@@ -1,34 +1,29 @@
-# spreadsheet
-## Interface
-At the top is a bar with two input fields. The first is a smaller one where you can input what cell you want to edit. Next to it is a larger input field, where you can enter the value of the cell. If you would like it to be a formula, begin with an "=" sign and then enter the formula.
-## Functions
-Currently, the only function available is SUM. There are other mathematical functions supported through the math.js library. Check out there documentation to see the functions that they support (https://mathjs.org/).
+# tauri-spreadsheet
 
-### SUM
-Syntax: SUM(startcoord\:endcoord)
+This template should help get you started developing with Vue 3 in Vite.
 
-coordinates are in the format A1.
+## Recommended IDE Setup
 
-# Vue stuff
-## Project setup
-```
+[VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+
+## Customize configuration
+
+See [Vite Configuration Reference](https://vite.dev/config/).
+
+## Project Setup
+
+```sh
 npm install
 ```
 
-### Compiles and hot-reloads for development
-```
-npm run serve
+### Compile and Hot-Reload for Development
+
+```sh
+npm run dev
 ```
 
-### Compiles and minifies for production
-```
+### Compile and Minify for Production
+
+```sh
 npm run build
 ```
-
-### Lints and fixes files
-```
-npm run lint
-```
-
-### Customize configuration
-See [Configuration Reference](https://cli.vuejs.org/config/).

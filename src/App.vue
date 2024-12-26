@@ -2,17 +2,19 @@
 	<FormulaBar />
 	<CommandLine />
 	<table>
-		<tr>
-			<td>abs</td>
-			<td>rel</td>
-			<td v-for="(cell, index) in sheetManager.numOfRows" :key="index" class="labels">{{ String.fromCharCode(index + 65) }}</td>
-		</tr>
-		<SheetRow
-			v-for="(row, index) in sheetManager.rows"
-			:key="index"
-			:row="row"
-			:rowNo="index"
-		/>
+		<tbody>
+			<tr>
+				<td>abs</td>
+				<td>rel</td>
+				<td v-for="(cell, index) in sheetManager.numOfRows" :key="index" class="labels">{{ String.fromCharCode(index + 65) }}</td>
+			</tr>
+			<SheetRow
+				v-for="(row, index) in sheetManager.rows"
+				:key="index"
+				:row="row"
+				:rowNo="index"
+			/>
+		</tbody>
 	</table>
 </template>
 

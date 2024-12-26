@@ -22,7 +22,7 @@
 		// command to replace the formula
 		else if (com == "c") {
 			formBar.value = "";
-			formBar.focus();
+			sheetManager.setFormula();
 			clear = true;
 		}
 		else if (com == ";") {
