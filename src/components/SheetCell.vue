@@ -1,5 +1,5 @@
 <template>
-	<td class="tableCell"><button :id="colNo + ':' + rowNo" class="cell" @click="handleClick()"></button></td>
+	<td class="tableCell"><button :id="colNo + ':' + rowNo" class="cell" @dblclick="handleDblClick" @click="handleClick()"></button></td>
 </template>
 
 <script setup>
@@ -8,6 +8,11 @@
 	const sheetManager = ref(new SheetManager());
 	function handleClick() {
 		sheetManager.value.selectCell(props.rowNo, props.colNo);
+	}
+
+	function handleDblClick() {
+		sheetManager.value.selectCell(props.rowNo, props.colNo);
+		document.getElementById("formulaBar").focus();
 	}
 
 	const props = defineProps({
