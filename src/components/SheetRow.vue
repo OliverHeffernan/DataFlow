@@ -1,7 +1,7 @@
 <template>
 	<tr class="sheetRow">
+		<td class="labels rowLabels">{{ rowNo }}</td>
 		<td class="labels relRow">{{ rowNo }}</td>
-		<td class="labels">{{ rowNo }}</td>
 		<SheetCell 
 			v-for="(cell, index) in row"
 			:key="index"

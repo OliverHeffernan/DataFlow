@@ -1,5 +1,5 @@
 <template>
-	<input id="commandLine" type="text" @input="checkCommand" />
+	<input id="commandLine" spellcheck="false" type="text" @input="checkCommand" />
 </template>
 <script setup>
 	import SheetManager from '../classes/SheetManager.js';
@@ -30,17 +30,19 @@
 			cellPicker.value = "";
 			clear = true;
 		}
+		else if (com == "zz") {
+			console.log("zz");
+			sheetManager.scrollToCenterSelCell();
+			clear = true;
+		}
 
 		// repeated commands
 		if (com.length == 1) {
 			com = "1" + com;
 		}
 		if (parseInt(com.substring(0, com.length - 2)) != "NaN") {
-			console.log("past NaN");
-			console.log(com[com.length - 1]);
 			// movements
 			let amount = parseInt(com.substring(0, com.length - 1));
-			console.log(amount);
 			if (com[com.length - 1] == "h") {
 				sheetManager.moveLeft(amount);
 				clear = true;
@@ -72,5 +74,7 @@
 	background-color: #15202E;
 	border: none;
 	outline: none;
+	z-index: 10;
+	box-shadow: rgba(0,0,0,0.5) 0px 0px 5px 0px;
 }
 </style>

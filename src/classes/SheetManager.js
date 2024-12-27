@@ -18,6 +18,8 @@ export default class SheetManager
 		this.numOfCols = 50;
 		this.selRow = 0;
 		this.selCol = 0;
+		this.prevRow = 0;
+		this.prevCol = 0;
 
 		// create a 2D array of empty strings
 		for (let i = 0; i < this.numOfRows; i++)
@@ -137,10 +139,72 @@ export default class SheetManager
 
 			// update the relative row numbers
 			this.updateRelRows();
+			let scrollCol = col;
+			if (this.selCol < this.prevCol) {
+				scrollCol = col > 1 ? col - 1 : 0;
+			}
+			let scrollRow = row;
+			if (this.selRow > this.prevRow) {
+				scrollRow = row < this.numOfRows - 1 ? row + 1 : this.numOfRows;
+			}
+			else if (this.selRow < this.prevRow) {
+				scrollRow = row > 2 ? row - 2 : 0;
+			}
+
+			this.getCell(scrollRow, scrollCol).scrollIntoView({
+				//behavior: "smooth",
+				block: "nearest",
+				inline: "nearest",
+			});
+
+			// if scrolling to first col, then scroll all the way
+			let scrollEdge = false;
+			let left = window.scrollX;
+			let top = window.scrollY;
+			if (col == 0) {
+				left = 0;
+				scrollEdge = true;
+			}
+
+			// if scrolling to last row, then scroll all the way
+			if (row == this.numOfRows - 1) {
+				top = document.body.scrollHeight;
+				scrollEdge = true;
+			}
+
+			// if scrolling to first row, then scroll all the way
+			if (row < 2) {
+				top = 0;
+				scrollEdge = true;
+			}
+
+			if (scrollEdge) {
+				window.requestAnimationFrame(function() {
+					window.scrollTo({
+						left: left,
+						top: top,
+						//behavior: "smooth"
+					});
+				});
+			}
+
+			this.prevRow = this.selRow;
+			this.prevCol = this.selCol;
 		}
 		catch(e) {
 			console.log(e.message);
 		}
+	}
+
+	scrollToCenterSelCell()
+	{
+		let cell = this.getCell(this.selRow, this.selCol);
+		let viewHeight = window.innerHeight;
+		console.log(viewHeight);
+		let cellTop = cell.offsetTop;
+		console.log(cellTop);
+
+		window.scrollTo(0, cellTop - (viewHeight / 2));
 	}
 	
 	// function to set the formula of the selected cell
@@ -215,7 +279,7 @@ export default class SheetManager
 	updateRelRows()
 	{
 		let labels = document.getElementsByClassName("relRow");
-		for (let i = 0; i < labels.length; i++)
+		for (let i = 1; i < labels.length; i++)
 		{
 			labels[i].innerText = Math.abs(this.selRow - i);
 		}

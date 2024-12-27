@@ -43,6 +43,8 @@ function focusFormulaBar() {
 	outline: none;
 	color: white;
 	display: flex;
+	z-index: 5;
+	box-shadow: rgba(0,0,0,0.5) 0px 0px 5px 0px;
 }
 
 #cellPicker {

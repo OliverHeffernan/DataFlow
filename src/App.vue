@@ -2,12 +2,14 @@
 	<FormulaBar />
 	<CommandLine />
 	<table>
-		<tbody>
+		<thead>
 			<tr>
-				<td>abs</td>
-				<td>rel</td>
-				<td v-for="(cell, index) in sheetManager.numOfRows" :key="index" class="labels">{{ String.fromCharCode(index + 65) }}</td>
+				<th class="rowLabelType rowLabels">abs</th>
+				<th class="rowLabelType relRow">rel</th>
+				<th v-for="(cell, index) in sheetManager.numOfRows" :key="index" class="labels colLabels">{{ String.fromCharCode(index + 65) }}</th>
 			</tr>
+		</thead>
+		<tbody>
 			<SheetRow
 				v-for="(row, index) in sheetManager.rows"
 				:key="index"
@@ -45,13 +47,36 @@ body {
 
 table {
 	border-collapse: collapse;
-	margin-top: 20px;
+	margin-top: 24px;
 }
 
 .labels {
 	color: rgba(255,255,255,0.5);
 	padding: 0 10px;
 	background-color: #15202E;
-	border: 1px solid #091119;
+	/*border: 1px solid #091119;*/
+	border: none;
+	z-index: 2;
+}
+
+.colLabels {
+	position: sticky;
+	top: 24px;
+}
+
+.rowLabels {
+	position: sticky;
+	left: 0;
+}
+
+.relRow {
+	position: sticky;
+	left: 38px;
+}
+
+.rowLabelType {
+	z-index: 3;
+	top: 24px;
+	background-color: #091119;
 }
 </style>
