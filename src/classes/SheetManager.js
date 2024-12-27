@@ -151,11 +151,18 @@ export default class SheetManager
 				scrollRow = row > 2 ? row - 2 : 0;
 			}
 
+			const cell = this.getCell(scrollRow, scrollCol);
+			
+			const initialPos = cell.getBoundingClientRect();
+
 			this.getCell(scrollRow, scrollCol).scrollIntoView({
-				//behavior: "smooth",
 				block: "nearest",
 				inline: "nearest",
 			});
+
+			const finalPos = cell.getBoundingClientRect();
+
+			const scrolled = initialPos.top !== finalPos.top || initialPos.left !== finalPos.left;
 
 			// if scrolling to first col, then scroll all the way
 			let scrollEdge = false;
@@ -179,12 +186,9 @@ export default class SheetManager
 			}
 
 			if (scrollEdge) {
-				window.requestAnimationFrame(function() {
-					window.scrollTo({
-						left: left,
-						top: top,
-						//behavior: "smooth"
-					});
+				window.scrollTo({
+					left: left,
+					top: top
 				});
 			}
 
@@ -199,12 +203,13 @@ export default class SheetManager
 	scrollToCenterSelCell()
 	{
 		let cell = this.getCell(this.selRow, this.selCol);
-		let viewHeight = window.innerHeight;
-		console.log(viewHeight);
-		let cellTop = cell.offsetTop;
-		console.log(cellTop);
 
-		window.scrollTo(0, cellTop - (viewHeight / 2));
+		cell.scrollIntoView({
+			behavior: 'smooth',
+			block: 'center',
+			inline: 'center'
+		});
+
 	}
 	
 	// function to set the formula of the selected cell
