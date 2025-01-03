@@ -18,10 +18,22 @@
 		else if (com == "I") {
 			sheetManager.selectCell(sheetManager.selRow, 0);
 			formBar.focus();
+			clear = true;
+		}
+		// command to select the first cell in the selected row
+		else if (com == "^") {
+			sheetManager.selectCell(sheetManager.selRow, 0);
+			clear = true;
+		}
+		// command to select last cell in a row
+		else if (com == "$") {
+			sheetManager.selectCell(sheetManager.selRow, sheetManager.numOfCols.value - 1);
+			clear = true;
 		}
 		// command to replace the formula
 		else if (com == "c") {
 			formBar.value = "";
+			formBar.focus();
 			sheetManager.setFormula();
 			clear = true;
 		}
@@ -33,6 +45,16 @@
 		else if (com == "zz") {
 			console.log("zz");
 			sheetManager.scrollToCenterSelCell();
+			clear = true;
+		}
+		// insert row below
+		else if (com == "oj") {
+			sheetManager.insertRowBelow();
+			clear = true;
+		}
+		// insert row above
+		else if (com == "ok") {
+			sheetManager.insertRowAbove();
 			clear = true;
 		}
 

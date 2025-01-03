@@ -1,4 +1,5 @@
-//import { ref } from "vue";
+import { ref } from "vue";
+//import { reactive } from "vue";
 import { create, all } from 'mathjs'
 const config = { }
 const math = create(all, config)
@@ -14,18 +15,18 @@ export default class SheetManager
 
 		this.rows = [];
 
-		this.numOfRows = 50;
-		this.numOfCols = 50;
+		this.numOfRows = ref(50);
+		this.numOfCols = ref(50);
 		this.selRow = 0;
 		this.selCol = 0;
 		this.prevRow = 0;
 		this.prevCol = 0;
 
 		// create a 2D array of empty strings
-		for (let i = 0; i < this.numOfRows; i++)
+		for (let i = 0; i < this.numOfRows.value; i++)
 		{
 			let row = [];
-			for (let j = 0; j < this.numOfCols; j++)
+			for (let j = 0; j < this.numOfCols.value; j++)
 			{
 				row.push("");
 			}
@@ -61,6 +62,22 @@ export default class SheetManager
 		// remove the equals sign from the expression
 		expr = expr.substring(1);
 
+		expr = expr.replaceAll("THISROW", row);
+		expr = expr.replaceAll("THISCOL", col);
+		expr = expr.replaceAll("PREVROW", row - 1);
+		expr = expr.replaceAll("PREVCOL", col - 1);
+		console.log(row - 1);
+		// curly braces are used to put equations in place of cell row references
+		expr = expr.replaceAll(/\{([^}]+)\}/g, (match, expression) => {
+			try {
+				// Evaluate the expression within the curly braces
+				const result = math.evaluate(expression);
+				return result; // Replace the match with the result
+			} catch (error) {
+				console.error(`Error evaluating expression "${expression}":`, error);
+				return match; // If evaluation fails, return the original match
+			}
+		});
 
 		// replacing cell ranges with string objects containing the sum and array.
 		expr = expr.replace(/\b([A-Z]+\d+):([A-Z]+\d+)\b/g, (match, start, end) => {
@@ -76,9 +93,15 @@ export default class SheetManager
 			{
 				for (let j = startCol; j <= endCol; j++)
 				{
-					sum += Number(this.getValue(i, j));
-					string += this.getValue(i, j);
-					string += ",";
+					try {
+						sum += Number(this.getValue(i, j));
+						string += this.getValue(i, j);
+						string += ",";
+					}
+					catch {
+						sum += 0;
+						string += "'" + this.getValue(i, j) + "',";
+					}
 				}
 			}
 
@@ -145,7 +168,7 @@ export default class SheetManager
 			}
 			let scrollRow = row;
 			if (this.selRow > this.prevRow) {
-				scrollRow = row < this.numOfRows - 1 ? row + 1 : this.numOfRows;
+				scrollRow = row < this.numOfRows.value - 1 ? row + 1 : this.numOfRows.value;
 			}
 			else if (this.selRow < this.prevRow) {
 				scrollRow = row > 2 ? row - 2 : 0;
@@ -174,7 +197,7 @@ export default class SheetManager
 			}
 
 			// if scrolling to last row, then scroll all the way
-			if (row == this.numOfRows - 1) {
+			if (row == this.numOfRows.value - 1) {
 				top = document.body.scrollHeight;
 				scrollEdge = true;
 			}
@@ -198,6 +221,7 @@ export default class SheetManager
 		catch(e) {
 			console.log(e.message);
 		}
+		this.clearPlaceholder();
 	}
 
 	scrollToCenterSelCell()
@@ -220,6 +244,7 @@ export default class SheetManager
 
 		// update the value of the selected cell
 		this.getCell(this.selRow, this.selCol).innerText = this.getValue(this.selRow, this.selCol);
+		this.loadAllCells();
 	}
 
 	// function to get the element of a specific cell
@@ -251,7 +276,7 @@ export default class SheetManager
 	{
 		for (let i = 0; i < amount; i++)
 		{
-			if (this.selCol < this.numOfCols - 1)
+			if (this.selCol < this.numOfCols.value - 1)
 			{
 				this.selectCell(this.selRow, this.selCol + 1);
 			}
@@ -273,7 +298,7 @@ export default class SheetManager
 	{
 		for (let i = 0; i < amount; i++)
 		{
-			if (this.selRow < this.numOfRows - 1)
+			if (this.selRow < this.numOfRows.value - 1)
 			{
 				this.selectCell(this.selRow + 1, this.selCol);
 			}
@@ -288,5 +313,86 @@ export default class SheetManager
 		{
 			labels[i].innerText = Math.abs(this.selRow - i);
 		}
+	}
+
+	// functions for saving using strings, temporary before i work out backend
+	saveSheetToClipboard()
+	{
+		let str = JSON.stringify(this.rows);
+		navigator.clipboard.writeText(str);
+		let commandLine = document.getElementById("commandLine");
+	}
+
+	loadFromClipboard()
+	{
+		let commandLine = document.getElementById("commandLine");
+		//let str = navigator.clipboard.readText();
+		let str = commandLine.value;
+
+		if (str === "")
+		{
+			commandLine.placeholder = "Paste the JSON string here, then click 'Load from clipboard'";
+			return;
+		}
+		console.log(str);
+		let data = JSON.parse(str);
+		this.rows = data;
+		this.loadAllCells();
+		commandLine.value = "";
+		this.clearPlaceholder();
+	}
+
+	clearPlaceholder()
+	{
+		let commandLine = document.getElementById("commandLine");
+		commandLine.placeholder = "";
+	}
+
+	setPlaceholder(str)
+	{
+		let commandLine = document.getElementById("commandLine");
+		commandLine.placeholder = str;
+	}
+
+
+	loadAllCells()
+	{
+		for (let i = 0; i < this.numOfRows.value; i++)
+		{
+			for (let j = 0; j < this.numOfCols.value; j++)
+			{
+				try {
+					this.getCell(i, j).innerText = this.getValue(i, j);
+				}
+				catch {
+					console.log("cell not yet loaded");
+				}
+			}
+		}
+		this.clearPlaceholder();
+	}
+
+	insertRowAtIndex(index)
+	{
+		let row = [];
+		for (let i = 0; i < this.numOfCols.value; i++)
+		{
+			row.push("");
+		}
+		this.rows.splice(index, 0, row);
+		this.numOfRows.value++;
+		this.loadAllCells();
+
+		this.selectCell(this.selRow, this.selCol);
+	}
+
+	insertRowBelow()
+	{
+		this.insertRowAtIndex(this.selRow + 1);
+	}
+
+	insertRowAbove()
+	{
+		this.insertRowAtIndex(this.selRow);
 	}
 }
