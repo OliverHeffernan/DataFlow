@@ -1,9 +1,77 @@
 <template>
-	<input id="commandLine" spellcheck="false" type="text" @input="checkCommand" />
+	<input id="commandLine" spellcheck="false" type="text" @input="checkCommand" @keyup.enter="handleEnter" />
 </template>
 <script setup>
 	import SheetManager from '../classes/SheetManager.js';
 	const sheetManager = new SheetManager();
+
+	import { save, open } from '@tauri-apps/plugin-dialog';
+	import { readTextFile, BaseDirectory } from '@tauri-apps/plugin-fs';
+	import { invoke } from '@tauri-apps/api/core';
+
+	async function saveFile() {
+		const path = await save
+		(
+			{
+				filters:
+				[
+					{
+					  name: 'My Filter',
+					  extensions: ['.heff'],
+					},
+				]
+			}
+		);
+
+		console.log(path);
+
+		let content = JSON.stringify(sheetManager.rows);
+		await invoke('write_file', { path: path, content: content });
+	}
+
+	async function openFile() {
+		const path = await open
+		(
+			{
+				filters:
+				[
+					{
+					  name: 'My Filter',
+					  extensions: ['.heff'],
+					},
+				]
+			}
+		);
+
+		const file = await readTextFile(path);
+
+		console.log(file);
+		if (path.split('.').pop() == "heff") {
+			sheetManager.rows = JSON.parse(file);
+			sheetManager.numOfRows.value = sheetManager.rows.length;
+			sheetManager.numOfCols.value = sheetManager.rows[0].length;
+			sheetManager.loadAllCells();
+		}
+		else {
+			console.log("Invalid file type");
+		}
+		await file.close();
+		//const file = await open(path)
+	}
+
+	function handleEnter() {
+		let com = document.getElementById('commandLine').value;
+		if (com == ":w") {
+			saveFile();
+			document.getElementById("commandLine").value = "";
+		}
+
+		if (com == ":o") {
+			openFile();
+			document.getElementById("commandLine").value = "";
+		}
+	}
+
 	function checkCommand() {
 		let com = document.getElementById('commandLine').value;
 		let formBar = document.getElementById('formulaBar');

@@ -19,10 +19,6 @@
 		</tbody>
 	</table>
 
-	<div id="loadAndSaveFromClipboard">
-		<button @click="sheetManager.loadFromClipboard()">Load from clipboard</button>
-		<button @click="sheetManager.saveSheetToClipboard()">Save to clipboard</button>
-	</div>
 </template>
 
 <script setup>
@@ -53,12 +49,6 @@ body {
 table {
 	border-collapse: collapse;
 	margin-top: 24px;
-}
-
-#loadAndSaveFromClipboard {
-	position: fixed;
-	bottom: 30px;
-	right: 0;
 }
 
 .labels {
