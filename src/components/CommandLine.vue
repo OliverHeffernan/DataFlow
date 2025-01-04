@@ -105,6 +105,7 @@
 			sheetManager.setFormula();
 			clear = true;
 		}
+		// command to change the selected cell
 		else if (com == ";") {
 			cellPicker.focus();
 			cellPicker.value = "";
@@ -123,6 +124,32 @@
 		// insert row above
 		else if (com == "ok") {
 			sheetManager.insertRowAbove();
+			clear = true;
+		}
+		else if (com == "oh") {
+			sheetManager.insertColLeft();
+			clear = true;
+		}
+		else if (com == "ol") {
+			sheetManager.insertColRight();
+			clear = true;
+		}
+		// yank formula
+		else if (com == "yf") {
+			let col = sheetManager.selCol;
+			let row = sheetManager.selRow;
+			let text = sheetManager.getFormula(row, col);
+			navigator.clipboard.writeText(text);
+			sheetManager.yank([[text]]);
+			clear = true;
+		}
+		// yank value
+		else if (com == "ys") {
+			let col = sheetManager.selCol;
+			let row = sheetManager.selRow;
+			let text = sheetManager.getValue(row, col);
+			navigator.clipboard.writeText(text);
+			sheetManager.yank([[text]]);
 			clear = true;
 		}
 
@@ -147,6 +174,10 @@
 			}
 			else if (com[com.length - 1] == "l") {
 				sheetManager.moveRight(amount);
+				clear = true;
+			}
+			else if (com.substring(1) == "p") {
+				sheetManager.paste(amount);
 				clear = true;
 			}
 		}

@@ -21,6 +21,7 @@ export default class SheetManager
 		this.selCol = 0;
 		this.prevRow = 0;
 		this.prevCol = 0;
+		this.copyBuffer = [[]];
 
 		// create a 2D array of empty strings
 		for (let i = 0; i < this.numOfRows.value; i++)
@@ -247,6 +248,29 @@ export default class SheetManager
 		this.loadAllCells();
 	}
 
+	// called when the user yanks something
+	yank(cells)
+	{
+		this.copyBuffer = cells;	
+	}
+
+	paste(amount)
+	{
+		for (let i = 0; i < amount; i++)
+		{
+			for (let y = 0; y < this.copyBuffer.length; y++)
+			{
+				for (let x = 0; x < this.copyBuffer[y].length; x++)
+				{
+					this.rows[this.selRow + y][this.selCol + x] = this.copyBuffer[y][x];
+				}
+			}
+			this.loadAllCells();
+			this.moveDown(1);
+		}
+	}
+
+
 	// function to get the element of a specific cell
 	getCell(row, col)
 	{
@@ -386,13 +410,39 @@ export default class SheetManager
 		this.selectCell(this.selRow, this.selCol);
 	}
 
+	insertColumnAtIndex(index)
+	{
+		for (let i = 0; i < this.numOfRows.value; i++)
+		{
+			this.rows[i].splice(index, 0, "");
+		}
+		this.numOfCols.value++;
+		this.loadAllCells();
+
+		this.selectCell(this.selRow, this.selCol);
+	}
+
 	insertRowBelow()
 	{
 		this.insertRowAtIndex(this.selRow + 1);
+		this.moveDown(1);
 	}
 
 	insertRowAbove()
 	{
 		this.insertRowAtIndex(this.selRow);
+		//this.moveUp(1);
+	}
+
+	insertColRight()
+	{
+		this.insertColumnAtIndex(this.selCol + 1);
+		this.moveRight(1);
+	}
+
+	insertColLeft()
+	{
+		this.insertColumnAtIndex(this.selCol);
+		//this.moveLeft(1);
 	}
 }
