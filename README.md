@@ -1,6 +1,10 @@
 # DataFlow
 DataFlow is a spreadsheet app with keyboard commands, similar to Vim/Neovim. This allows for fast manipulation of your spreadsheets.
 
+## Installation
+### MacOS:
+Install for mac through the .dmg file found in the "current release for mac" folder of this repository.
+
 ## Commands
 Commands are entered into the command line at the bottom of the window.
 
