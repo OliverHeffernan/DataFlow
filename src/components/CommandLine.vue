@@ -9,9 +9,9 @@
 	import { readTextFile, BaseDirectory } from '@tauri-apps/plugin-fs';
 	import { invoke } from '@tauri-apps/api/core';
 
-	async function saveFile() {
+	async function saveFile(saveAs = false) {
 		let path;
-		if (sheetManager.path == null) {
+		if (sheetManager.path == null || saveAs) {
 			path = await save
 			(
 				{
@@ -70,12 +70,20 @@
 
 	function handleEnter() {
 		let com = document.getElementById('commandLine').value;
+		// save file with command :w
 		if (com == ":w") {
 			saveFile();
 			document.getElementById("commandLine").value = "";
 		}
 
-		if (com == ":o") {
+		// save file as with command :wa
+		else if (com == ":wa") {
+			saveFile(true);
+			document.getElementById("commandLine").value = "";
+		}
+
+		// open file with command :o
+		else if (com == ":o") {
 			openFile();
 			document.getElementById("commandLine").value = "";
 		}

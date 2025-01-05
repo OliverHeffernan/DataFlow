@@ -89,12 +89,13 @@ export default class SheetManager
 			const endRow = parseInt(end.match(/\d+/)[0]);
 			let sum = 0;
 			let string = "";
-
+			let count = 0;
 			// iterate through cells that are within the range, adding them to the sun and string
 			for (let i = startRow; i <= endRow; i++)
 			{
 				for (let j = startCol; j <= endCol; j++)
 				{
+					count++;
 					try {
 						sum += Number(this.getValue(i, j));
 						string += this.getValue(i, j);
@@ -107,6 +108,8 @@ export default class SheetManager
 				}
 			}
 
+			let average = sum/count;
+
 			// removing the last comma
 			string = string.substring(0, string.length - 1);
 
@@ -116,13 +119,27 @@ export default class SheetManager
 			// returning it as a string so that it can be parsed later
 			return JSON.stringify({
 				SUM: sum,
-				ARRAY: JSON.parse(string)
+				ARRAY: JSON.parse(string),
+				COUNT: count,
+				AVG: average
 			});
 		});
 
 		// replacing SUM with its value
 		expr = expr.replace(/SUM\((.*)\)/g, (match, array) => {
 			return JSON.parse(array).SUM;
+		});
+
+		// replacing COUNT with the count
+		expr = expr.replace(/COUNT\((.*)\)/g, (match, array) => {
+			return JSON.parse(array).COUNT;
+		});
+
+		expr = expr.replace(/AVG\((.*)\)/g, (match, array) => {
+			return JSON.parse(array).AVG;
+		});
+		expr = expr.replace(/MEAN\((.*)\)/g, (match, array) => {
+			return JSON.parse(array).AVG;
 		});
 
 		// replacing cell references with their values
