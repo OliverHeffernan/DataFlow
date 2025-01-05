@@ -32,14 +32,18 @@ To center the viewport around your selection, enter `zz` into the command line.
 To insert a row or column, enter `o` in the command line, then use standard vim motions to show where the new row/column will be created. All 4 of these commands are detailed below.
 
 `oh`: Insert column left.
+
 `oj`: Insert row below.
+
 `ok`: Insert row above.
+
 `ol`: Insert column right.
 
 ### Yank `y`:
 When yanking (copying), you can specify whether to yank the formula, or the value.
 
 `yf`: Yank formula.
+
 `ys`: Yank value.
 
 ### Delete row `dd`:
