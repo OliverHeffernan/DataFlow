@@ -22,6 +22,7 @@ export default class SheetManager
 		this.prevRow = 0;
 		this.prevCol = 0;
 		this.copyBuffer = [[]];
+		this.path = null;
 
 		// create a 2D array of empty strings
 		for (let i = 0; i < this.numOfRows.value; i++)

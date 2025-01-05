@@ -10,18 +10,25 @@
 	import { invoke } from '@tauri-apps/api/core';
 
 	async function saveFile() {
-		const path = await save
-		(
-			{
-				filters:
-				[
-					{
-					  name: 'My Filter',
-					  extensions: ['.heff'],
-					},
-				]
-			}
-		);
+		let path;
+		if (sheetManager.path == null) {
+			path = await save
+			(
+				{
+					filters:
+					[
+						{
+						  name: 'My Filter',
+						  extensions: ['.heff'],
+						},
+					]
+				}
+			);
+			sheetManager.path = path;
+		}
+		else {
+			path = sheetManager.path;
+		}
 
 		console.log(path);
 
@@ -51,11 +58,13 @@
 			sheetManager.numOfRows.value = sheetManager.rows.length;
 			sheetManager.numOfCols.value = sheetManager.rows[0].length;
 			sheetManager.loadAllCells();
+
+			sheetManager.path = path;
 		}
 		else {
 			console.log("Invalid file type");
 		}
-		await file.close();
+		//await file.close();
 		//const file = await open(path)
 	}
 
