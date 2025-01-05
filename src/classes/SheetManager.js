@@ -270,7 +270,6 @@ export default class SheetManager
 		}
 	}
 
-
 	// function to get the element of a specific cell
 	getCell(row, col)
 	{
@@ -394,6 +393,41 @@ export default class SheetManager
 			}
 		}
 		this.clearPlaceholder();
+	}
+
+	removeColAtIndex(index)
+	{
+		console.log("index: " + index);
+		for (let i = 0; i < this.rows.length; i++)
+		{
+			console.log('deleting cols');
+			this.rows[i].splice(index, 1);
+		}
+
+		this.loadAllCells();
+		this.selectCell(this.selRow, this.selCol);
+	}
+
+	deleteSelCol(amount)
+	{
+		for (let i = 0; i < amount; i++)
+		{
+			this.removeColAtIndex(this.selCol);
+		}
+	}
+
+	removeRowAtIndex(index)
+	{
+		this.rows.splice(index, 1);
+		this.loadAllCells();
+	}
+
+	deleteSelRow(amount)
+	{
+		for (let i = 0; i < amount; i++)
+		{	
+			this.removeRowAtIndex(this.selRow);
+		}
 	}
 
 	insertRowAtIndex(index)

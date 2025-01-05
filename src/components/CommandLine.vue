@@ -154,36 +154,69 @@
 		}
 
 		// repeated commands
+		/*
 		if (com.length == 1) {
 			com = "1" + com;
 		}
-		if (parseInt(com.substring(0, com.length - 2)) != "NaN") {
-			// movements
-			let amount = parseInt(com.substring(0, com.length - 1));
-			if (com[com.length - 1] == "h") {
-				sheetManager.moveLeft(amount);
-				clear = true;
-			}
-			else if (com[com.length - 1] == "j") {
-				sheetManager.moveDown(amount);
-				clear = true;
-			}
-			else if (com[com.length - 1] == "k") {
-				sheetManager.moveUp(amount);
-				clear = true;
-			}
-			else if (com[com.length - 1] == "l") {
-				sheetManager.moveRight(amount);
-				clear = true;
-			}
-			else if (com.substring(1) == "p") {
-				sheetManager.paste(amount);
-				clear = true;
-			}
+		*/
+		// getting the amount
+		let amount = parseCommand(com).amount;
+		let command = parseCommand(com).command;
+			
+		//if (parseInt(com.substring(0, com.length - 2)) != "NaN") {
+		// movements
+		//let amount = parseInt(com.substring(0, com.length - 1));
+		if (command == "h") {
+			sheetManager.moveLeft(amount);
+			clear = true;
 		}
+		else if (command == "j") {
+			console.log(amount);
+			sheetManager.moveDown(amount);
+			clear = true;
+		}
+		else if (command == "k") {
+			sheetManager.moveUp(amount);
+			clear = true;
+		}
+		else if (command == "l") {
+			sheetManager.moveRight(amount);
+			clear = true;
+		}
+		else if (command == "p") {
+			sheetManager.paste(amount);
+			clear = true;
+		}
+		// command to delete a row
+		else if (command == "dd") {
+			sheetManager.deleteSelRow(amount);
+			clear = true;
+		}
+		// command to delete a column
+		else if (command == "dc") {
+			sheetManager.deleteSelCol(amount);
+			clear = true;
+		}
+
+			
 		if (clear) {
 			document.getElementById("commandLine").value = "";
 		}
+	}
+
+	function parseCommand(com) {
+		const match = com.match(/^(\d+)?(.+)$/);
+
+		if (!match) {
+			return nulll;
+		}
+
+		const [_, amount, command] = match;
+
+		return {
+			amount: amount ? parseInt(amount, 10) : 1,
+			command: command
+		};
 	}
 </script>
 <style>
