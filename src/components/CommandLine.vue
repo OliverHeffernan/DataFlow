@@ -1,5 +1,10 @@
 <template>
 	<input id="commandLine" spellcheck="false" type="text" @input="checkCommand" @keyup.enter="handleEnter" />
+	<div id="webFileUpload">
+		<input id="fileInput" type="file" />
+		<button id="readFileBtn" @click="openFileWeb()">Read File</button>
+		<button id="cancelButton" @click="closeWebFilePick()">Cancel</button>
+	</div>
 </template>
 <script setup>
 	import SheetManager from '../classes/SheetManager.js';
@@ -10,63 +15,115 @@
 	import { invoke } from '@tauri-apps/api/core';
 
 	async function saveFile(saveAs = false) {
-		let path;
-		if (sheetManager.path == null || saveAs) {
-			path = await save
+		try {
+			let path;
+			if (sheetManager.path == null || saveAs) {
+				path = await save
+				(
+					{
+						filters:
+						[
+							{
+							  name: 'My Filter',
+							  extensions: ['.dflo'],
+							},
+						]
+					}
+				);
+				sheetManager.path = path;
+			}
+			else {
+				path = sheetManager.path;
+			}
+
+
+			let content = JSON.stringify(sheetManager.rows);
+			await invoke('write_file', { path: path, content: content });
+		}
+		catch(e) {
+			console.log(e.message);
+			downloadFile(JSON.stringify(sheetManager.rows), "sheet.dflo");
+		}
+	}
+	function downloadFile(content, filename) {
+		// Create a Blob object with the text content
+		const blob = new Blob([content], { type: 'text/plain' });
+
+		// Create an object URL for the Blob
+		const url = URL.createObjectURL(blob);
+
+		// Create an anchor element and set the download link
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename; // Specify the filename
+		a.click(); // Programmatically click the anchor element to trigger the download
+
+		// Clean up by revoking the object URL
+		URL.revokeObjectURL(url);
+	}
+
+	function closeWebFilePick() {
+		document.getElementById("webFileUpload").style.display = "none";
+	}
+
+	async function openFile() {
+		try {
+			const path = await open
 			(
 				{
 					filters:
 					[
 						{
 						  name: 'My Filter',
-						  extensions: ['.heff'],
+						  extensions: ['.dflo'],
 						},
 					]
 				}
 			);
-			sheetManager.path = path;
-		}
-		else {
-			path = sheetManager.path;
-		}
 
-		console.log(path);
+			const file = await readTextFile(path);
 
-		let content = JSON.stringify(sheetManager.rows);
-		await invoke('write_file', { path: path, content: content });
+			if (path.split('.').pop() == "dflo") {
+				sheetManager.rows = JSON.parse(file);
+				sheetManager.numOfRows.value = sheetManager.rows.length;
+				sheetManager.numOfCols.value = sheetManager.rows[0].length;
+				sheetManager.loadAllCells();
+
+				sheetManager.path = path;
+			}
+			else {
+				console.log("Invalid file type");
+			}
+			//await file.close();
+			//const file = await open(path)
+		}
+		catch (e) {
+			document.getElementById("webFileUpload").style.display = "block";
+		}
 	}
 
-	async function openFile() {
-		const path = await open
-		(
-			{
-				filters:
-				[
-					{
-					  name: 'My Filter',
-					  extensions: ['.heff'],
-					},
-				]
-			}
-		);
+	function openFileWeb() {
+		const fileInput = document.getElementById('fileInput');
+		const file = fileInput.files[0];
 
-		const file = await readTextFile(path);
+		console.log("web view");
 
-		console.log(file);
-		if (path.split('.').pop() == "heff") {
-			sheetManager.rows = JSON.parse(file);
+		const reader = new FileReader();
+
+		reader.onload = function(e) {
+			console.log(e.target.result);
+			sheetManager.rows = JSON.parse(e.target.result);
 			sheetManager.numOfRows.value = sheetManager.rows.length;
 			sheetManager.numOfCols.value = sheetManager.rows[0].length;
 			sheetManager.loadAllCells();
+		}
 
-			sheetManager.path = path;
-		}
-		else {
-			console.log("Invalid file type");
-		}
-		//await file.close();
-		//const file = await open(path)
+		reader.readAsText(file);
+
+
+		document.getElementById("webFileUpload").style.display = "none";
 	}
+
 
 	function handleEnter() {
 		let com = document.getElementById('commandLine').value;
@@ -129,7 +186,6 @@
 			clear = true;
 		}
 		else if (com == "zz") {
-			console.log("zz");
 			sheetManager.scrollToCenterSelCell();
 			clear = true;
 		}
@@ -188,7 +244,6 @@
 			clear = true;
 		}
 		else if (command == "j") {
-			console.log(amount);
 			sheetManager.moveDown(amount);
 			clear = true;
 		}
@@ -248,4 +303,26 @@
 	z-index: 10;
 	box-shadow: rgba(0,0,0,0.5) 0px 0px 5px 0px;
 }
+
+#webFileUpload {
+	display: none;
+	position: fixed;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+
+	background-color: #15202E;
+	border-radius: 20px;
+	padding: 20px;
+	box-shadow: black 0px 0px 50px;
+}
+
+#fileInput {
+	color: white;
+}
+
+#cancelButton {
+	margin-left: 5px;
+}
+
 </style>
