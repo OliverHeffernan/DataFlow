@@ -1,9 +1,9 @@
 # DataFlow
-DataFlow is a spreadsheet app with keyboard commands, similar to Vim/Neovim. This allows for fast manipulation of your spreadsheets.
+DataFlow is a spreadsheet app with keyboard commands, similar to Vim/Neovim. This allows for fast manipulation of your spreadsheets. You can access the web app at https://oliverheffernan.github.io/DataFlow/.
 
-## Installation
+## Local Installation
 ### MacOS:
-Install for mac through the .dmg file found in the "current release for mac" folder of this repository.
+If you want a local version of the app, you can clone this repository, and compile the app using the terminal command, `npm run tauri build`. The only feature that is in the desktop version that is not available in the web version is improved file management. In the desktop version, when you save a file, you can choose where it is saved, whereas in the web version, it will just be downloaded to the downloads folder.
 
 ## Commands
 Commands are entered into the command line at the bottom of the window.
