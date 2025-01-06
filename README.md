@@ -5,6 +5,49 @@ DataFlow is a spreadsheet app with keyboard commands, similar to Vim/Neovim. Thi
 ### MacOS:
 If you want a local version of the app, you can clone this repository, and compile the app using the terminal command, `npm run tauri build`. The only feature that is in the desktop version that is not available in the web version is improved file management. In the desktop version, when you save a file, you can choose where it is saved, whereas in the web version, it will just be downloaded to the downloads folder.
 
+## Functions
+Functions are entered in the formula bar at the top of the screen. These are used to set the value of a cell mathematically.
+
+To use a function, begin the formula with `=`, so that DataFlow knows it is a formula, and not just text.
+### Mathjs
+Many functions are provided through the Mathjs library, including round, sin, tan and many more. If you want to see more detail on mathjs functions view there documentation at <a href="https://mathjs.org/index.html">math js documentation</a>.
+
+### DataFlow Functions
+In this section are functions that make it easier to collate data from throughout your spreadsheets, allowing you to collate your meaningless numbers into understandable sums, averages and counts.
+
+#### SUM: `SUM(range)`
+SUM provides a sum of all the values in the given range.
+
+The range is of format A0:B15, which selects all cells within a rectangle starting at A0 and ending at B15.
+
+#### AVG/MEAN: `AVG(range)`
+AVG averages all values given in a range.
+
+#### COUNT: `COUNT(range)`
+Returns the number of cells in the range.
+
+#### IF: `SUMIF(conditionRange, criteria, valueRange)`
+SUMIF allows you to filter through the range, valueRange, adding it if a corresponding cell is equal to the criteria. This is useful for things like budgets, where you may want to see a sum of your spending in certain categories.
+
+criteria is of format =3
+
+below is an example of a SUMIF function being used.
+
+`=SUMIF(A0:A10,=5,B0:B10)`
+
+The above function would return a sum of all values on column B, within rows 0 and 10, where the corresponding value in column A is 5.
+
+There is currently only support for = criterion.
+
+There is currently no support for cell ranges being provided in the criteria.
+
+There are more IF functions below:
+`COUNTIF`: count if
+`AVGIF`: average if
+`SUMIF`: sum if
+
+All of the above if functions take the same parameters as SUMIF.
+
 ## Commands
 Commands are entered into the command line at the bottom of the window.
 

@@ -18,33 +18,30 @@
 		try {
 			let path;
 			if (sheetManager.path == null || saveAs) {
-				path = await save
-				(
-					{
-						filters:
-						[
-							{
-							  name: 'My Filter',
-							  extensions: ['.dflo'],
-							},
-						]
-					}
-				);
+				path = await save ({
+					filters: [
+						{
+						  name: 'My Filter',
+						  extensions: ['.dflo'],
+						},
+					]
+				});
 				sheetManager.path = path;
 			}
 			else {
 				path = sheetManager.path;
 			}
 
-
 			let content = JSON.stringify(sheetManager.rows);
 			await invoke('write_file', { path: path, content: content });
+			setPhMessage("Saved file to " + path + " successfully");
 		}
 		catch(e) {
 			console.log(e.message);
 			downloadFile(JSON.stringify(sheetManager.rows), "sheet.dflo");
 		}
 	}
+
 	function downloadFile(content, filename) {
 		// Create a Blob object with the text content
 		const blob = new Blob([content], { type: 'text/plain' });
@@ -66,6 +63,10 @@
 		document.getElementById("webFileUpload").style.display = "none";
 	}
 
+	function setPhMessage(mg) {
+		document.getElementById("commandLine").placeholder = mg;
+	}
+
 	async function openFile() {
 		try {
 			const path = await open
@@ -83,13 +84,15 @@
 
 			const file = await readTextFile(path);
 
-			if (path.split('.').pop() == "dflo") {
+			if (path.split('.').pop() == "dflo" || path.split('.').pop() == "heff") {
 				sheetManager.rows = JSON.parse(file);
 				sheetManager.numOfRows.value = sheetManager.rows.length;
 				sheetManager.numOfCols.value = sheetManager.rows[0].length;
 				sheetManager.loadAllCells();
 
 				sheetManager.path = path;
+
+				setPhMessage("Opened file from " + path + " successfully");
 			}
 			else {
 				console.log("Invalid file type");
@@ -147,6 +150,7 @@
 	}
 
 	function checkCommand() {
+		setPhMessage("");
 		let com = document.getElementById('commandLine').value;
 		let formBar = document.getElementById('formulaBar');
 		let cellPicker = document.getElementById("cellPicker");
@@ -280,7 +284,7 @@
 		const match = com.match(/^(\d+)?(.+)$/);
 
 		if (!match) {
-			return nulll;
+			return null;
 		}
 
 		const [_, amount, command] = match;
