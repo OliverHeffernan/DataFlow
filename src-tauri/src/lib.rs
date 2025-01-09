@@ -28,8 +28,8 @@ fn write_file(_path: String, content: String) {
     if path.split('.').last() == Some("h") {
         path.truncate(path.len() - 2);
     }
-    if path.split('.').last() != Some("heff") {
-        path.push_str(".heff");
+    if path.split('.').last() != Some("dflo") {
+        path.push_str(".dflo");
     }
 
     let mut file = File::create(path).unwrap();

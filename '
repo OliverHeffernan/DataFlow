@@ -1,0 +1,354 @@
+<template>
+	<input id="commandLine" spellcheck="false" type="text" @input="checkCommand" @keyup.enter="handleEnter" />
+	<div id="webFileUpload">
+		<input id="fileInput" type="file" />
+		<button id="readFileBtn" @click="openFileWeb()">Read File</button>
+		<button id="cancelButton" @click="closeWebFilePick()">Cancel</button>
+	</div>
+</template>
+<script setup>
+	import SheetManager from '../classes/SheetManager.js';
+	const sheetManager = new SheetManager();
+
+	import { save, open } from '@tauri-apps/plugin-dialog';
+	import { readTextFile, BaseDirectory } from '@tauri-apps/plugin-fs';
+	import { invoke } from '@tauri-apps/api/core';
+
+	async function saveFile(saveAs = false) {
+		try {
+			let path;
+			if (sheetManager.path == null || saveAs) {
+				path = await save ({
+					filters: [
+						{
+						  name: 'My Filter',
+						  extensions: ['.dflo'],
+						},
+					]
+				});
+				sheetManager.path = path;
+			}
+			else {
+				path = sheetManager.path;
+			}
+
+			let object = {
+				rows: sheetManager.rows
+			};
+
+			let content = JSON.stringify(object);
+			await invoke('write_file', { path: path, content: content });
+			setPhMessage("Saved file to " + path + " successfully");
+		}
+		catch(e) {
+			console.log(e.message);
+			downloadFile(JSON.stringify(sheetManager.rows), "sheet.dflo");
+		}
+	}
+
+	function downloadFile(content, filename) {
+		// Create a Blob object with the text content
+		const blob = new Blob([content], { type: 'text/plain' });
+
+		// Create an object URL for the Blob
+		const url = URL.createObjectURL(blob);
+
+		// Create an anchor element and set the download link
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename; // Specify the filename
+		a.click(); // Programmatically click the anchor element to trigger the download
+
+		// Clean up by revoking the object URL
+		URL.revokeObjectURL(url);
+	}
+
+	function closeWebFilePick() {
+		document.getElementById("webFileUpload").style.display = "none";
+	}
+
+	function setPhMessage(mg) {
+		document.getElementById("commandLine").placeholder = mg;
+	}
+
+	async function openFile() {
+		try {
+			const path = await open
+			(
+				{
+					filters:
+					[
+						{
+						  name: 'My Filter',
+						  extensions: ['.dflo'],
+						},
+					]
+				}
+			);
+
+			const file = await readTextFile(path);
+
+			if (path.split('.').pop() == "dflo") {
+				const object = JSON.parse(file);
+				sheetManager.rows = object.rows;
+				sheetManager.numOfRows.value = sheetManager.rows.length;
+				sheetManager.numOfCols.value = sheetManager.rows[0].length;
+				sheetManager.loadAllCells();
+				sheetManager.path = path;
+
+				setPhMessage("Opened file from " + path + " successfully");
+			}
+			else if (path.split('.').pop() == "heff") {
+				sheetManager.rows = JSON.parse(file);
+				sheetManager.numOfRows.value = sheetManager.rows.length;
+				sheetManager.numOfCols.value = sheetManager.rows[0].length;
+				sheetManager.loadAllCells();
+
+				sheetManager.path = path;
+
+				setPhMessage("Opened file from " + path + " successfully");
+			}
+			else {
+				console.log("Invalid file type");
+			}
+			//await file.close();
+			//const file = await open(path)
+		}
+		catch (e) {
+			document.getElementById("webFileUpload").style.display = "block";
+		}
+	}
+
+	function openFileWeb() {
+		const fileInput = document.getElementById('fileInput');
+		const file = fileInput.files[0];
+
+		console.log("web view");
+
+		const reader = new FileReader();
+
+		reader.onload = function(e) {
+			console.log(e.target.result);
+			sheetManager.rows = JSON.parse(e.target.result);
+			sheetManager.numOfRows.value = sheetManager.rows.length;
+			sheetManager.numOfCols.value = sheetManager.rows[0].length;
+			sheetManager.loadAllCells();
+		}
+
+		reader.readAsText(file);
+
+
+		document.getElementById("webFileUpload").style.display = "none";
+	}
+
+
+	function handleEnter() {
+		let com = document.getElementById('commandLine').value;
+		// save file with command :w
+		if (com == ":w") {
+			saveFile();
+			document.getElementById("commandLine").value = "";
+		}
+
+		// save file as with command :wa
+		else if (com == ":wa") {
+			saveFile(true);
+			document.getElementById("commandLine").value = "";
+		}
+
+		// open file with command :o
+		else if (com == ":o") {
+			openFile();
+			document.getElementById("commandLine").value = "";
+		}
+		else if (com.startsWith(":hi")) {
+			console.log("styling");
+			const row = sheetManager.selRow;
+			const col = sheetManager.selCol;
+			sheetManager.setStyles(com, row, col);
+			document.getElementById("commandLine").value = "";
+		}
+	}
+
+	function checkCommand() {
+		setPhMessage("");
+		let com = document.getElementById('commandLine').value;
+		let formBar = document.getElementById('formulaBar');
+		let cellPicker = document.getElementById("cellPicker");
+		let clear = false;
+		// command to edit the formula
+		if (com == "i") {
+			formBar.focus();
+			clear = true;
+		}
+		// command to edit the formula of the first cell in the selected row
+		else if (com == "I") {
+			sheetManager.selectCell(sheetManager.selRow, 0);
+			formBar.focus();
+			clear = true;
+		}
+		// command to select the first cell in the selected row
+		else if (com == "^") {
+			sheetManager.selectCell(sheetManager.selRow, 0);
+			clear = true;
+		}
+		// command to select last cell in a row
+		else if (com == "$") {
+			sheetManager.selectCell(sheetManager.selRow, sheetManager.numOfCols.value - 1);
+			clear = true;
+		}
+		// command to replace the formula
+		else if (com == "c") {
+			formBar.value = "";
+			formBar.focus();
+			sheetManager.setFormula();
+			clear = true;
+		}
+		// command to change the selected cell
+		else if (com == ";") {
+			cellPicker.focus();
+			cellPicker.value = "";
+			clear = true;
+		}
+		else if (com == "zz") {
+			sheetManager.scrollToCenterSelCell();
+			clear = true;
+		}
+		// insert row below
+		else if (com == "oj") {
+			sheetManager.insertRowBelow();
+			clear = true;
+		}
+		// insert row above
+		else if (com == "ok") {
+			sheetManager.insertRowAbove();
+			clear = true;
+		}
+		else if (com == "oh") {
+			sheetManager.insertColLeft();
+			clear = true;
+		}
+		else if (com == "ol") {
+			sheetManager.insertColRight();
+			clear = true;
+		}
+		// yank formula
+		else if (com == "yf") {
+			let col = sheetManager.selCol;
+			let row = sheetManager.selRow;
+			let text = sheetManager.getFormula(row, col);
+			navigator.clipboard.writeText(text);
+			sheetManager.yank([[text]]);
+			clear = true;
+		}
+		// yank value
+		else if (com == "ys") {
+			let col = sheetManager.selCol;
+			let row = sheetManager.selRow;
+			let text = sheetManager.getValue(row, col);
+			navigator.clipboard.writeText(text);
+			sheetManager.yank([[text]]);
+			clear = true;
+		}
+
+		// repeated commands
+		/*
+		if (com.length == 1) {
+			com = "1" + com;
+		}
+		*/
+		// getting the amount
+		let amount = parseCommand(com).amount;
+		let command = parseCommand(com).command;
+			
+		//if (parseInt(com.substring(0, com.length - 2)) != "NaN") {
+		// movements
+		//let amount = parseInt(com.substring(0, com.length - 1));
+		if (command == "h") {
+			sheetManager.moveLeft(amount);
+			clear = true;
+		}
+		else if (command == "j") {
+			sheetManager.moveDown(amount);
+			clear = true;
+		}
+		else if (command == "k") {
+			sheetManager.moveUp(amount);
+			clear = true;
+		}
+		else if (command == "l") {
+			sheetManager.moveRight(amount);
+			clear = true;
+		}
+		else if (command == "p") {
+			sheetManager.paste(amount);
+			clear = true;
+		}
+		// command to delete a row
+		else if (command == "dd") {
+			sheetManager.deleteSelRow(amount);
+			clear = true;
+		}
+		// command to delete a column
+		else if (command == "dc") {
+			sheetManager.deleteSelCol(amount);
+			clear = true;
+		}
+
+			
+		if (clear) {
+			document.getElementById("commandLine").value = "";
+		}
+	}
+
+	function parseCommand(com) {
+		const match = com.match(/^(\d+)?(.+)$/);
+
+		if (!match) {
+			return null;
+		}
+
+		const [_, amount, command] = match;
+
+		return {
+			amount: amount ? parseInt(amount, 10) : 1,
+			command: command
+		};
+	}
+</script>
+<style>
+#commandLine {
+	position: fixed;
+	width: 100%;
+	bottom: 0;
+	color: white;
+	background-color: #15202E;
+	border: none;
+	outline: none;
+	z-index: 10;
+	box-shadow: rgba(0,0,0,0.5) 0px 0px 5px 0px;
+	text-shadow: 0 0 0 white;
+}
+
+#webFileUpload {
+	display: none;
+	position: fixed;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+
+	background-color: #15202E;
+	border-radius: 20px;
+	padding: 20px;
+	box-shadow: black 0px 0px 50px;
+}
+
+#fileInput {
+	color: white;
+}
+
+#cancelButton {
+	margin-left: 5px;
+}
+
+</style>

@@ -136,15 +136,16 @@ export default class Formulas {
 	}
 
 	// evaluated curly bracs, which can be used to use a calculation to choose a row in formulas
-	evaluateRefCalcs(expr) {
+	evaluateRefCalcs(expr, sheetManager) {
 		expr = expr.replaceAll(/\{([^}]+)\}/g, (match, expression) => {
 			try {
 				// Evaluate the expression within the curly braces
-				const result = math.evaluate(expression);
+				const result = math.evaluate(this.replaceReferences(expression, sheetManager));
 				return result; // Replace the match with the result
 			}
 			catch (error) {
 				console.error(`Error evaluating expression "${expression}":`, error);
+				console.error(error.message);
 				return match; // If evaluation fails, return the original match
 			}
 		});
