@@ -15,6 +15,24 @@ Many functions are provided through the Mathjs library, including round, sin, ta
 ### DataFlow Functions
 In this section are functions that make it easier to collate data from throughout your spreadsheets, allowing you to collate your meaningless numbers into understandable sums, averages and counts.
 
+#### Absolute cell references
+To include a cell's value in a formula for another cell, type the reference for the cell, e.g. A0.
+
+#### Relative cell references
+To get a relative cell reference, (e.g. get the value of the cell two rows up and one column to the left), you can use square brackets to calculate the column and curly brackets for the row. An example is below.
+
+```
+= [-3]{+5}
+```
+The formula above would return the value of the cell 3 columns to the left, and 5 rows down. This is useful when creating formulas that will be used in several places, as it means that you can copy them over without worrying about readjusting the formula for the new location. It is also useful for getting sums.
+
+For example, if you had a column of values that you wanted a sum for, you could place the following formula at the bottom of it.
+```
+= SUM([]0:[]{-1})
+```
+This gets the sum from row 0, to the previous row, meaning that if you add any more values in between, it will update immediately without needing to readjust the range. This applies for AVG, COUNT, and can also be utilised in SUMIF, AVGIF, and COUNTIF functions.
+
+As shown in the above code, to get the current column, you can type []. You can also use {} to get the current row.
 #### SUM: `SUM(range)`
 SUM provides a sum of all the values in the given range.
 
@@ -54,8 +72,16 @@ Commands are entered into the command line at the bottom of the window.
 ### Motions
 Motions are standard vim motions (hjkl), supporting quantified motions for most commands (e.g. 5k to move up 5 rows).
 
+You can also use arrow keys to move around. If you are typing anything in either the command line, or the formula bar, you can still use the arrow keys to move across your command or formula, but if you are not, the arrow keys will be used to move the selection cursor. Arrow key movement ignores amount commands, i.e. you can't press 5 then the right arrow key to move right five times.
+
 ### Insert `i`:
-Use this command to edit the formula of the currently selected cell. Then to go back to the command line, press `esc`.
+Use this command to edit the formula of the currently selected cell. This will place the cursor at the beginning of the formula. Then to go back to the command line, press `esc`.
+
+### Apped `a`:
+Similar to the insert command, except it will place the cursor at the end of the formula
+
+### Replace currently selected cell's formula `c`:
+Similar to a and i commands, except it clears the formula, so that you can replace it with a new one.
 
 ### Insert at start of row `I`:
 Enter this command in the command line to edit the first cell in the currently selected row.
@@ -65,6 +91,12 @@ Enter this command to select the first cell in the currently selected row, witho
 
 ### Move to end of row `$`:
 Enter this command to select the last cell in the currently selected row, without editing it.
+
+### Move to row 0 `gg`:
+Enter this command to select the first cell in the currently selected column.
+
+### Move to final row `G`:
+Enter this command to select the final cell in the currently selected column.
 
 ### Replace currently selected cell's formula `c`:
 Enter this command to replace the formula of the currently selected cell.
@@ -108,30 +140,32 @@ To save a file to a new location, enter the command `:wa` into the command line,
 
 This is useful when you want to have a template file to duplicate, for example, a monthly budget template.
 
-# Setup stuff from Tauri
-This template should help get you started developing with Vue 3 in Vite.
-## Recommended IDE Setup
+### Clear sheet/new file `:clear`:
+If you want to clear the screen, or you want a new file (make sure you have saved the current file before doing this), type the above command and press enter.
 
-[VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
-
-```sh
-npm install
+### Styling `:hi`
+Let's say I want to style a cell with a lightblue background, and a black font colour. To achieve this, I would select the desired cell, and type the following command.
 ```
-
-### Compile and Hot-Reload for Development
-
-```sh
-npm run dev
+:hi bg lightblue fg black
 ```
+Then press `enter`.
 
-### Compile and Minify for Production
-
-```sh
-npm run build
+If I wanted to keep the background the same, but change the foreground/font color, I could type this.
 ```
+:hi fg black
+```
+This has support for all CSS colors, including hex values, named colors, and rgb values. But when typing rgb values, make sure not to include any spaces between values.
+
+When using rgb values, do this:
+```
+:hi fg rgb(0,0,0)
+```
+Don't do this
+```
+:hi fg rgb(0, 0, 0)
+```
+### reset all styling `:resetallstyles`
+To reset all styling to defaults, type the above command and press `enter`.
+
+### force load styles `:forceloadstyles`:
+If you encounter any issues with styling where it is not behaving as it should, you can try entering the above command and pressing `enter`.
