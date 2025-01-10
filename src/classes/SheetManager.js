@@ -5,6 +5,7 @@ import Formulas from './FormulaFunctions.js';
 const formulas = new Formulas();
 const config = { }
 const math = create(all, config)
+
 export default class SheetManager {
 	constructor() {
 		// make sure there is only one instance of SheetManager
@@ -65,14 +66,15 @@ export default class SheetManager {
 			this.styles.push(styleRow);
 		}
 
-		this.loadAllCells();
+		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 		this.loadStyles();
 	}
 
 	loadStyles() {
-		console.log("load styles");
 		const cols = this.numOfCols.value;
 		const rows = this.numOfRows.value;
+		console.log(this.defaultStyling);
+
 		for (let x = 0; x < cols; x++) {
 			for (let y = 0; y < rows; y++) {
 				const styles = this.styles[y][x];
@@ -95,11 +97,10 @@ export default class SheetManager {
 			if (split[i - 1] == "bg") {
 				if (validColor) {
 					try {
-						this.getCell(row, col).parentElement.style.backgroundColor = split[i];
+						this.getCell(row, col).style.backgroundColor = split[i];
 						this.styles[row][col].bg = split[i];
 					}
 					catch(e) {
-						console.log(e.message)
 					}
 				}
 				else {
@@ -121,11 +122,9 @@ export default class SheetManager {
 				}
 			}
 			else if (split[i] == "reset") {
-				console.log("reset");
 				this.resetStyles(row, col);
 			}
 			else if (split[i] == "resetall") {
-				console.log("resetall");
 				this.resetAllStyles();
 			}
 		}
@@ -138,11 +137,29 @@ export default class SheetManager {
 	resetAllStyles() {
 		const cols = this.numOfCols.value;
 		const rows = this.numOfRows.value;
-		for (let x = 0; x < cols; x++) {
-			for (let y = 0; y < rows; y++) {
-				this.resetStyles(x, y);
-			}
+		//for (let x = 0; x < cols; x++) {
+			//for (let y = 0; y < rows; y++) {
+				//this.resetStyles(x, y);
+			//}
+		//}
+
+		let styleRow = [];
+		let styles = [];
+		for (let i = 0; i < cols; i++) {
+			//styleRow.push(this.defaultStyling);
+			styleRow.push({
+				fg: this.defaultStyling.fg,
+				bg: this.defaultStyling.bg
+			});
 		}
+
+		for (let p = 0; p < rows; p++) {
+			styles.push(styleRow);
+		}
+
+		this.styles = styles;
+
+		this.loadStyles();
 	}
 
 	// function to get the formula for a specific cell
@@ -167,14 +184,31 @@ export default class SheetManager {
 		}
 		// remove the equals sign from the expression
 		expr = expr.substring(1);
+		// adding relative references
+		expr = expr.replace("{-", "{THISROW-");
+		expr = expr.replace("{}", "{THISROW}");
+		expr = expr.replace("{+", "{THISROW+");
+
+		expr = expr.replace("[-", "[THISCOL-");
+		expr = expr.replace("[]", "[THISCOL]");
+		expr = expr.replace("[+", "[THISCOL+");
+
+
 		expr = formulas.replaceVariables(expr, row, col);
+
+		// replacing curly brace calcs with a number result
 		expr = formulas.evaluateRefCalcs(expr, this);
+		// replacing square brace calcs with a letter result for col references
+		expr = formulas.evaluateLetterRefCalcs(expr, this);
+		// remove all white space
+		expr = expr.replace(" ", "");
 		// replacing cell ranges with string objects containing the sum and array.
 		// replace cell ranges (e.g. A0:A20) with objects
 		expr = formulas.replaceCellRanges(expr, row, col, this);
 		if (expr === "circular") return "circular logic detected";
 		// replacing SUM with its value
 		expr = formulas.replaceSUM(expr);
+		expr = formulas.replaceAVG(expr);
 		// replacing SUMIF with its value
 		// SUMIF(conditionRange| criteria| valueRange)
 		expr = formulas.replaceSUMIF(expr);
@@ -182,7 +216,6 @@ export default class SheetManager {
 		expr = formulas.replaceAVGIF(expr);
 		// replacing COUNT with the count
 		expr = formulas.replaceCOUNT(expr);
-		expr = formulas.replaceAVG(expr);
 		// replacing cell references with their values
 		expr = formulas.replaceReferences(expr, this);
 
@@ -292,16 +325,18 @@ export default class SheetManager {
 	}
 
 	// function to set the formula of the selected cell
-	setFormula() {
+	setFormula(move = true) {
 		// set the formula from the formula bar to the selected cell
 		this.rows[this.selRow][this.selCol] = document.getElementById("formulaBar").value;
 
 		// update the value of the selected cell
 		this.getCell(this.selRow, this.selCol).innerText = this.getValue(this.selRow, this.selCol);
-		this.loadAllCells();
+		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 
 		//this.moveDown(1);
-		this.keyboardMotion(0, 1);
+		if (move) {
+			this.keyboardMotion(0, 1);
+		}
 	}
 
 	// called when the user yanks something
@@ -316,7 +351,7 @@ export default class SheetManager {
 					this.rows[this.selRow + y][this.selCol + x] = this.copyBuffer[y][x];
 				}
 			}
-			this.loadAllCells();
+			this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 			//this.moveDown(1);
 			this.keyboardMotion(0, 1);
 		}
@@ -373,7 +408,7 @@ export default class SheetManager {
 		console.log(str);
 		let data = JSON.parse(str);
 		this.rows = data;
-		this.loadAllCells();
+		this.loadAllCells(data.length, data[0].length);
 		commandLine.value = "";
 		this.clearPlaceholder();
 	}
@@ -402,6 +437,7 @@ export default class SheetManager {
 
 		// checks if new cells are being created, if they are, then it lets the styles be loaded once it is all mounted, otherwise it loads the styles right away.
 		if (r >= this.numOfRows.value && c >= this.numOfCols.value) {
+			console.log("loading styles");
 			this.loadStyles();
 		}
 
@@ -413,9 +449,10 @@ export default class SheetManager {
 		for (let i = 0; i < this.rows.length; i++) {
 			console.log('deleting cols');
 			this.rows[i].splice(index, 1);
+			this.styles[i].splice(index, 1);
 		}
 
-		this.loadAllCells();
+		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 		this.selectCell(this.selRow, this.selCol);
 	}
 
@@ -429,7 +466,7 @@ export default class SheetManager {
 		this.rows.splice(index, 1);
 		this.styles.splice(index, 1);
 		this.numOfRows.value--;
-		this.loadAllCells();
+		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 		this.loadStyles();
 		this.selectCell(this.selRow, this.selCol);
 	}
@@ -445,30 +482,39 @@ export default class SheetManager {
 		let styleRow = [];
 		for (let i = 0; i < this.numOfCols.value; i++) {
 			row.push("");
-			styleRow.push(this.defaultStyling);
+			//styleRow.push(this.defaultStyling);
+			styleRow.push({
+				fg: this.defaultStyling.fg,
+				bg: this.defaultStyling.bg
+			});
 		}
 		this.rows.splice(index, 0, row);
 		this.styles.splice(index, 0, styleRow);
 		this.numOfRows.value++;
-		this.loadAllCells();
+		/*
+		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 		this.loadStyles();
+		*/
 		this.selectCell(this.selRow, this.selCol);
 	}
 
 	insertColumnAtIndex(index) {
 		for (let i = 0; i < this.numOfRows.value; i++) {
 			this.rows[i].splice(index, 0, "");
-			this.styles[i].splice(index, 0, this.defaultStyling);
+			this.styles[i].splice(index, 0, {
+				fg: this.defaultStyling.fg,
+				bg: this.defaultStyling.bg
+			});
 		}
 		this.numOfCols.value++;
-		this.loadAllCells();
+		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 
 		this.selectCell(this.selRow, this.selCol);
 	}
 
 	insertRowBelow() {
 		this.insertRowAtIndex(this.selRow + 1);
-		this.moveDown(1);
+		this.keyboardMotion(0, 1);
 	}
 
 	insertRowAbove() {
@@ -478,7 +524,7 @@ export default class SheetManager {
 
 	insertColRight() {
 		this.insertColumnAtIndex(this.selCol + 1);
-		this.moveRight(1);
+		this.keyboardMotion(1, 0);
 	}
 
 	insertColLeft() {

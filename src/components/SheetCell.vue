@@ -5,22 +5,7 @@
 <script setup>
 	import { ref, onMounted, defineProps } from 'vue';
 	import SheetManager from '../classes/SheetManager.js';
-	const sheetManager = ref(new SheetManager());
-
-	onMounted(() => {
-		if (props.rowNo == sheetManager.numOfRows.value - 1 && props.colNo == sheetManager.numOfCols.value - 1) {
-			sheetManager.loadAllCells();
-		}
-	});
-	function handleClick() {
-		sheetManager.value.selectCell(props.rowNo, props.colNo);
-		document.getElementById("commandLine").focus();
-	}
-
-	function handleDblClick() {
-		sheetManager.value.selectCell(props.rowNo, props.colNo);
-		document.getElementById("formulaBar").focus();
-	}
+	const sheetManager = new SheetManager();
 
 	const props = defineProps({
 		rowNo: {
@@ -31,7 +16,37 @@
 			type: Number,
 			required: true,
 		},
+		numOfCols: {
+			type: Number,
+			required: true,
+		},
+		numOfRows: {
+			type: Number,
+			required: true,
+		}
 	});
+
+	onMounted(() => {
+		//if (props.rowNo == sheetManager.value.numOfRows.value - 1 && props.colNo == sheetManager.value.numOfCols.value - 1) {
+		if (props.rowNo == 0) {
+			console.log(props.numOfCols);
+		}
+		if (props.rowNo == props.numOfRows - 1 && props.colNo == props.numOfCols - 1) {
+			console.log("loaded");
+			sheetManager.loadAllCells(sheetManager.numOfRows.value, sheetManager.numOfCols.value);
+			sheetManager.loadStyles();
+		}
+	});
+	function handleClick() {
+		sheetManager.selectCell(props.rowNo, props.colNo);
+		document.getElementById("commandLine").focus();
+	}
+
+	function handleDblClick() {
+		sheetManager.selectCell(props.rowNo, props.colNo);
+		document.getElementById("formulaBar").focus();
+	}
+
 </script>
 
 <style scoped>

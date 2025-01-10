@@ -7,15 +7,17 @@
 			:key="index"
 			:rowNo="rowNo"
 			:colNo="index"
+			:numOfRows="sheetManager.numOfRows.value"
+			:numOfCols="sheetManager.numOfCols.value"
 		/>
 	</tr>
 </template>
 <script setup>
 	import { defineProps } from 'vue';
 	import SheetCell from './SheetCell.vue';
-	//import SheetManager from '../classes/SheetManager.js';
+	import SheetManager from '../classes/SheetManager.js';
 
-	//const sheetManager = new SheetManager();
+	const sheetManager = new SheetManager();
 
 	defineProps({
 		rowNo: {

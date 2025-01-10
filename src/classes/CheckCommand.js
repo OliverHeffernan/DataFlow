@@ -1,10 +1,13 @@
 import SheetManager from '../classes/SheetManager.js';
 const sheetManager = new SheetManager();
+import ArrowMovement from './ArrowMovement.js';
+const arrowMovement = new ArrowMovement();
 import FileManager from '../classes/FileManager.js';
 const fileManager = new FileManager();
 export default class CheckCommand {
 	constructor() {
 		CheckCommand.instance = this;
+
 	}
 
 	setPhMessage(mg) {
@@ -24,6 +27,11 @@ export default class CheckCommand {
 		// non repeatable commands here
 		// command to edit the formula
 		if (com == "i") {
+			formBar.focus();
+			formBar.setSelectionRange(0,0);
+			clear = true;
+		}
+		else if (com == "a") {
 			formBar.focus();
 			clear = true;
 		}
@@ -47,7 +55,7 @@ export default class CheckCommand {
 		else if (com == "c") {
 			formBar.value = "";
 			formBar.focus();
-			sheetManager.setFormula();
+			sheetManager.setFormula(false);
 			clear = true;
 		}
 		// command to change the selected cell
@@ -157,6 +165,10 @@ export default class CheckCommand {
 			fileManager.saveFile();
 			document.getElementById("commandLine").value = "";
 		}
+		else if (com == ":forceloadstyles") {
+			sheetManager.loadStyles();
+			document.getElementById("commandLine").value = "";
+		}
 
 		// save file as with command :wa
 		else if (com == ":wa") {
@@ -178,6 +190,10 @@ export default class CheckCommand {
 			const row = sheetManager.selRow;
 			const col = sheetManager.selCol;
 			sheetManager.setStyles(com, row, col);
+			document.getElementById("commandLine").value = "";
+		}
+		else if (com == ":resetallstyles") {
+			sheetManager.resetAllStyles();
 			document.getElementById("commandLine").value = "";
 		}
 	}

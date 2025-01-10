@@ -32,6 +32,32 @@ export default class Formulas {
 		return expr;
 	}
 
+	replaceAVG(expr) {
+		console.log(expr);
+		expr = expr.replace(/AVG\(([^)]+)\)/g, (match, array) => {
+			//return JSON.parse(array).AVG;
+			try {
+				let result = this.getObjectFromTag(array).AVG;
+				return result;
+			}
+			catch(e) {
+				return e.message;
+			}
+		});
+		expr = expr.replace(/MEAN\(([^)]+)\)/g, (match, array) => {
+			//return JSON.parse(array).AVG;
+			try {
+				let result = this.getObjectFromTag(array).AVG;
+				return result;
+			}
+			catch(e) {
+				return e.message;
+			}
+		});
+
+		return expr;
+	}
+
 	getObjectFromTag(tag) {
 		return JSON.parse(tag.split("<nExTProP*!>")[1]);
 	}
@@ -50,6 +76,18 @@ export default class Formulas {
 			let term = crit.substring(1);
 			for (let i = 0; i < valRange.length; i++) {
 				if (crit[0] == "=" && conRange[i] == term) {
+					console.log("we got in!!!!");
+					sum += Number(valRange[i]);
+				}
+				else if (crit[0] == "!" && conRange[i] != term) {
+					console.log("we got in!!!!");
+					sum += Number(valRange[i]);
+				}
+				else if (crit[0] == "<" && conRange[i] < term) {
+					console.log("we got in!!!!");
+					sum += Number(valRange[i]);
+				}
+				else if (crit[0] == ">" && conRange[i] > term) {
 					console.log("we got in!!!!");
 					sum += Number(valRange[i]);
 				}
@@ -115,16 +153,6 @@ export default class Formulas {
 		return expr;
 	}
 
-	replaceAVG(expr) {
-		expr = expr.replace(/AVG\(([^)]+)\)/g, (match, array) => {
-			return JSON.parse(array).AVG;
-		});
-		expr = expr.replace(/MEAN\(([^)]+)\)/g, (match, array) => {
-			return JSON.parse(array).AVG;
-		});
-
-		return expr;
-	}
 
 	replaceReferences(expr, sheetManager) {
 		// replacing cell references with their values
@@ -142,6 +170,21 @@ export default class Formulas {
 				// Evaluate the expression within the curly braces
 				const result = math.evaluate(this.replaceReferences(expression, sheetManager));
 				return result; // Replace the match with the result
+			}
+			catch (error) {
+				console.error(`Error evaluating expression "${expression}":`, error);
+				console.error(error.message);
+				return match; // If evaluation fails, return the original match
+			}
+		});
+		return expr;
+	}
+	evaluateLetterRefCalcs(expr, sheetManager) {
+		expr = expr.replaceAll(/\[([^\]]+)\]/g, (match, expression) => {
+			try {
+				// Evaluate the expression within the curly braces
+				const result = math.evaluate(this.replaceReferences(expression, sheetManager));
+				return String.fromCharCode(65 + result);
 			}
 			catch (error) {
 				console.error(`Error evaluating expression "${expression}":`, error);
