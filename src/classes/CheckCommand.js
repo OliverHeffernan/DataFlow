@@ -4,10 +4,14 @@ import ArrowMovement from './ArrowMovement.js';
 const arrowMovement = new ArrowMovement();
 import FileManager from '../classes/FileManager.js';
 const fileManager = new FileManager();
+import VisualManager from './VisualManager.js';
+const visualManager = new VisualManager();
 export default class CheckCommand {
 	constructor() {
+		this.mode = "n";
+		this.selStartRow = null;
+		this.selStartCol = null;
 		CheckCommand.instance = this;
-
 	}
 
 	setPhMessage(mg) {
@@ -17,6 +21,8 @@ export default class CheckCommand {
 	// commands that do not need to have pressed enter to executre
 	checkCommand() {
 		this.setPhMessage("");
+		// templog
+		console.log(this.mode);
 		let com = document.getElementById('commandLine').value;
 		if (com == "") {
 			return;
@@ -25,14 +31,24 @@ export default class CheckCommand {
 		let cellPicker = document.getElementById("cellPicker");
 		let clear = false;
 		// non repeatable commands here
-		// command to edit the formula
+		// command to edit at the beginning the formula
 		if (com == "i") {
 			formBar.focus();
 			formBar.setSelectionRange(0,0);
 			clear = true;
 		}
+		// edit at the end of the formula
 		else if (com == "a") {
 			formBar.focus();
+			const end = formBar.value.length;
+			formBar.setSelectionRange(end, end);
+			clear = true;
+		}
+		else if (com == "v") {
+			this.mode = "v";
+			this.selStartRow = sheetManager.selRow;
+			this.selStartCol = sheetManager.selCol;
+			visualManager.startVisual(sheetManager.selRow, sheetManager.selCol);
 			clear = true;
 		}
 		// command to edit the formula of the first cell in the selected row
@@ -86,6 +102,21 @@ export default class CheckCommand {
 			sheetManager.insertColRight();
 			clear = true;
 		}
+		else if (com == "yf" && this.mode == "v") {
+			// templog
+			console.log("visual selection");
+			let col = sheetManager.selCol;
+			let row = sheetManager.selRow;
+			let text = sheetManager.getFormula(row, col);
+			navigator.clipboard.writeText(text);
+
+			visualManager.yankSelection(sheetManager);
+			// templog
+			console.log(sheetManager.copyBuffer);
+
+			clear = true;
+			this.handleEsc();
+		}
 		// yank formula
 		else if (com == "yf") {
 			let col = sheetManager.selCol;
@@ -103,6 +134,15 @@ export default class CheckCommand {
 			navigator.clipboard.writeText(text);
 			sheetManager.yank([[text]]);
 			clear = true;
+		}
+		// yank a row
+		else if (com == "yy") {
+			const row = sheetManager.selRow;
+			let buffer = sheetManager.rows[row];
+			let endIndex = buffer.lastIndexOf("");
+			buffer = endIndex === -1 ? buffer : buffer.slice(0, endIndex + 1);
+
+			sheetManager.yank([buffer]);
 		}
 		else if (com == "gg") {
 			let col = sheetManager.selCol;
@@ -140,7 +180,23 @@ export default class CheckCommand {
 			clear = true;
 		}
 		else if (command == "p") {
-			sheetManager.paste(amount);
+			sheetManager.paste(amount, false);
+			clear = true;
+		}
+		else if (command == "Pj") {
+			sheetManager.pasteInGapRow(amount, 1);
+			clear = true;
+		}
+		else if (command == "Pk") {
+			sheetManager.pasteInGapRow(amount, -1);
+			clear = true;
+		}
+		else if (command == "Pl") {
+			sheetManager.pasteInGapCol(amount, 1);
+			clear = true;
+		}
+		else if (command == "Ph") {
+			sheetManager.pasteInGapCol(amount, -1);
 			clear = true;
 		}
 		// command to delete a row
@@ -163,39 +219,38 @@ export default class CheckCommand {
 		// save file with command :w
 		if (com == ":w") {
 			fileManager.saveFile();
-			document.getElementById("commandLine").value = "";
 		}
 		else if (com == ":forceloadstyles") {
 			sheetManager.loadStyles();
-			document.getElementById("commandLine").value = "";
 		}
 
 		// save file as with command :wa
 		else if (com == ":wa") {
 			fileManager.saveFile(true);
-			document.getElementById("commandLine").value = "";
 		}
 
 		// open file with command :o
 		else if (com == ":o") {
 			fileManager.openFile();
-			document.getElementById("commandLine").value = "";
 		}
 		else if (com == ":clear") {
 			sheetManager.clearScreen();
-			document.getElementById("commandLine").value = "";
 		}
 		else if (com.startsWith(":hi")) {
-			console.log("styling");
 			const row = sheetManager.selRow;
 			const col = sheetManager.selCol;
 			sheetManager.setStyles(com, row, col);
-			document.getElementById("commandLine").value = "";
 		}
 		else if (com == ":resetallstyles") {
 			sheetManager.resetAllStyles();
-			document.getElementById("commandLine").value = "";
 		}
+		document.getElementById("commandLine").value = "";
+	}
+
+	handleEsc() {
+		visualManager.exitVisual();
+		this.mode = "n";
+		document.getElementById("commandLine").value = "";
 	}
 
 	parseCommand(com) {

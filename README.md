@@ -169,3 +169,23 @@ To reset all styling to defaults, type the above command and press `enter`.
 
 ### force load styles `:forceloadstyles`:
 If you encounter any issues with styling where it is not behaving as it should, you can try entering the above command and pressing `enter`.
+
+### Visual Mode `v`:
+To enter visual mode, use the command `v`. This mode is used to make a selection of multiple cells in a rectangle. AFter making the selection, there are several commands you can use to manipulate the selection.
+
+ - `d`: Will clear the cells, leaving them blank, and exiting visual mode.
+ - `yf`: yank/copy the formula of all cells in the selection.
+ - `ys`: yank/copy the value of all cells in the selection.
+
+### paste `p`:
+To paste the copy buffer directly into preexisting cells, use the `p` command. This will paste the buffer starting at the currently selected cell.
+
+Keep in mind this may overwrite the values of preexisting cells. If you want to create a gap to paste into, use the next command.
+
+### paste into gap `P{motion}`:
+If you want to paste the copy buffer between preexisting cells, you can use the `P` command, then specify the direction that they should be pasted into.
+
+- `Pj`: paste below, creating new rows for the copy buffer to paste into.
+- `Pk`: paste above, creating new rows for the copy buffer to paste into.
+- `Pl`: paste to the right, creating new columns for the copy buffer to paste into.
+- `Ph`: paste to the left, creating new columns for the copy buffer to paste into.

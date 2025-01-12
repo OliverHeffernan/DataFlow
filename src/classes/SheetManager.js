@@ -6,6 +6,9 @@ const formulas = new Formulas();
 const config = { }
 const math = create(all, config)
 
+import VisualManager from './VisualManager.js';
+const visualManager = new VisualManager();
+
 export default class SheetManager {
 	constructor() {
 		// make sure there is only one instance of SheetManager
@@ -73,7 +76,6 @@ export default class SheetManager {
 	loadStyles() {
 		const cols = this.numOfCols.value;
 		const rows = this.numOfRows.value;
-		console.log(this.defaultStyling);
 
 		for (let x = 0; x < cols; x++) {
 			for (let y = 0; y < rows; y++) {
@@ -184,16 +186,8 @@ export default class SheetManager {
 		}
 		// remove the equals sign from the expression
 		expr = expr.substring(1);
-		// adding relative references
-		expr = expr.replace("{-", "{THISROW-");
-		expr = expr.replace("{}", "{THISROW}");
-		expr = expr.replace("{+", "{THISROW+");
 
-		expr = expr.replace("[-", "[THISCOL-");
-		expr = expr.replace("[]", "[THISCOL]");
-		expr = expr.replace("[+", "[THISCOL+");
-
-
+		// replacing all variables and relative references
 		expr = formulas.replaceVariables(expr, row, col);
 
 		// replacing curly brace calcs with a number result
@@ -201,7 +195,7 @@ export default class SheetManager {
 		// replacing square brace calcs with a letter result for col references
 		expr = formulas.evaluateLetterRefCalcs(expr, this);
 		// remove all white space
-		expr = expr.replace(" ", "");
+		expr = expr.replaceAll(" ", "");
 		// replacing cell ranges with string objects containing the sum and array.
 		// replace cell ranges (e.g. A0:A20) with objects
 		expr = formulas.replaceCellRanges(expr, row, col, this);
@@ -306,6 +300,8 @@ export default class SheetManager {
 
 			this.prevRow = this.selRow;
 			this.prevCol = this.selCol;
+
+			visualManager.setVisual(this.selRow, this.selCol);
 		}
 		catch(e) {
 			console.log(e.message);
@@ -344,7 +340,8 @@ export default class SheetManager {
 		this.copyBuffer = cells;	
 	}
 
-	paste(amount) {
+
+	paste(amount, horizontal = false) {
 		for (let i = 0; i < amount; i++) {
 			for (let y = 0; y < this.copyBuffer.length; y++) {
 				for (let x = 0; x < this.copyBuffer[y].length; x++) {
@@ -353,8 +350,41 @@ export default class SheetManager {
 			}
 			this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 			//this.moveDown(1);
-			this.keyboardMotion(0, 1);
+			if (!horizontal) {
+				this.keyboardMotion(0, this.copyBuffer.length);
+			}
+			else {
+				this.keyboardMotion(this.copyBuffer[0].length, 0);
+			}
 		}
+	}
+
+	pasteInGapRow(amount, dir) {
+		if (dir == -1) this.keyboardMotion(0, 1);
+
+		const startRow = this.selRow + 1;
+		const startCol = this.selCol;
+
+		const rowAmount = this.copyBuffer.length * amount;
+
+		this.insertRowBelow(rowAmount);
+
+		this.selectCell(startRow, startCol);
+		this.paste(amount, false);
+	}
+
+	pasteInGapCol(amount, dir) {
+		if (dir == -1) this.keyboardMotion(-1, 0);
+		const startRow = this.selRow;
+		const startCol = this.selCol + 1;
+
+		const colAmount = this.copyBuffer[0].length * amount;
+
+		this.insertColRight(colAmount);
+
+		this.selectCell(startRow, startCol);
+
+		this.paste(amount, true);
 	}
 
 	// function to get the element of a specific cell
@@ -405,7 +435,6 @@ export default class SheetManager {
 			commandLine.placeholder = "Paste the JSON string here, then click 'Load from clipboard'";
 			return;
 		}
-		console.log(str);
 		let data = JSON.parse(str);
 		this.rows = data;
 		this.loadAllCells(data.length, data[0].length);
@@ -437,7 +466,6 @@ export default class SheetManager {
 
 		// checks if new cells are being created, if they are, then it lets the styles be loaded once it is all mounted, otherwise it loads the styles right away.
 		if (r >= this.numOfRows.value && c >= this.numOfCols.value) {
-			console.log("loading styles");
 			this.loadStyles();
 		}
 
@@ -445,9 +473,7 @@ export default class SheetManager {
 	}
 
 	removeColAtIndex(index) {
-		console.log("index: " + index);
 		for (let i = 0; i < this.rows.length; i++) {
-			console.log('deleting cols');
 			this.rows[i].splice(index, 1);
 			this.styles[i].splice(index, 1);
 		}
@@ -477,24 +503,20 @@ export default class SheetManager {
 		}
 	}
 
-	insertRowAtIndex(index) {
-		let row = [];
-		let styleRow = [];
-		for (let i = 0; i < this.numOfCols.value; i++) {
-			row.push("");
-			//styleRow.push(this.defaultStyling);
-			styleRow.push({
-				fg: this.defaultStyling.fg,
-				bg: this.defaultStyling.bg
-			});
-		}
-		this.rows.splice(index, 0, row);
-		this.styles.splice(index, 0, styleRow);
-		this.numOfRows.value++;
-		/*
-		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
-		this.loadStyles();
-		*/
+	insertRowAtIndex(index, amount = 1) {
+		const createRow = () => Array.from({ length: this.numOfCols.value }, () => "");
+		const createStyleRow = () => Array.from({ length: this.numOfCols.value }, () => ({
+			fg: this.defaultStyling.fg,
+			bg: this.defaultStyling.bg
+		}));
+
+		const rowsToInsert = Array.from({ length: amount }, createRow);
+		const stylesToInsert = Array.from({ length: amount }, createStyleRow);
+
+		this.rows.splice(index, 0, ...rowsToInsert);
+		this.styles.splice(index, 0, ...stylesToInsert);
+
+		this.numOfRows.value += amount;
 		this.selectCell(this.selRow, this.selCol);
 	}
 
@@ -512,19 +534,28 @@ export default class SheetManager {
 		this.selectCell(this.selRow, this.selCol);
 	}
 
-	insertRowBelow() {
-		this.insertRowAtIndex(this.selRow + 1);
+	insertRowBelow(amount = 1) {
+		//for (let i = 0; i < amount; i++) {
+			//this.insertRowAtIndex(this.selRow + 1);
+			//this.keyboardMotion(0, 1);
+		//}
+		//
+		this.insertRowAtIndex(this.selRow + 1, amount);
 		this.keyboardMotion(0, 1);
 	}
 
-	insertRowAbove() {
-		this.insertRowAtIndex(this.selRow);
+	insertRowAbove(amount = 1) {
+		for (let i = 0; i < amount; i++) {
+			this.insertRowAtIndex(this.selRow);
+		}
 		//this.moveUp(1);
 	}
 
-	insertColRight() {
-		this.insertColumnAtIndex(this.selCol + 1);
-		this.keyboardMotion(1, 0);
+	insertColRight(amount) {
+		for (let i = 0; i < amount; i++) {
+			this.insertColumnAtIndex(this.selCol + 1);
+			this.keyboardMotion(1, 0);
+		}
 	}
 
 	insertColLeft() {

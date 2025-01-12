@@ -1,5 +1,5 @@
 <template>
-	<input id="commandLine" spellcheck="false" type="text" @input="checkCommand.checkCommand()" @keyup.enter="checkCommand.handleEnter()" />
+	<input id="commandLine" spellcheck="false" type="text" @input="checkCommand.checkCommand()" @keyup.enter="checkCommand.handleEnter()" @keyup.esc="checkCommand.handleEsc()" />
 	<div id="webFileUpload">
 		<input id="fileInput" type="file" />
 		<button id="readFileBtn" @click="openFileWeb()">Read File</button>

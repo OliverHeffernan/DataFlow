@@ -3,11 +3,18 @@ import { create, all } from 'mathjs'
 const math = create(all, config)
 export default class Formulas {
 	constructor() {
-		console.log("imported successfully");
 		Formulas.instance = this;
 	}
 
 	replaceVariables(expr, row, col) {
+		expr = expr.replaceAll("{-", "{THISROW-");
+		expr = expr.replaceAll("{}", "{THISROW}");
+		expr = expr.replaceAll("{+", "{THISROW+");
+
+		expr = expr.replaceAll("[-", "[THISCOL-");
+		expr = expr.replaceAll("[]", "[THISCOL]");
+		expr = expr.replaceAll("[+", "[THISCOL+");
+
 		expr = expr.replaceAll("THISROW", row);
 		expr = expr.replaceAll("THISCOL", col);
 		expr = expr.replaceAll("PREVROW", row - 1);
@@ -17,8 +24,6 @@ export default class Formulas {
 
 	replaceSUM(expr) {
 		expr = expr.replace(/SUM\(([^)]+)\)/g, (match, array) => {
-			console.log(array);
-			console.log(match);
 			try {
 				//let result = JSON.parse(array.split("<nExTProP*!>")[1]).SUM;
 				let result = this.getObjectFromTag(array).SUM;
@@ -33,7 +38,6 @@ export default class Formulas {
 	}
 
 	replaceAVG(expr) {
-		console.log(expr);
 		expr = expr.replace(/AVG\(([^)]+)\)/g, (match, array) => {
 			//return JSON.parse(array).AVG;
 			try {
@@ -67,7 +71,6 @@ export default class Formulas {
 			//const props = contents.split(",");
 			//const conRange = JSON.parse(props[0]).ARRAY;
 			const props = contents.split("<nExTProP*!>");
-			console.log(props);
 			const conRange = JSON.parse(props[1]).ARRAY;
 			const crit = props[2].substring(1, props[2].length - 1);
 			const valRange = JSON.parse(props[3]).ARRAY;
@@ -76,19 +79,15 @@ export default class Formulas {
 			let term = crit.substring(1);
 			for (let i = 0; i < valRange.length; i++) {
 				if (crit[0] == "=" && conRange[i] == term) {
-					console.log("we got in!!!!");
 					sum += Number(valRange[i]);
 				}
 				else if (crit[0] == "!" && conRange[i] != term) {
-					console.log("we got in!!!!");
 					sum += Number(valRange[i]);
 				}
 				else if (crit[0] == "<" && conRange[i] < term) {
-					console.log("we got in!!!!");
 					sum += Number(valRange[i]);
 				}
 				else if (crit[0] == ">" && conRange[i] > term) {
-					console.log("we got in!!!!");
 					sum += Number(valRange[i]);
 				}
 			}
@@ -102,7 +101,6 @@ export default class Formulas {
 	replaceCOUNTIF(expr) {
 		expr = expr.replace(/COUNTIF\(([^)]+)\)/g, (match, contents) => {
 			const props = contents.split("<nExTProP*!>");
-			console.log(props);
 			const conRange = JSON.parse(props[1]).ARRAY;
 			const crit = props[2].substring(1, props[2].length - 1);
 			const valRange = JSON.parse(props[3]).ARRAY;
@@ -124,7 +122,6 @@ export default class Formulas {
 	replaceAVGIF(expr) {
 		expr = expr.replace(/AVGIF\(([^)]+)\)/g, (match, contents) => {
 			const props = contents.split("<nExTProP*!>");
-			console.log(props);
 			const conRange = JSON.parse(props[1]).ARRAY;
 			const crit = props[2].substring(1, props[2].length - 1);
 			const valRange = JSON.parse(props[3]).ARRAY;
@@ -199,7 +196,6 @@ export default class Formulas {
 		let circularLogic = false;
 		// replace cell ranges (e.g. A0:A20) with objects
 		expr = expr.replace(/\b([A-Z]+\d+):([A-Z]+\d+)\b/g, (match, start, end) => {
-			console.log("Processing range:", match);
 
 			// Extract column and row for start and end cells
 			const startCol = start.match(/[A-Z]+/)[0].charCodeAt(0) - 65;

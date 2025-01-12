@@ -34,7 +34,7 @@ export default class FileManager {
 
 			let content = JSON.stringify(object);
 			await invoke('write_file', { path: path, content: content });
-			setPhMessage("Saved file to " + path + " successfully");
+			this.setPhMessage("Saved file to " + path + " successfully");
 		}
 		catch(e) {
 			console.log(e.message);
@@ -88,7 +88,7 @@ export default class FileManager {
 				sheetManager.loadAllCells(prevNumOfRows, prevNumOfCols);
 				sheetManager.path = path;
 
-				setPhMessage("Opened file from " + path + " successfully");
+				this.setPhMessage("Opened file from " + path + " successfully");
 			}
 			else if (path.split('.').pop() == "heff") {
 				sheetManager.rows = JSON.parse(file);
@@ -98,10 +98,10 @@ export default class FileManager {
 
 				sheetManager.path = path;
 
-				setPhMessage("Opened file from " + path + " successfully");
+				this.setPhMessage("Opened file from " + path + " successfully");
 			}
 			else {
-				console.log("Invalid file type");
+				this.setPhMessage("Invalid file type");
 			}
 			//await file.close();
 			//const file = await open(path)
@@ -110,5 +110,9 @@ export default class FileManager {
 			console.log(e.message);
 			document.getElementById("webFileUpload").style.display = "block";
 		}
+	}
+
+	setPhMessage(mg) {
+		document.getElementById("commandLine").placeholder = mg;
 	}
 }
