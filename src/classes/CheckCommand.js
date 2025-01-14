@@ -6,6 +6,9 @@ import FileManager from '../classes/FileManager.js';
 const fileManager = new FileManager();
 import VisualManager from './VisualManager.js';
 const visualManager = new VisualManager();
+
+import LaunchManager from './LaunchManager.js';
+const launchManager = new LaunchManager();
 export default class CheckCommand {
 	constructor() {
 		this.mode = "n";
@@ -143,6 +146,7 @@ export default class CheckCommand {
 			buffer = endIndex === -1 ? buffer : buffer.slice(0, endIndex + 1);
 
 			sheetManager.yank([buffer]);
+			clear = true;
 		}
 		else if (com == "gg") {
 			let col = sheetManager.selCol;
@@ -214,6 +218,7 @@ export default class CheckCommand {
 		}
 	}
 
+	
 	handleEnter() {
 		let com = document.getElementById('commandLine').value;
 		// save file with command :w
@@ -232,9 +237,13 @@ export default class CheckCommand {
 		// open file with command :o
 		else if (com == ":o") {
 			fileManager.openFile();
+			launchManager.hide();
 		}
 		else if (com == ":clear") {
+
 			sheetManager.clearScreen();
+
+			launchManager.hide();
 		}
 		else if (com.startsWith(":hi")) {
 			const row = sheetManager.selRow;

@@ -1,4 +1,5 @@
 <template>
+	<FirstLaunchScreen v-if="launchManager.displayed" />
 	<FormulaBar />
 	<CommandLine />
 	<table>
@@ -27,8 +28,22 @@
 	import SheetRow from './components/SheetRow.vue';
 	import FormulaBar from './components/FormulaBar.vue';
 	import CommandLine from './components/CommandLine.vue';
+	import FirstLaunchScreen from './components/FirstLaunchScreen.vue';
+
+	import LaunchManager from './classes/LaunchManager.js';
+
+	const launchManager = ref(new LaunchManager());
 
 	const sheetManager = ref(new SheetManager());
+
+	let firstTime;
+	const testing = true;
+
+	if (localStorage.getItem("launched") && !testing) firstTime = false;
+	else {
+		firstTime = true;
+		localStorage.setItem("launched", "launched");
+	}
 </script>
 
 <style>
@@ -38,12 +53,24 @@
 	-moz-osx-font-smoothing: grayscale;
 	color: #2c3e50;
 	background-color: #091119;
+	scrollbar-color: red orange;
 }
 
 body {
 	margin: 0;
 	padding: 0;
 	background-color: #091119;
+
+}
+
+::-webkit-scrollbar {
+	background: #0A0C0F;
+}
+
+::-webkit-scrollbar-thumb {
+	background: #1E2227;
+	border: 2px #28374A solid;
+	border-radius: 5px;
 }
 
 table {
