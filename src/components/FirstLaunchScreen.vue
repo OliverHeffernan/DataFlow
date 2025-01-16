@@ -1,5 +1,5 @@
 <template>
-	<div id="splashScreen">
+	<div id="splashScreen" @click="focusComLine">
 		<h1> Welcome to DataFlow </h1>
 
 		<img src="../assets/128x128.png" />
@@ -27,6 +27,10 @@ const colours = [
 	"white"
 ];
 import BlurBubble from './BlurBubble.vue';
+
+function focusComLine() {
+	document.getElementById("commandLine").focus();
+}
 
 </script>
 

@@ -201,11 +201,10 @@ export default class CheckCommand {
 			clear = true;
 		}
 		else if (com[0] == "g") {
-			if (!Number(com.substring(1, com.length))) return;
+			if (!Number(com.substring(1, com.length - 1))) return;
 			let col = sheetManager.selCol;
 
-			let row = Number(com.substring(1, com.length));
-			console.log(row);
+			let row = Number(com.substring(1, com.length - 1));
 			sheetManager.selectCell(row, col);
 		}
 		else if (com == "G") {

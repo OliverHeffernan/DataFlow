@@ -340,6 +340,12 @@ export default class SheetManager {
 		this.copyBuffer = cells;	
 	}
 
+	relativeYank(end) {
+		const startRow = this.selRow;
+		const endRow = this.selRow + end;
+
+		this.yank(this.rows.slice(startRow, endRow));
+	}
 
 	paste(amount, horizontal = false) {
 		for (let i = 0; i < amount; i++) {
@@ -360,7 +366,7 @@ export default class SheetManager {
 	}
 
 	pasteInGapRow(amount, dir) {
-		if (dir == -1) this.keyboardMotion(0, 1);
+		if (dir == -1) this.keyboardMotion(0, -1);
 
 		const startRow = this.selRow + 1;
 		const startCol = this.selCol;
@@ -465,7 +471,8 @@ export default class SheetManager {
 		}
 
 		// checks if new cells are being created, if they are, then it lets the styles be loaded once it is all mounted, otherwise it loads the styles right away.
-		if (r >= this.numOfRows.value && c >= this.numOfCols.value) {
+		if (r == null) this.loadStyles();
+		else if (r >= this.numOfRows.value && c >= this.numOfCols.value) {
 			this.loadStyles();
 		}
 

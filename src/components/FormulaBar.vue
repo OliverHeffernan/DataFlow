@@ -7,12 +7,17 @@
 <script setup>
 import SheetManager from '../classes/SheetManager.js';
 const sheetManager = new SheetManager();
+
+import CheckCommand from "../classes/CheckCommand.js";
+const checkCommand = new CheckCommand();
 function handleEnter() {
 	sheetManager.setFormula();
+	checkCommand.changeMode("n");
 	document.getElementById("commandLine").focus();
 }
 
 function handleEscape() {
+	checkCommand.changeMode("n");
 	document.getElementById("commandLine").focus();
 }
 

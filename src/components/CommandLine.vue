@@ -1,5 +1,8 @@
 <template>
-	<input id="commandLine" placeholder="command line here" spellcheck="false" type="text" @input="checkCommand.checkCommand()" @keyup.enter="checkCommand.handleEnter()" @keyup.esc="checkCommand.handleEsc()" />
+	<div id="statusBar" @click="handleClick()">
+		<div id="modeDisplay">-- NORMAL --</div>
+		<input id="commandLine" placeholder="command line here" spellcheck="false" type="text" @input="checkCommand.checkCommand()" @keyup.enter="checkCommand.handleEnter()" @keyup.esc="checkCommand.handleEsc()" />
+	</div>
 	<div id="webFileUpload">
 		<input id="fileInput" type="file" />
 		<button id="readFileBtn" @click="openFileWeb()">Read File</button>
@@ -46,10 +49,32 @@
 
 		document.getElementById("webFileUpload").style.display = "none";
 	}
+	function handleClick() {
+		document.getElementById("commandLine").focus();
+	}
 </script>
 <style>
 #commandLine {
+	/*position: fixed;*/
+	/*width: 100%;*/
+	/*bottom: 0;*/
+	color: white;
+	background-color: #15202E;
+	border: none;
+	outline: none;
+	z-index: 30;
+	/*box-shadow: rgba(0,0,0,0.5) 0px 0px 5px 0px;*/
+	text-shadow: 0 0 0 white;
+	margin-left: 10px;
+}
+
+#modeDisplay {
+	font-size: 11px;
+}
+
+#statusBar {
 	position: fixed;
+	display: flex;
 	width: 100%;
 	bottom: 0;
 	color: white;

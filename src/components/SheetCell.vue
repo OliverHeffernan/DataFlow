@@ -94,7 +94,8 @@ td {
 }
 
 .visualSelection {
-	background-color: rgba(0, 216, 255, 0.5);
+	/*background-color: rgba(0, 216, 255, 0.5);*/
+	background-color: rgba(255,255,255,0.5);
 }
 
 .sel {
@@ -104,10 +105,25 @@ td {
 	left: 0;
 	right: 0;
 	/*background-color: rgba(15, 255, 255);*/
-	background-color: #4CFDFF;
+	/*background-color: #4CFDFF;*/
+	/*background-color: #A0FEFF;*/
+	background-color: rgba(160,254,255,0.3);
 	z-index: 1;
-	opacity: 0.3;
+	/*opacity: 0.3;*/
 	pointer-events: none;
+}
+
+.t {
+	border-top: lightblue 2px solid;
+}
+.r {
+	border-right: lightblue 2px solid;
+}
+.b {
+	border-bottom: lightblue 2px solid;
+}
+.l {
+	border-left: lightblue 2px solid;
 }
 
 .inactive {

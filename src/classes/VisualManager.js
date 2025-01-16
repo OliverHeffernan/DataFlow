@@ -31,7 +31,12 @@ export default class VisualManager {
 		endCol = Math.max(this.startCol, endCol);
 		for (let y = startRow; y <= endRow; y++) {
 			for (let x = startCol; x <= endCol; x++) {
-				this.getSelectionElement(y, x).className = "sel active";
+				let dir = "";
+				if (y == startRow) dir += " t";
+				if (y == endRow) dir += " b";
+				if (x == startCol) dir += " l";
+				if (x == endCol) dir += " r";
+				this.getSelectionElement(y, x).className = "sel active" + dir;
 			}
 		}
 	}
