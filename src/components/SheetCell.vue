@@ -1,7 +1,16 @@
 <template>
 	<td class="tableCell">
-		<button :id="colNo + ':' + rowNo" class="cell" @dblclick="handleDblClick" @click="handleClick()"></button>
-		<div :id="'visual'+colNo+':'+rowNo" class="sel inactive"></div>
+		<button
+			:id="colNo + ':' + rowNo"
+			class="cell"
+			@dblclick="handleDblClick"
+			@click="handleClick"
+			@contextmenu.prevent="handleRightClick"
+		></button>
+		<div
+			:id="'visual'+colNo+':'+rowNo"
+			class="sel inactive"
+		></div>
 	</td>
 </template>
 
@@ -9,6 +18,12 @@
 	import { ref, onMounted, defineProps } from 'vue';
 	import SheetManager from '../classes/SheetManager.js';
 	const sheetManager = new SheetManager();
+
+	import VisualManager from '../classes/VisualManager.js';
+	const visualManager = new VisualManager();
+
+	import CheckCommand from '../classes/CheckCommand.js';
+	const checkCommand = new CheckCommand();
 
 	const props = defineProps({
 		rowNo: {
@@ -36,7 +51,31 @@
 			sheetManager.loadStyles();
 		}
 	});
-	function handleClick() {
+	function handleMouseover() {
+		const thisRow = props.rowNo;
+		const thisCol = props.colNo;
+		if (visualManager.dragging) {
+			const startRow = sheetManager.selRow;
+			const startCol = sheetManager.selCol;
+			
+
+			// check if new cell
+			// if different, then do a visualselection
+			if (startRow != thisRow || startCol != thisCol) {
+				sheetManager.selectCell(thisRow, thisCol);
+			}
+		}
+	}
+			
+	function handleClick(event) {
+		console.log(checkCommand.mode);
+		if (event.shiftKey && checkCommand.mode == "n") {
+			checkCommand.changeMode("v");
+			visualManager.startVisual(sheetManager.selRow, sheetManager.selCol);
+		}
+		else if (!event.shiftKey && checkCommand.mode == "v") {
+			checkCommand.handleEsc();
+		}
 		sheetManager.selectCell(props.rowNo, props.colNo);
 		document.getElementById("commandLine").focus();
 	}
@@ -44,6 +83,49 @@
 	function handleDblClick() {
 		sheetManager.selectCell(props.rowNo, props.colNo);
 		document.getElementById("formulaBar").focus();
+	}
+
+	const rcMenu = document.getElementById("rightClickMenu");
+	function handleRightClick(event) {
+		const thisRow = props.rowNo;
+		const thisCol = props.colNo;
+		sheetManager.selectCell(thisRow, thisCol);
+		rcMenu.className = "rcActive";
+		modalRightClick();
+
+		const rcHeight = rcMenu.style.height;
+		console.log(rcHeight);
+		
+		rcMenu.style.left = event.clientX + "px";
+		rcMenu.style.top = event.clientY + "px";
+	}
+
+	function modalRightClick() {
+		const mode = checkCommand.mode;
+		const rcn = document.getElementById("rcn");
+		const rcv = document.getElementById("rcv");
+		const rcV = document.getElementById("rcV");
+
+		if (mode == "n") {
+			rcn.style.display = "block";
+		}
+		else {
+			rcn.style.display = "none";
+		}
+
+		if (mode == "v") {
+			rcv.style.display = "block";
+		}
+		else {
+			rcv.style.display = "none";
+		}
+			
+		if (mode == "V") {
+			rcV.style.display = "block";
+		}
+		else {
+			rcV.style.display = "none";
+		}
 	}
 
 </script>
@@ -57,9 +139,11 @@ td {
 	/*background-color: #091119;*/
 	background-color: transparent;
 	position: relative;
-	z-index: 0;
+	z-index: 10;
 }
+
 .cell {
+	z-index: 3;
 	/*background-color: #091119;*/
 	background-color: transparent;
 	border: none;
@@ -125,6 +209,12 @@ td {
 .l {
 	border-left: lightblue 2px solid;
 }
+
+div.t.r.b.l {
+	border: none !important;
+	box-shadow: inset 0 0 0 2px white !important; /* Inner outline effect */
+}
+
 
 .inactive {
 	display: none;

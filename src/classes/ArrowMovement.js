@@ -1,4 +1,4 @@
-import SheetManager from '../classes/SheetManager.js';
+import SheetManager from './SheetManager.js';
 const sheetManager = new SheetManager();
 export default class ArrowMovement {
 	constructor() {

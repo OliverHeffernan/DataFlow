@@ -2,6 +2,7 @@
 	<FirstLaunchScreen v-if="launchManager.displayed" />
 	<FormulaBar />
 	<CommandLine />
+	<RightClickMenu />
 	<table>
 		<thead>
 			<tr>
@@ -29,6 +30,7 @@
 	import FormulaBar from './components/FormulaBar.vue';
 	import CommandLine from './components/CommandLine.vue';
 	import FirstLaunchScreen from './components/FirstLaunchScreen.vue';
+	import RightClickMenu from './components/RightClickMenu.vue';
 
 	import LaunchManager from './classes/LaunchManager.js';
 
@@ -84,26 +86,29 @@ table {
 	background-color: #15202E;
 	/*border: 1px solid #091119;*/
 	border: none;
-	z-index: 2;
+	/*z-index: 2;*/
 }
 
 .colLabels {
 	position: sticky;
 	top: 24px;
+	z-index: 30;
 }
 
 .rowLabels {
 	position: sticky;
 	left: 0;
+	z-index: 30;
 }
 
 .relRow {
 	position: sticky;
 	left: 38px;
+	z-index: 30;
 }
 
 .rowLabelType {
-	z-index: 3;
+	z-index: 40;
 	top: 24px;
 	background-color: #091119;
 }

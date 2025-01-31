@@ -9,8 +9,14 @@ const visualManager = new VisualManager();
 
 import LaunchManager from './LaunchManager.js';
 const launchManager = new LaunchManager();
+
+import Commands from './Commands.js';
+const commands = new Commands();
 export default class CheckCommand {
 	constructor() {
+		if (CheckCommand.instance) {
+			return CheckCommand.instance;
+		}
 		this.mode = "n";
 		this.selStartRow = null;
 		this.selStartCol = null;
@@ -18,24 +24,7 @@ export default class CheckCommand {
 	}
 
 	changeMode(mode) {
-		let modeName;
-		switch (mode) {
-			case 'n':
-				modeName = "NORMAL";
-				break;
-			case 'i':
-				modeName = "INSERT";
-				break;
-			case 'v':
-				modeName = "VISUAL";
-				break;
-			case 'V':
-				modeName = "VISUAL-LINE";
-				break;
-		}
-
-		document.getElementById("modeDisplay").innerText = `-- ${modeName} --`
-		this.mode = mode;
+		commands.changeMode(mode);
 	}
 
 	setPhMessage(mg) {
@@ -44,9 +33,13 @@ export default class CheckCommand {
 
 	// commands that do not need to have pressed enter to executre
 	checkCommand() {
+		// hide the right click menu if typing a command
+		if (document.getElementsByClassName("rcActive").length != 0) {
+			document.getElementsByClassName("rcActive")[0].className = "cellRightClick rcInactive";
+		}
+		
 		this.setPhMessage("");
 		// templog
-		console.log(this.mode);
 		let com = document.getElementById('commandLine').value;
 		if (com == "") {
 			return;
@@ -57,162 +50,89 @@ export default class CheckCommand {
 		// non repeatable commands here
 		// command to edit at the beginning the formula
 		if (com == "i") {
-			formBar.focus();
-			this.changeMode("i");
-			formBar.setSelectionRange(0,0);
-			clear = true;
+			commands.insert();
+
 		}
 		// edit at the end of the formula
 		else if (com == "a") {
-			formBar.focus();
-			this.changeMode("i");
-			const end = formBar.value.length;
-			formBar.setSelectionRange(end, end);
-			clear = true;
+			commands.append();
 		}
 		else if (com == "v") {
-			this.changeMode("v");
-			this.selStartRow = sheetManager.selRow;
-			this.selStartCol = sheetManager.selCol;
-			visualManager.startVisual(sheetManager.selRow, sheetManager.selCol);
-			clear = true;
+			commands.startVisual();
+		}
+		else if (com == "V") {
+			commands.startVisualLine();
 		}
 		// command to edit the formula of the first cell in the selected row
 		else if (com == "I") {
-			sheetManager.selectCell(sheetManager.selRow, 0);
-			this.changeMode("i");
-			formBar.focus();
-			clear = true;
+			commands.insertAtFirstColumn();
 		}
 		// command to select the first cell in the selected row
 		else if (com == "^" || com == "gh") {
-			sheetManager.selectCell(sheetManager.selRow, 0);
-			clear = true;
+			commands.selectFirstColumn();
 		}
 		// command to select last cell in a row
 		else if (com == "$" || com == "gl") {
-			sheetManager.selectCell(sheetManager.selRow, sheetManager.numOfCols.value - 1);
-			clear = true;
+			commands.selectLastColumn();
 		}
 		// command to replace the formula
 		else if (com == "c" && this.mode == "n") {
-			formBar.value = "";
-			formBar.focus();
-			sheetManager.setFormula(false);
-			clear = true;
+			commands.replaceFormula();
 		}
 		else if ((com == "c" || com == "d") && this.mode == "v") {
-			console.log("clear");
-			const startRow = visualManager.startRow;
-			const startCol = visualManager.startCol;
-			const endRow = sheetManager.selRow;
-			const endCol = sheetManager.selCol;
-
-			const sr = Math.min(startRow, endRow);
-			const sc = Math.min(startCol, endCol);
-			const er = Math.max(startRow, endRow);
-			const ec = Math.max(startCol, startCol);
-
-			for (let i = sr; i < er + 1; i++) {
-				for (let p = sc; p < ec + 1; p++) {
-					sheetManager.rows[i][p] = "";
-				}
-			}
-
-			sheetManager.loadAllCells();
-
+			commands.clearSelection();
 			this.handleEsc();
-			clear = true;
+		}
+		else if (com == "d" && this.mode == "V") {
+			commands.deleteSelectedRows();
+			this.handleEsc();
 		}
 		// command to change the selected cell
 		else if (com == ";") {
-			cellPicker.focus();
-			cellPicker.value = "";
-			clear = true;
+			commands.focusCellPicker();
 		}
 		else if (com == "zz") {
-			sheetManager.scrollToCenterSelCell();
-			clear = true;
+			commands.viewportCenterCell();
 		}
-		// insert row below
 		else if (com == "oj") {
-			sheetManager.insertRowBelow();
-			clear = true;
+			commands.insertRowBelow();
 		}
-		// insert row above
 		else if (com == "ok") {
-			sheetManager.insertRowAbove();
-			clear = true;
+			commands.insertRowAbove();
 		}
 		else if (com == "oh") {
-			sheetManager.insertColLeft();
-			clear = true;
+			commands.insertColLeft();
 		}
 		else if (com == "ol") {
-			sheetManager.insertColRight();
-			clear = true;
+			commands.insertColRight();
 		}
-		else if (com == "yf" && this.mode == "v") {
-			// templog
-			console.log("visual selection");
-			let col = sheetManager.selCol;
-			let row = sheetManager.selRow;
-			let text = sheetManager.getFormula(row, col);
-			navigator.clipboard.writeText(text);
-
-			visualManager.yankSelection(sheetManager);
-			// templog
-			console.log(sheetManager.copyBuffer);
-
-			clear = true;
-			this.handleEsc();
+		else if (com == "yf" && (this.mode == "v" || this.mode == "V")) {
+			commands.yankSelectionFormulae();
+		}
+		else if (com == "ys" && (this.mode == "v" || this.mode == "V")) {
+			commands.yankSelectionValues();
 		}
 		// yank formula
 		else if (com == "yf") {
-			let col = sheetManager.selCol;
-			let row = sheetManager.selRow;
-			let text = sheetManager.getFormula(row, col);
-			navigator.clipboard.writeText(text);
-			sheetManager.yank([[text]]);
-			clear = true;
+			commands.yankFormula();
 		}
 		// yank value
 		else if (com == "ys") {
-			let col = sheetManager.selCol;
-			let row = sheetManager.selRow;
-			let text = sheetManager.getValue(row, col);
-			navigator.clipboard.writeText(text);
-			sheetManager.yank([[text]]);
-			clear = true;
+			commands.yankValue();
 		}
 		// yank a row
 		else if (com == "yy") {
-			const row = sheetManager.selRow;
-			let buffer = sheetManager.rows[row];
-			let endIndex = buffer.lastIndexOf("");
-			buffer = endIndex === -1 ? buffer : buffer.slice(0, endIndex + 1);
-
-			sheetManager.yank([buffer]);
-			clear = true;
+			commands.yankRowFormulae();
 		}
 		else if (com == "gg") {
-			let col = sheetManager.selCol;
-			sheetManager.selectCell(0, col);
-			clear = true;
+			commands.selectRowZero();
 		}
-		else if (com[0] == "g") {
-			if (!Number(com.substring(1, com.length))) return;
-			let col = sheetManager.selCol;
-
+		else if (com[0] == "g" && Number(com.substring(1, com.length))) {
 			let row = Number(com.substring(1, com.length));
-			console.log(row);
-			sheetManager.selectCell(row, col);
+			commands.selectRow(row);
 		}
 		else if (com == "G") {
-			let col = sheetManager.selCol;
-			let row = sheetManager.numOfRows.value - 1;
-			sheetManager.selectCell(row, col);
-			clear = true;
+			commands.selectLastRow();
 		}
 
 		// repeated commands here
@@ -222,52 +142,52 @@ export default class CheckCommand {
 			
 		//if (parseInt(com.substring(0, com.length - 2)) != "NaN") {
 		// movements
-		if (command == "h") {
-			sheetManager.keyboardMotion(-amount, 0);
-			clear = true;
-		}
-		else if (command == "j") {
-			sheetManager.keyboardMotion(0, amount);
-			clear = true;
-		}
-		else if (command == "k") {
-			sheetManager.keyboardMotion(0, -amount);
-			clear = true;
-		}
-		else if (command == "l") {
-			sheetManager.keyboardMotion(amount, 0);
-			clear = true;
-		}
-		else if (command == "p") {
-			sheetManager.paste(amount, false);
-			clear = true;
-		}
-		else if (command == "Pj") {
-			sheetManager.pasteInGapRow(amount, 1);
-			clear = true;
-		}
-		else if (command == "Pk") {
-			sheetManager.pasteInGapRow(amount, -1);
-			clear = true;
-		}
-		else if (command == "Pl") {
-			sheetManager.pasteInGapCol(amount, 1);
-			clear = true;
-		}
-		else if (command == "Ph") {
-			sheetManager.pasteInGapCol(amount, -1);
-			clear = true;
-		}
-		// command to delete a row
-		else if (command == "dd") {
-			sheetManager.relativeYank(amount);
-			sheetManager.deleteSelRow(amount);
-			clear = true;
-		}
-		// command to delete a column
-		else if (command == "dc") {
-			sheetManager.deleteSelCol(amount);
-			clear = true;
+		switch (command) {
+			case "h":
+				sheetManager.keyboardMotion(-amount, 0);
+				clear = true;
+				break;
+			case "j":
+				sheetManager.keyboardMotion(0, amount);
+				clear = true;
+				break;
+			case "k":
+				sheetManager.keyboardMotion(0, -amount);
+				clear = true;
+				break;
+			case "l":
+				sheetManager.keyboardMotion(amount, 0);
+				clear = true;
+				break;
+			case "p":
+				sheetManager.paste(amount, false);
+				clear = true;
+				break;
+			case "Pj":
+				sheetManager.pasteInGapRow(amount, 1);
+				clear = true;
+				break;
+			case "Pk":
+				sheetManager.pasteInGapRow(amount, -1);
+				clear = true;
+				break;
+			case "Pl":
+				sheetManager.pasteInGapCol(amount, 1);
+				clear = true;
+				break;
+			case "Ph":
+				sheetManager.pasteInGapCol(amount, -1);
+				clear = true;
+				break;
+			case "dd":
+				sheetManager.relativeYank(amount);
+				sheetManager.deleteSelRow(amount);
+				clear = true;
+				break;
+			case "dc":
+				sheetManager.deleteSelCol(amount);
+				clear = true;
+				break;
 		}
 		if (clear) {
 			document.getElementById("commandLine").value = "";
@@ -313,9 +233,7 @@ export default class CheckCommand {
 	}
 
 	handleEsc() {
-		visualManager.exitVisual();
-		this.changeMode("n");
-		document.getElementById("commandLine").value = "";
+		commands.handleEsc();
 	}
 
 	parseCommand(com) {

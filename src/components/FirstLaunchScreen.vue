@@ -42,7 +42,7 @@ function focusComLine() {
 	right: 0;
 	left: 0;
 	background-color: #0B1118;
-	z-index: 20;
+	z-index: 50;
 	color: white;
 	text-align: center;
 }

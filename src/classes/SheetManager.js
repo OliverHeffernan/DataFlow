@@ -224,6 +224,9 @@ export default class SheetManager {
 
 	// function to select a specific cell
 	selectCell(row, col) {
+		if (document.getElementsByClassName("rcActive").length != 0) {
+			document.getElementsByClassName("rcActive")[0].className = "cellRightClick rcInactive";
+		}
 		// tries to select the cell, if it fails, it logs the error
 		try {
 			this.selRow = row;
@@ -231,6 +234,9 @@ export default class SheetManager {
 			// display the formula of the new selected cell in the formula bar
 			let bar = document.getElementById("formulaBar");
 			bar.value = this.getFormula(row, col);
+
+			let newBar = document.getElementById("formText");
+			newBar.innerHTML = this.getFormula(row, col);
 
 			// if it is defined, remove the focussed class from the previously selected cell
 			if (this.getSelectedCell() != undefined) {
@@ -301,7 +307,7 @@ export default class SheetManager {
 			this.prevRow = this.selRow;
 			this.prevCol = this.selCol;
 
-			visualManager.setVisual(this.selRow, this.selCol);
+			visualManager.setVisual(this.selRow, this.selCol, this.numOfCols.value);
 		}
 		catch(e) {
 			console.log(e.message);
@@ -338,6 +344,22 @@ export default class SheetManager {
 	// called when the user yanks something
 	yank(cells) {
 		this.copyBuffer = cells;	
+	}
+
+	yankFormula() {
+		let col = this.selCol;
+		let row = this.selRow;
+		let text = this.getFormula(row, col);
+		navigator.clipboard.writeText(text);
+		this.yank([[text]]);
+	}
+
+	yankValue() {
+		let col = this.selCol;
+		let row = this.selRow;
+		let text = this.getValue(row, col);
+		navigator.clipboard.writeText(text);
+		this.yank([[text]]);
 	}
 
 	relativeYank(end) {

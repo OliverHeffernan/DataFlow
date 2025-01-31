@@ -58,18 +58,22 @@
 	/*position: fixed;*/
 	/*width: 100%;*/
 	/*bottom: 0;*/
+	width: calc(100% - 70px);
 	color: white;
 	background-color: #15202E;
 	border: none;
 	outline: none;
-	z-index: 30;
+	z-index: 60;
 	/*box-shadow: rgba(0,0,0,0.5) 0px 0px 5px 0px;*/
 	text-shadow: 0 0 0 white;
 	margin-left: 10px;
+
+	/*width: calc(100%-100px);*/
 }
 
 #modeDisplay {
 	font-size: 11px;
+	width: 70px;
 }
 
 #statusBar {
@@ -81,7 +85,7 @@
 	background-color: #15202E;
 	border: none;
 	outline: none;
-	z-index: 30;
+	z-index: 50;
 	box-shadow: rgba(0,0,0,0.5) 0px 0px 5px 0px;
 	text-shadow: 0 0 0 white;
 }

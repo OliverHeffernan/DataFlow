@@ -1,6 +1,10 @@
 <template>
 	<div id="topBar">
 		<input id="cellPicker" @input="selectCell" @keyup.esc="handleEscape" @keyup.enter="focusFormulaBar" type="text" placeholder="e.g. A0" />
+		<div id="newFormBar">
+			<div id="formCursor"></div>
+			<div id="formText"></div>
+		</div>
 		<input id="formulaBar" type="text" placeholder="edit cell formulae" @keyup.enter="handleEnter" @keyup.esc="handleEscape" />
 	</div>
 </template>
@@ -67,6 +71,7 @@ function focusFormulaBar() {
 }
 
 #formulaBar {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 	background-color: #15202E;
 	border: none;
 	outline: none;
@@ -77,5 +82,9 @@ function focusFormulaBar() {
 	font-size: 15px;
 	margin: 0;
 	white-space: nowrap;
+}
+
+#newFormBar {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 </style>

@@ -223,7 +223,6 @@ export default class Formulas {
 						//values.push(value);
 					} catch {
 						const nonNumericValue = sheetManager.getValue(i, j);
-						console.log(nonNumbericValue);
 						//values.push(`'${nonNumericValue}'`);
 					}
 					values.push(sheetManager.getValue(i, j));

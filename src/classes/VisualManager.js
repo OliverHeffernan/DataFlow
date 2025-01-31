@@ -1,3 +1,5 @@
+//import CheckCommand from './CheckCommand.js';
+//const checkCommand = new CheckCommand();
 export default class VisualManager {
 	constructor() {
 		if (VisualManager.instance) {
@@ -5,13 +7,17 @@ export default class VisualManager {
 		}
 		this.startRow = null;
 		this.startCol = null;
+		this.line = false;
+		this.dragging = false;
 		VisualManager.instance = this;
 	}
 
-	startVisual(row, col) {
+	startVisual(row, col, line = false, numOfCols) {
+		//checkCommand.changeMode("v");
 		this.startRow = row;
 		this.startCol = col;
-		this.setVisual(this.startRow, this.startCol);
+		this.line = line;
+		this.setVisual(this.startRow, this.startCol, numOfCols);
 	}
 
 	getSelectionElement(row, col) {
@@ -19,7 +25,7 @@ export default class VisualManager {
 		return element;
 	}
 
-	setVisual(endRow, endCol) {
+	setVisual(endRow, endCol, numOfCols) {
 		if (this.startRow == null || this.startCol == null) return;
 
 		this.clearVisual();
@@ -28,7 +34,7 @@ export default class VisualManager {
 		endRow = Math.max(this.startRow, endRow);
 
 		let startCol = Math.min(this.startCol, endCol);
-		endCol = Math.max(this.startCol, endCol);
+		endCol = this.line ? numOfCols - 1 : Math.max(this.startCol, endCol);
 		for (let y = startRow; y <= endRow; y++) {
 			for (let x = startCol; x <= endCol; x++) {
 				let dir = "";
@@ -57,9 +63,9 @@ export default class VisualManager {
 		this.startCol = null;
 	}
 
-	yankSelection(sheetManager) {
+	yankSelection(sheetManager, formula = true) {
 		let endRow = sheetManager.selRow;
-		let endCol = sheetManager.selCol;
+		let endCol = this.line ? sheetManager.numOfCols.value : sheetManager.selCol;
 		let startRow = Math.min(this.startRow, endRow);
 		endRow = Math.max(this.startRow, endRow);
 
@@ -69,13 +75,13 @@ export default class VisualManager {
 		for (let y = startRow; y <= endRow; y++) {
 			let line = [];
 			for (let x = startCol; x <= endCol; x++) {
-				line.push(sheetManager.getFormula(y, x));
+				if (formula) line.push(sheetManager.getFormula(y, x));
+				else line.push(sheetManager.getValue(y, x));
 			}
 
 			buffer.push(line);
 		}
 
-		console.log(buffer);
 
 		sheetManager.copyBuffer = buffer;
 	}

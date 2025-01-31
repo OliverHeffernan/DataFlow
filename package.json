@@ -11,8 +11,10 @@
 		"tauri": "tauri"
 	},
 	"dependencies": {
+		"@tauri-apps/plugin-deep-link": "^2.2.0",
 		"@tauri-apps/plugin-dialog": "^2.2.0",
 		"@tauri-apps/plugin-fs": "^2.2.0",
+		"@tauri-apps/plugin-shell": "^2.2.0",
 		"mathjs": "^14.0.1",
 		"vue": "^3.5.13",
 		"vue-router": "^4.5.0"
