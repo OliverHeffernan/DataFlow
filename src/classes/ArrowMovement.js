@@ -1,5 +1,4 @@
 import SheetManager from './SheetManager.js';
-const sheetManager = new SheetManager();
 export default class ArrowMovement {
 	constructor() {
 		ArrowMovement.instance = this;
@@ -7,11 +6,12 @@ export default class ArrowMovement {
 	}
 
 	movement(key) {
+		const sheetManager = new SheetManager();
 		key = key || window.event;
 		const isFocusedInput = document.activeElement.tagName === 'INPUT';
 		const typingCommand = document.activeElement.value.length > 0;
 		// preventing it from scrolling with key presses, also preventing it from moving when the user tries to use the arrow keys to move to a different part of a command
-		if(["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(key.code) && !typingCommand) {
+		if([/*"Space",*/"ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(key.code) && !typingCommand) {
 			key.preventDefault();
 			switch (key.code) {
 				case "ArrowLeft":

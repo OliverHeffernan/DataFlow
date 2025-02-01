@@ -1,14 +1,12 @@
 <template>
 	<div id="topBar">
 		<input id="cellPicker" @input="selectCell" @keyup.esc="handleEscape" @keyup.enter="focusFormulaBar" type="text" placeholder="e.g. A0" />
-		<div id="newFormBar">
-			<div id="formCursor"></div>
-			<div id="formText"></div>
-		</div>
-		<input id="formulaBar" type="text" placeholder="edit cell formulae" @keyup.enter="handleEnter" @keyup.esc="handleEscape" />
+		<NewFormBar />
+		<!--<input id="formulaBar" type="text" placeholder="edit cell formulae" @keyup.enter="handleEnter" @keyup.esc="handleEscape" />-->
 	</div>
 </template>
 <script setup>
+import NewFormBar from "./NewFormBar.vue";
 import SheetManager from '../classes/SheetManager.js';
 const sheetManager = new SheetManager();
 
@@ -84,7 +82,4 @@ function focusFormulaBar() {
 	white-space: nowrap;
 }
 
-#newFormBar {
-	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
 </style>

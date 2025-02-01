@@ -4,6 +4,8 @@ const sheetManager = new SheetManager();
 import VisualManager from "./VisualManager.js";
 const visualManager = new VisualManager();
 
+import MacroManager from "./MacroManager.js";
+
 export default class Commands {
 	constructor() {
 		if (Commands.instance) {
@@ -12,6 +14,7 @@ export default class Commands {
 		this.mode = "n";
 		this.selStartRow = null;
 		this.selStartCol = null;
+		this.tempForm = "";
 		Commands.instance = this;
 	}
 	changeMode(mode) {
@@ -31,6 +34,8 @@ export default class Commands {
 				break;
 		}
 
+		document.getElementById("formCursor").className = mode;
+
 		document.getElementById("modeDisplay").innerText = `-- ${modeName} --`
 		this.mode = mode;
 	}
@@ -44,17 +49,94 @@ export default class Commands {
 	}
 
 	handleEsc() {
+		if (this.mode == "i") {
+			this.setFormula();
+		}
 		visualManager.exitVisual();
 		this.changeMode("n");
+		const macroManager = new MacroManager();
+		macroManager.addToRecording("<ESC>", "key");
 		document.getElementById("commandLine").value = "";
 	}
+
 	// enter insert mode
 	insert() {
-		const formBar = this.byId("formulaBar");
-		formBar.focus();
 		this.changeMode("i");
-		formBar.setSelectionRange(0,0);
+		const row = sheetManager.selRow;
+		const col = sheetManager.selCol;
+		this.tempForm = sheetManager.getFormula(row, col);
 		this.clearComLine();
+	}
+
+	backspace() {
+		const macroManager = new MacroManager();
+		macroManager.addToRecording("<B-SPACE>", "key");
+		const cellCol = sheetManager.cellCurPos;
+		if (cellCol === 0) return;
+
+		let newForm = this.tempForm
+		newForm = newForm.slice(0, cellCol - 1) + newForm.slice(cellCol);
+
+		this.tempForm = newForm;
+
+		sheetManager.updateEditFormula(newForm);
+		sheetManager.setCellCurPos(cellCol - 1, this.tempForm);
+	}
+
+	deleteKey() {
+		const macroManager = new MacroManager();
+		macroManager.addToRecording("<DEL>", "key");
+		const cellCol = sheetManager.cellCurPos;
+		if (cellCol === 0) return;
+
+		let newForm = this.tempForm
+		newForm = newForm.slice(0, cellCol) + newForm.slice(cellCol + 1);
+
+		this.tempForm = newForm;
+
+		sheetManager.updateEditFormula(newForm);
+	}
+		
+	
+	insertText(com) {
+		const row = sheetManager.selRow;
+		const col = sheetManager.selCol;
+		const cellCol = sheetManager.cellCurPos;
+		//let cell = sheetManager.getFormula(row, col);
+
+		let cell = this.tempForm;
+
+		const firstPart = cell.slice(0, cellCol);
+		const endPart = cell.substring(cellCol);
+		cell = firstPart + com + endPart;
+
+
+		this.tempForm = cell;
+
+		sheetManager.updateEditFormula(cell);
+		sheetManager.setCellCurPos(cellCol + com.length, this.tempForm);
+	}
+
+	startOfCell() {
+		const row = sheetManager.selRow;
+		const col = sheetManager.selCol;
+		const form = sheetManager.getFormula(row, col);
+		sheetManager.setCellCurPos(0, form);
+		this.clearComLine();
+	}
+
+	endOfCell() {
+		const row = sheetManager.selRow;
+		const col = sheetManager.selCol;
+		const form = sheetManager.getFormula(row, col);
+		console.log(form.length);
+
+		sheetManager.setCellCurPos(form.length, this.tempForm);
+		this.clearComLine();
+	}
+
+	setFormula() {
+		sheetManager.setSpecFormula(this.tempForm);
 	}
 
 	insertAtFirstColumn() {
@@ -95,14 +177,23 @@ export default class Commands {
 	}
 
 	selectLastColumn() {
-		sheetManager.selectCell(sheetManager.selRow, sheetManager.numOfCols.value - 1);
+		//sheetManager.selectCell(sheetManager.selRow, sheetManager.numOfCols.value - 1);
+		//
+		const row = sheetManager.selRow;
+		let col = sheetManager.rows[row].findLastIndex((element) => element != "");
+		console.log("col", col);
+		col = Math.max(0, col);
+		col = Math.min(col, sheetManager.rows[row].length - 1);
+		sheetManager.selectCell(row, col);
 		this.clearComLine();
 	}
 
 	replaceFormula() {
 		const formBar = this.byId("formulaBar");
-		formBar.value = "";
-		formBar.focus();
+		//formBar.value = "";
+		this.tempForm = "";
+		//formBar.focus();
+		this.changeMode("i");
 		sheetManager.setFormula(false);
 		this.clearComLine();
 	}

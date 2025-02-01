@@ -158,8 +158,9 @@ td {
 	font-size: 15px;
 	margin: 0;
 	padding: 2px;
-	white-space: nowrap;
+	white-space: pre;
 	display: block;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 .cell:hover {

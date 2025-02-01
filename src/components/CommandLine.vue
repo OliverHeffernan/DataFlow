@@ -1,7 +1,17 @@
 <template>
 	<div id="statusBar" @click="handleClick()">
 		<div id="modeDisplay">-- NORMAL --</div>
-		<input id="commandLine" placeholder="command line here" spellcheck="false" type="text" @input="checkCommand.checkCommand()" @keyup.enter="checkCommand.handleEnter()" @keyup.esc="checkCommand.handleEsc()" />
+		<input
+			id="commandLine"
+			placeholder="command line here"
+			spellcheck="false"
+			type="text"
+			@input="checkCommand.checkCommandDirect()"
+			@keyup.enter="checkCommand.handleEnter()"
+			@keyup.esc="checkCommand.handleEsc()"
+			@keydown="deleteOrBackspace"
+		/>
+		<!--@keyup.delete="checkCommand.handleBackspace()"-->
 	</div>
 	<div id="webFileUpload">
 		<input id="fileInput" type="file" />
@@ -51,6 +61,14 @@
 	}
 	function handleClick() {
 		document.getElementById("commandLine").focus();
+	}
+
+	function deleteOrBackspace(event) {
+		if (event.key === "Backspace") {
+			checkCommand.handleBackspace();
+		} else if (event.key === "Delete") {
+			checkCommand.handleDelete();
+		}
 	}
 </script>
 <style>

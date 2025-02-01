@@ -25,6 +25,7 @@ export default class SheetManager {
 		this.numOfCols = ref(50);
 		this.selRow = 0;
 		this.selCol = 0;
+		this.cellCurPos = 0;
 		this.prevRow = 0;
 		this.prevCol = 0;
 		this.copyBuffer = [[]];
@@ -74,14 +75,21 @@ export default class SheetManager {
 	}
 
 	loadStyles() {
-		const cols = this.numOfCols.value;
-		const rows = this.numOfRows.value;
+		//const cols = this.numOfCols.value;
+		//const rows = this.numOfRows.value;
+		//
+		const cols = this.rows[0].length;
+		const rows = this.rows.length;
 
 		for (let x = 0; x < cols; x++) {
 			for (let y = 0; y < rows; y++) {
-				const styles = this.styles[y][x];
-				const com = `:hi bg ${styles.bg} fg ${styles.fg}`;
-				this.setStyles(com, y, x);
+				try {
+					const styles = this.styles[y][x];
+					const com = `:hi bg ${styles.bg} fg ${styles.fg}`;
+					this.setStyles(com, y, x);
+				} catch(e) {
+					console.log(e.message);
+				}
 			}
 		}
 	}
@@ -98,12 +106,8 @@ export default class SheetManager {
 			const validColor = style.color !== '';
 			if (split[i - 1] == "bg") {
 				if (validColor) {
-					try {
-						this.getCell(row, col).style.backgroundColor = split[i];
-						this.styles[row][col].bg = split[i];
-					}
-					catch(e) {
-					}
+					this.getCell(row, col).style.backgroundColor = split[i];
+					this.styles[row][col].bg = split[i];
 				}
 				else {
 					this.setPlaceholder(color + "is not a valid CSS color");
@@ -111,12 +115,7 @@ export default class SheetManager {
 			}
 			else if (split[i - 1] == "fg") {
 				if (validColor) {
-					try {
-						this.getCell(row, col).style.color = split[i];
-					}
-					catch(e) {
-						console.log(e.message);
-					}
+					this.getCell(row, col).style.color = split[i];
 					this.styles[row][col].fg = split[i];
 				}
 				else {
@@ -232,11 +231,11 @@ export default class SheetManager {
 			this.selRow = row;
 			this.selCol = col;
 			// display the formula of the new selected cell in the formula bar
-			let bar = document.getElementById("formulaBar");
-			bar.value = this.getFormula(row, col);
+			//let bar = document.getElementById("formulaBar");
+			//bar.value = this.getFormula(row, col);
 
 			let newBar = document.getElementById("formText");
-			newBar.innerHTML = this.getFormula(row, col);
+			newBar.innerText = this.getFormula(row, col);
 
 			// if it is defined, remove the focussed class from the previously selected cell
 			if (this.getSelectedCell() != undefined) {
@@ -308,6 +307,8 @@ export default class SheetManager {
 			this.prevCol = this.selCol;
 
 			visualManager.setVisual(this.selRow, this.selCol, this.numOfCols.value);
+
+			this.setCellCurPos(0, this.getFormula(this.selRow, this.selCol));
 		}
 		catch(e) {
 			console.log(e.message);
@@ -341,9 +342,19 @@ export default class SheetManager {
 		}
 	}
 
+	setSpecFormula(value) {
+		this.rows[this.selRow][this.selCol] = value;
+		this.getCell(this.selRow, this.selCol).innerText = this.getValue(this.selRow, this.selCol);
+		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
+	}
+
+	updateEditFormula(form) {
+		document.getElementById("formText").innerText = form;
+	}
+
 	// called when the user yanks something
 	yank(cells) {
-		this.copyBuffer = cells;	
+		this.copyBuffer = cells;
 	}
 
 	yankFormula() {
@@ -425,6 +436,20 @@ export default class SheetManager {
 		return document.getElementsByClassName("focussed")[0];
 	}
 
+	cellMotion(amount, tempForm = "") {
+		this.cellCurPos += amount;
+		this.cellCurPos = math.max(0, this.cellCurPos);
+		const cell = this.getFormula(this.selRow, this.selCol);
+		this.cellCurPos = math.min(this.cellCurPos, tempForm.length);
+
+		document.getElementById("formCursor").style.marginLeft = this.cellCurPos.toString() + "ch";
+	}
+
+	setCellCurPos(value, tempForm = "") {
+		this.cellCurPos = value;
+		this.cellMotion(0, tempForm);
+	}
+
 	// navigation functions
 	keyboardMotion(x, y) {
 		let newCol = this.selCol + x;
@@ -481,8 +506,10 @@ export default class SheetManager {
 	}
 
 	loadAllCells(r, c) {
-		for (let i = 0; i < this.numOfRows.value; i++) {
-			for (let j = 0; j < this.numOfCols.value; j++) {
+		const rows = this.rows.length;
+		const cols = this.rows[0].length;
+		for (let i = 0; i < rows; i++) {
+			for (let j = 0; j < cols; j++) {
 				try {
 					this.getCell(i, j).innerText = this.getValue(i, j);
 				}
@@ -522,7 +549,6 @@ export default class SheetManager {
 		this.styles.splice(index, 1);
 		this.numOfRows.value--;
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
-		this.loadStyles();
 		this.selectCell(this.selRow, this.selCol);
 	}
 
@@ -547,15 +573,16 @@ export default class SheetManager {
 
 		this.numOfRows.value += amount;
 		this.selectCell(this.selRow, this.selCol);
+		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 	}
 
 	insertColumnAtIndex(index) {
 		for (let i = 0; i < this.numOfRows.value; i++) {
-			this.rows[i].splice(index, 0, "");
-			this.styles[i].splice(index, 0, {
-				fg: this.defaultStyling.fg,
-				bg: this.defaultStyling.bg
-			});
+				this.rows[i].splice(index, 0, "");
+				this.styles[i].splice(index, 0, {
+					fg: this.defaultStyling.fg,
+					bg: this.defaultStyling.bg
+				});
 		}
 		this.numOfCols.value++;
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
@@ -583,12 +610,14 @@ export default class SheetManager {
 	insertColRight(amount) {
 		for (let i = 0; i < amount; i++) {
 			this.insertColumnAtIndex(this.selCol + 1);
-			this.keyboardMotion(1, 0);
 		}
+		this.keyboardMotion(amount, 0);
 	}
 
-	insertColLeft() {
-		this.insertColumnAtIndex(this.selCol);
+	insertColLeft(amount) {
+		for (let i = 0; i < amount; i++) {
+			this.insertColumnAtIndex(this.selCol);
+		}
 		//this.moveLeft(1);
 	}
 }

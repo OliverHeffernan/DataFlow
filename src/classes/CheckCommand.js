@@ -1,4 +1,4 @@
-import SheetManager from '../classes/SheetManager.js';
+import SheetManager from "./SheetManager.js";
 const sheetManager = new SheetManager();
 import ArrowMovement from './ArrowMovement.js';
 const arrowMovement = new ArrowMovement();
@@ -6,6 +6,9 @@ import FileManager from '../classes/FileManager.js';
 const fileManager = new FileManager();
 import VisualManager from './VisualManager.js';
 const visualManager = new VisualManager();
+
+import MacroManager from "./MacroManager.js";
+const macroManager  = new MacroManager();
 
 import LaunchManager from './LaunchManager.js';
 const launchManager = new LaunchManager();
@@ -20,38 +23,65 @@ export default class CheckCommand {
 		this.mode = "n";
 		this.selStartRow = null;
 		this.selStartCol = null;
+		this.cDown = false;
 		CheckCommand.instance = this;
 	}
 
 	changeMode(mode) {
 		commands.changeMode(mode);
+		this.mode = mode;
 	}
 
 	setPhMessage(mg) {
 		document.getElementById("commandLine").placeholder = mg;
 	}
 
+	checkCommandDirect() {
+		let com = document.getElementById('commandLine').value;
+		if (com == "") {
+			return;
+		}
+		this.checkCommand(com)
+	}
+
+	handleBackspace() {
+		console.log("backspace");
+		const com = document.getElementById('commandLine').value;
+		if (com == "" && this.mode == "i") {
+			commands.backspace();
+		}
+	}
+
+	handleDelete() {
+		console.log("delete");
+		const com = document.getElementById('commandLine').value;
+		if (com == "" && this.mode == "i") {
+			commands.deleteKey();
+		}
+	}
+
 	// commands that do not need to have pressed enter to executre
-	checkCommand() {
+	checkCommand(com) {
+		if (commands.mode == "i") {
+			commands.insertText(com);
+			macroManager.addToRecording(com, "i");
+			this.clearCom(com, false);
+			return;
+		}
 		// hide the right click menu if typing a command
 		if (document.getElementsByClassName("rcActive").length != 0) {
 			document.getElementsByClassName("rcActive")[0].className = "cellRightClick rcInactive";
 		}
 		
 		this.setPhMessage("");
-		// templog
-		let com = document.getElementById('commandLine').value;
-		if (com == "") {
-			return;
-		}
 		let formBar = document.getElementById('formulaBar');
 		let cellPicker = document.getElementById("cellPicker");
 		let clear = false;
 		// non repeatable commands here
-		// command to edit at the beginning the formula
 		if (com == "i") {
+			this.changeMode("i");
 			commands.insert();
-
+			this.clearCom(com);
 		}
 		// edit at the end of the formula
 		else if (com == "a") {
@@ -63,20 +93,46 @@ export default class CheckCommand {
 		else if (com == "V") {
 			commands.startVisualLine();
 		}
+		else if (com == "q" && macroManager.recordingTo !== null) {
+			macroManager.endRecording();
+			this.clearCom();
+		}
+		else if (com.length == 2 && com[0] == "q") {
+			macroManager.startRecording(com[1]);
+			this.clearCom(com, false);
+		}
+		/*
+		else if (com.length == 2 && com[0] == "@") {
+			macroManager.playMacro(com[1]);
+		}
+		*/
 		// command to edit the formula of the first cell in the selected row
 		else if (com == "I") {
-			commands.insertAtFirstColumn();
+			commands.startOfCell();
+			this.changeMode("i");
+			commands.insert();
+		}
+		else if (com == "A") {
+			commands.endOfCell();
+			this.changeMode("i");
+			commands.insert();
 		}
 		// command to select the first cell in the selected row
-		else if (com == "^" || com == "gh") {
+		else if (com == "gh") {
 			commands.selectFirstColumn();
 		}
 		// command to select last cell in a row
-		else if (com == "$" || com == "gl") {
+		else if (com == "gl") {
 			commands.selectLastColumn();
 		}
+		else if (com == "^") {
+			commands.startOfCell();
+		}
+		else if (com == "$") {
+			commands.endOfCell();
+		}
 		// command to replace the formula
-		else if (com == "c" && this.mode == "n") {
+		else if (com == "C" && this.mode == "n") {
 			commands.replaceFormula();
 		}
 		else if ((com == "c" || com == "d") && this.mode == "v") {
@@ -88,23 +144,8 @@ export default class CheckCommand {
 			this.handleEsc();
 		}
 		// command to change the selected cell
-		else if (com == ";") {
-			commands.focusCellPicker();
-		}
 		else if (com == "zz") {
 			commands.viewportCenterCell();
-		}
-		else if (com == "oj") {
-			commands.insertRowBelow();
-		}
-		else if (com == "ok") {
-			commands.insertRowAbove();
-		}
-		else if (com == "oh") {
-			commands.insertColLeft();
-		}
-		else if (com == "ol") {
-			commands.insertColRight();
 		}
 		else if (com == "yf" && (this.mode == "v" || this.mode == "V")) {
 			commands.yankSelectionFormulae();
@@ -139,54 +180,87 @@ export default class CheckCommand {
 		// getting the amount
 		let amount = this.parseCommand(com).amount;
 		let command = this.parseCommand(com).command;
-			
+
+		let macro = "";
+
+		if (command[0] == "@" && command.length == 2) {
+			console.log("macro");
+			macro = command[1];
+			command = "@";
+			macroManager.playMacro(macro, amount);
+			return;
+		}
 		//if (parseInt(com.substring(0, com.length - 2)) != "NaN") {
 		// movements
 		switch (command) {
 			case "h":
 				sheetManager.keyboardMotion(-amount, 0);
-				clear = true;
+				this.clearCom(com);
 				break;
 			case "j":
 				sheetManager.keyboardMotion(0, amount);
-				clear = true;
+				this.clearCom(com);
 				break;
 			case "k":
 				sheetManager.keyboardMotion(0, -amount);
-				clear = true;
+				this.clearCom(com);
 				break;
 			case "l":
 				sheetManager.keyboardMotion(amount, 0);
-				clear = true;
+				this.clearCom(com);
+				break;
+			case "oh":
+				sheetManager.insertColLeft(amount);
+				this.clearCom(com);
+				break;
+			case "oj":
+				sheetManager.insertRowBelow(amount);
+				this.clearCom(com);
+				break;
+			case "ok":
+				sheetManager.insertRowAbove(amount);
+				this.clearCom(com);
+				break;
+			case "ol":
+				sheetManager.insertColRight(amount);
+				this.clearCom(com);
+				break;
+			case "[":
+				sheetManager.cellMotion(-amount, commands.tempForm);
+				this.clearCom(com);
+				break;
+			case "]":
+				sheetManager.cellMotion(amount, commands.tempForm);
+				this.clearCom(com);
 				break;
 			case "p":
 				sheetManager.paste(amount, false);
-				clear = true;
+				this.clearCom(com);
 				break;
 			case "Pj":
 				sheetManager.pasteInGapRow(amount, 1);
-				clear = true;
+				this.clearCom(com);
 				break;
 			case "Pk":
 				sheetManager.pasteInGapRow(amount, -1);
-				clear = true;
+				this.clearCom(com);
 				break;
 			case "Pl":
 				sheetManager.pasteInGapCol(amount, 1);
-				clear = true;
+				this.clearCom(com);
 				break;
 			case "Ph":
 				sheetManager.pasteInGapCol(amount, -1);
-				clear = true;
+				this.clearCom(com);
 				break;
 			case "dd":
 				sheetManager.relativeYank(amount);
 				sheetManager.deleteSelRow(amount);
-				clear = true;
+				this.clearCom(com);
 				break;
 			case "dc":
 				sheetManager.deleteSelCol(amount);
-				clear = true;
+				this.clearCom(com);
 				break;
 		}
 		if (clear) {
@@ -195,6 +269,12 @@ export default class CheckCommand {
 	}
 	
 	handleEnter() {
+		macroManager.addToRecording("<CR>", "key");
+		if (commands.mode == "i") {
+			commands.setFormula();
+			this.changeMode("n");
+			return;
+		}
 		let com = document.getElementById('commandLine').value;
 		this.changeMode("n");
 		// save file with command :w
@@ -230,6 +310,13 @@ export default class CheckCommand {
 			sheetManager.resetAllStyles();
 		}
 		document.getElementById("commandLine").value = "";
+
+		// when entering long string into the table, it puts the whole table out of whack
+		// for some reason doing this fixes it ??????
+		sheetManager.cellMotion(-1);
+		window.requestAnimationFrame(() => {
+			sheetManager.cellMotion(1);
+		});
 	}
 
 	handleEsc() {
@@ -249,5 +336,12 @@ export default class CheckCommand {
 			amount: amount ? parseInt(amount, 10) : 1,
 			command: command
 		};
+	}
+
+	clearCom(com, record = true) {
+		document.getElementById("commandLine").value = "";
+		if (record) {
+			macroManager.addToRecording(com, "n");
+		}
 	}
 }

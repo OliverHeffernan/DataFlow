@@ -18,13 +18,8 @@ let element;
 
 onMounted(() => {
 	element = document.getElementById(props.colour);
-
-	console.log(element);
-	//requestAnimationFrame(dvdmove);
-
 	requestAnimationFrame(trigMove);
 
-	console.log(element.style.top);
 });
 
 
@@ -68,31 +63,6 @@ function trigMove() {
     // Request next frame
     requestAnimationFrame(trigMove);
 }
-
-/*
-let xv = 0.1;
-let yv = 0.1;
-
-let xd = 1;
-let yd = 1;
-function dvdmove() {
-	left += xv * xd;
-	top += yv * yd;
-
-	if (top > 100) yd = -1;
-	if (top < 0) yd = 1;
-	if (left > 100) xd = -1;
-	if (left < 0) xd = 1;
-
-	console.log("kia ora");
-
-	element.style.top = top + "%";
-	element.style.left = left + "%";
-
-	requestAnimationFrame(move);
-}
-*/
-
 
 </script>
 
