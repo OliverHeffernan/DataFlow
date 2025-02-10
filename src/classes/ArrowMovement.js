@@ -10,8 +10,9 @@ export default class ArrowMovement {
 		key = key || window.event;
 		const isFocusedInput = document.activeElement.tagName === 'INPUT';
 		const typingCommand = document.activeElement.value.length > 0;
+
 		// preventing it from scrolling with key presses, also preventing it from moving when the user tries to use the arrow keys to move to a different part of a command
-		if([/*"Space",*/"ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(key.code) && !typingCommand) {
+		if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(key.code) && !typingCommand) {
 			key.preventDefault();
 			switch (key.code) {
 				case "ArrowLeft":

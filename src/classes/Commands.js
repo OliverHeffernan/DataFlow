@@ -17,26 +17,31 @@ export default class Commands {
 		this.tempForm = "";
 		Commands.instance = this;
 	}
+
+	setTempForm(value) {
+		this.tempForm = value;
+	}
+
 	changeMode(mode) {
 		let modeName;
 		switch (mode) {
-			case 'n':
+			case "n":
 				modeName = "NORMAL";
 				break;
-			case 'i':
+			case "i":
 				modeName = "INSERT";
 				break;
-			case 'v':
+			case "v":
 				modeName = "VISUAL";
 				break;
-			case 'V':
+			case "V":
 				modeName = "VISUAL-LINE";
 				break;
 		}
 
 		document.getElementById("formCursor").className = mode;
 
-		document.getElementById("modeDisplay").innerText = `-- ${modeName} --`
+		document.getElementById("modeDisplay").innerText = `-- ${modeName} --`;
 		this.mode = mode;
 	}
 
@@ -74,13 +79,14 @@ export default class Commands {
 		const cellCol = sheetManager.cellCurPos;
 		if (cellCol === 0) return;
 
-		let newForm = this.tempForm
+		let newForm = this.tempForm;
 		newForm = newForm.slice(0, cellCol - 1) + newForm.slice(cellCol);
 
 		this.tempForm = newForm;
 
 		sheetManager.updateEditFormula(newForm);
-		sheetManager.setCellCurPos(cellCol - 1, this.tempForm);
+		//sheetManager.setCellCurPos(cellCol - 1, this.tempForm);
+		sheetManager.setCellCurPos(cellCol - 1, sheetManager.tempForm);
 	}
 
 	deleteKey() {
@@ -89,15 +95,14 @@ export default class Commands {
 		const cellCol = sheetManager.cellCurPos;
 		if (cellCol === 0) return;
 
-		let newForm = this.tempForm
+		let newForm = this.tempForm;
 		newForm = newForm.slice(0, cellCol) + newForm.slice(cellCol + 1);
 
 		this.tempForm = newForm;
 
 		sheetManager.updateEditFormula(newForm);
 	}
-		
-	
+
 	insertText(com) {
 		const row = sheetManager.selRow;
 		const col = sheetManager.selCol;
@@ -110,11 +115,11 @@ export default class Commands {
 		const endPart = cell.substring(cellCol);
 		cell = firstPart + com + endPart;
 
-
 		this.tempForm = cell;
 
 		sheetManager.updateEditFormula(cell);
-		sheetManager.setCellCurPos(cellCol + com.length, this.tempForm);
+		//sheetManager.setCellCurPos(cellCol + com.length, this.tempForm);
+		sheetManager.setCellCurPos(cellCol + com.length, sheetManager.tempForm);
 	}
 
 	startOfCell() {
@@ -131,15 +136,18 @@ export default class Commands {
 		const form = sheetManager.getFormula(row, col);
 		console.log(form.length);
 
-		sheetManager.setCellCurPos(form.length, this.tempForm);
+		//sheetManager.setCellCurPos(form.length, this.tempForm);
+		sheetManager.setCellCurPos(form.length, sheetManager.tempForm);
+
 		this.clearComLine();
 	}
 
 	setFormula() {
-		sheetManager.setSpecFormula(this.tempForm);
+		sheetManager.setSpecFormula(sheetManager.tempForm);
 	}
 
 	insertAtFirstColumn() {
+		this.tempForm = sheetManager.getFormula(row, col);
 		sheetManager.selectCell(sheetManager.selRow, 0);
 		this.changeMode("i");
 		formBar.focus();
@@ -151,7 +159,7 @@ export default class Commands {
 		formBar.focus();
 		this.changeMode("i");
 		const end = formBar.value.length;
-		formBar.setSelectionRange(end,end);
+		formBar.setSelectionRange(end, end);
 		this.clearComLine();
 	}
 
@@ -167,11 +175,17 @@ export default class Commands {
 		this.changeMode("V");
 		this.selStartRow = sheetManager.selRow;
 		this.selStartCol = 0;
-		visualManager.startVisual(sheetManager.selRow, 0, true, sheetManager.numOfCols.value);
+		visualManager.startVisual(
+			sheetManager.selRow,
+			0,
+			true,
+			sheetManager.numOfCols.value,
+		);
 		this.clearComLine();
 	}
 
 	selectFirstColumn() {
+		this.tempForm = sheetManager.getFormula(row, col);
 		sheetManager.selectCell(sheetManager.selRow, 0);
 		this.clearComLine();
 	}
@@ -184,6 +198,7 @@ export default class Commands {
 		console.log("col", col);
 		col = Math.max(0, col);
 		col = Math.min(col, sheetManager.rows[row].length - 1);
+		this.tempForm = sheetManager.getFormula(row, col);
 		sheetManager.selectCell(row, col);
 		this.clearComLine();
 	}
@@ -232,6 +247,8 @@ export default class Commands {
 		sheetManager.selectCell(sr, selCol);
 
 		sheetManager.deleteSelRow(amount + 1);
+
+		this.tempForm = sheetManager.getFormula(row, col);
 
 		this.clearComLine();
 	}
@@ -313,19 +330,24 @@ export default class Commands {
 
 	selectRowZero() {
 		let col = sheetManager.selCol;
+		this.tempForm = sheetManager.getFormula(row, col);
 		sheetManager.selectCell(0, col);
+		this.tempForm = sheetManager.getFormula(row, col);
 		this.clearComLine();
 	}
 
 	selectRow(row) {
 		let col = sheetManager.selCol;
+		this.tempForm = sheetManager.getFormula(row, col);
 		sheetManager.selectCell(row, col);
 	}
 
 	selectLastRow() {
 		let col = sheetManager.selCol;
 		let row = sheetManager.numOfRows.value - 1;
+		this.tempForm = sheetManager.getFormula(row, col);
 		sheetManager.selectCell(row, col);
+		this.tempForm = sheetManager.getFormula(row, col);
 		this.clearComLine();
 	}
 }

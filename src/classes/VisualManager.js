@@ -1,5 +1,3 @@
-//import CheckCommand from './CheckCommand.js';
-//const checkCommand = new CheckCommand();
 export default class VisualManager {
 	constructor() {
 		if (VisualManager.instance) {

@@ -1,19 +1,19 @@
 import SheetManager from "./SheetManager.js";
 const sheetManager = new SheetManager();
-import ArrowMovement from './ArrowMovement.js';
+import ArrowMovement from "./ArrowMovement.js";
 const arrowMovement = new ArrowMovement();
-import FileManager from '../classes/FileManager.js';
+import FileManager from "../classes/FileManager.js";
 const fileManager = new FileManager();
-import VisualManager from './VisualManager.js';
+import VisualManager from "./VisualManager.js";
 const visualManager = new VisualManager();
 
 import MacroManager from "./MacroManager.js";
-const macroManager  = new MacroManager();
+const macroManager = new MacroManager();
 
-import LaunchManager from './LaunchManager.js';
+import LaunchManager from "./LaunchManager.js";
 const launchManager = new LaunchManager();
 
-import Commands from './Commands.js';
+import Commands from "./Commands.js";
 const commands = new Commands();
 export default class CheckCommand {
 	constructor() {
@@ -37,16 +37,16 @@ export default class CheckCommand {
 	}
 
 	checkCommandDirect() {
-		let com = document.getElementById('commandLine').value;
+		let com = document.getElementById("commandLine").value;
 		if (com == "") {
 			return;
 		}
-		this.checkCommand(com)
+		this.checkCommand(com);
 	}
 
 	handleBackspace() {
 		console.log("backspace");
-		const com = document.getElementById('commandLine').value;
+		const com = document.getElementById("commandLine").value;
 		if (com == "" && this.mode == "i") {
 			commands.backspace();
 		}
@@ -54,7 +54,7 @@ export default class CheckCommand {
 
 	handleDelete() {
 		console.log("delete");
-		const com = document.getElementById('commandLine').value;
+		const com = document.getElementById("commandLine").value;
 		if (com == "" && this.mode == "i") {
 			commands.deleteKey();
 		}
@@ -70,11 +70,12 @@ export default class CheckCommand {
 		}
 		// hide the right click menu if typing a command
 		if (document.getElementsByClassName("rcActive").length != 0) {
-			document.getElementsByClassName("rcActive")[0].className = "cellRightClick rcInactive";
+			document.getElementsByClassName("rcActive")[0].className =
+				"cellRightClick rcInactive";
 		}
-		
+
 		this.setPhMessage("");
-		let formBar = document.getElementById('formulaBar');
+		let formBar = document.getElementById("formulaBar");
 		let cellPicker = document.getElementById("cellPicker");
 		let clear = false;
 		// non repeatable commands here
@@ -86,18 +87,14 @@ export default class CheckCommand {
 		// edit at the end of the formula
 		else if (com == "a") {
 			commands.append();
-		}
-		else if (com == "v") {
+		} else if (com == "v") {
 			commands.startVisual();
-		}
-		else if (com == "V") {
+		} else if (com == "V") {
 			commands.startVisualLine();
-		}
-		else if (com == "q" && macroManager.recordingTo !== null) {
+		} else if (com == "q" && macroManager.recordingTo !== null) {
 			macroManager.endRecording();
 			this.clearCom();
-		}
-		else if (com.length == 2 && com[0] == "q") {
+		} else if (com.length == 2 && com[0] == "q") {
 			macroManager.startRecording(com[1]);
 			this.clearCom(com, false);
 		}
@@ -111,8 +108,7 @@ export default class CheckCommand {
 			commands.startOfCell();
 			this.changeMode("i");
 			commands.insert();
-		}
-		else if (com == "A") {
+		} else if (com == "A") {
 			commands.endOfCell();
 			this.changeMode("i");
 			commands.insert();
@@ -124,33 +120,27 @@ export default class CheckCommand {
 		// command to select last cell in a row
 		else if (com == "gl") {
 			commands.selectLastColumn();
-		}
-		else if (com == "^") {
+		} else if (com == "^") {
 			commands.startOfCell();
-		}
-		else if (com == "$") {
+		} else if (com == "$") {
 			commands.endOfCell();
 		}
 		// command to replace the formula
 		else if (com == "C" && this.mode == "n") {
 			commands.replaceFormula();
-		}
-		else if ((com == "c" || com == "d") && this.mode == "v") {
+		} else if ((com == "c" || com == "d") && this.mode == "v") {
 			commands.clearSelection();
 			this.handleEsc();
-		}
-		else if (com == "d" && this.mode == "V") {
+		} else if (com == "d" && this.mode == "V") {
 			commands.deleteSelectedRows();
 			this.handleEsc();
 		}
 		// command to change the selected cell
 		else if (com == "zz") {
 			commands.viewportCenterCell();
-		}
-		else if (com == "yf" && (this.mode == "v" || this.mode == "V")) {
+		} else if (com == "yf" && (this.mode == "v" || this.mode == "V")) {
 			commands.yankSelectionFormulae();
-		}
-		else if (com == "ys" && (this.mode == "v" || this.mode == "V")) {
+		} else if (com == "ys" && (this.mode == "v" || this.mode == "V")) {
 			commands.yankSelectionValues();
 		}
 		// yank formula
@@ -164,15 +154,12 @@ export default class CheckCommand {
 		// yank a row
 		else if (com == "yy") {
 			commands.yankRowFormulae();
-		}
-		else if (com == "gg") {
+		} else if (com == "gg") {
 			commands.selectRowZero();
-		}
-		else if (com[0] == "g" && Number(com.substring(1, com.length))) {
+		} else if (com[0] == "g" && Number(com.substring(1, com.length))) {
 			let row = Number(com.substring(1, com.length));
 			commands.selectRow(row);
-		}
-		else if (com == "G") {
+		} else if (com == "G") {
 			commands.selectLastRow();
 		}
 
@@ -267,7 +254,7 @@ export default class CheckCommand {
 			document.getElementById("commandLine").value = "";
 		}
 	}
-	
+
 	handleEnter() {
 		macroManager.addToRecording("<CR>", "key");
 		if (commands.mode == "i") {
@@ -275,13 +262,12 @@ export default class CheckCommand {
 			this.changeMode("n");
 			return;
 		}
-		let com = document.getElementById('commandLine').value;
+		let com = document.getElementById("commandLine").value;
 		this.changeMode("n");
 		// save file with command :w
 		if (com == ":w") {
 			fileManager.saveFile();
-		}
-		else if (com == ":forceloadstyles") {
+		} else if (com == ":forceloadstyles") {
 			sheetManager.loadStyles();
 		}
 
@@ -294,19 +280,15 @@ export default class CheckCommand {
 		else if (com == ":o") {
 			fileManager.openFile();
 			launchManager.hide();
-		}
-		else if (com == ":clear") {
-
+		} else if (com == ":clear") {
 			sheetManager.clearScreen();
 
 			launchManager.hide();
-		}
-		else if (com.startsWith(":hi")) {
+		} else if (com.startsWith(":hi")) {
 			const row = sheetManager.selRow;
 			const col = sheetManager.selCol;
 			sheetManager.setStyles(com, row, col);
-		}
-		else if (com == ":resetallstyles") {
+		} else if (com == ":resetallstyles") {
 			sheetManager.resetAllStyles();
 		}
 		document.getElementById("commandLine").value = "";
@@ -334,7 +316,7 @@ export default class CheckCommand {
 
 		return {
 			amount: amount ? parseInt(amount, 10) : 1,
-			command: command
+			command: command,
 		};
 	}
 
