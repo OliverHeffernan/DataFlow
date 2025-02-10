@@ -119,6 +119,7 @@ export default class Commands {
 
 		sheetManager.updateEditFormula(cell);
 		//sheetManager.setCellCurPos(cellCol + com.length, this.tempForm);
+		sheetManager.tempForm = this.tempForm;
 		sheetManager.setCellCurPos(cellCol + com.length, sheetManager.tempForm);
 	}
 
@@ -151,15 +152,6 @@ export default class Commands {
 		sheetManager.selectCell(sheetManager.selRow, 0);
 		this.changeMode("i");
 		formBar.focus();
-		this.clearComLine();
-	}
-
-	append() {
-		const formBar = this.byId("formulaBar");
-		formBar.focus();
-		this.changeMode("i");
-		const end = formBar.value.length;
-		formBar.setSelectionRange(end, end);
 		this.clearComLine();
 	}
 

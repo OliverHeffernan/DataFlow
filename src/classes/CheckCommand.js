@@ -83,10 +83,11 @@ export default class CheckCommand {
 			this.changeMode("i");
 			commands.insert();
 			this.clearCom(com);
-		}
-		// edit at the end of the formula
-		else if (com == "a") {
-			commands.append();
+		} else if (com == "a") {
+			this.changeMode("i");
+			sheetManager.cellMotion(1);
+			commands.insert();
+			this.clearCom(com);
 		} else if (com == "v") {
 			commands.startVisual();
 		} else if (com == "V") {
@@ -98,11 +99,6 @@ export default class CheckCommand {
 			macroManager.startRecording(com[1]);
 			this.clearCom(com, false);
 		}
-		/*
-		else if (com.length == 2 && com[0] == "@") {
-			macroManager.playMacro(com[1]);
-		}
-		*/
 		// command to edit the formula of the first cell in the selected row
 		else if (com == "I") {
 			commands.startOfCell();
