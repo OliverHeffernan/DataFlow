@@ -74,11 +74,14 @@ Motions are standard vim motions (hjkl), supporting quantified motions for most 
 
 You can also use arrow keys to move around. If you are typing anything in either the command line, or the formula bar, you can still use the arrow keys to move across your command or formula, but if you are not, the arrow keys will be used to move the selection cursor. Arrow key movement ignores amount commands, i.e. you can't press 5 then the right arrow key to move right five times.
 
-### Insert `i`:
-Use this command to edit the formula of the currently selected cell. This will place the cursor at the beginning of the formula. Then to go back to the command line, press `esc`.
+### Motions within formula bar `[` `]`:
+To move around in the formula bar, you can use the `[` command to move left, and the `]` command to move right. I am not set on this particular keymap, so if you have any suggestions for this command, please let me know. The struggle is how to differentiate it from the hjkl commands. I though to use control h and control l, but I personally have these mapped to something else on the system level, and I thought many others would have similar mappings. So I am open to suggestions, and am also looking to implement configuration, so that the user can change their keymaps.
 
-### Apped `a`:
-Similar to the insert command, except it will place the cursor at the end of the formula
+### Insert `i`:
+To enter insert mode, press `i`. This will place the insert cursor on the left side of the box cursor that is displayed in the formula bar.
+
+### Append `a`:
+Another way to enter insert mode is by using the `a` command. The difference is that this will place the insert cursor on the right side of the box cursor.
 
 ### Replace currently selected cell's formula `c`:
 Similar to a and i commands, except it clears the formula, so that you can replace it with a new one.
@@ -86,11 +89,17 @@ Similar to a and i commands, except it clears the formula, so that you can repla
 ### Insert at start of row `I`:
 Enter this command in the command line to edit the first cell in the currently selected row.
 
-### Move to first cell in row `^`:
+### Move to first cell in row `gh`:
 Enter this command to select the first cell in the currently selected row, without editing it.
 
-### Move to end of row `$`:
+### Move to end of row `gl`:
 Enter this command to select the last cell in the currently selected row, without editing it.
+
+### Move cursor to end of cell `$`:
+To move the cursor to the end of the cell, use the `$` command.
+
+## Move cursor to beginning of cell `^`:
+Similarly, you can use the `^` command to move the cursor to the beginning of the cell.
 
 ### Move to row 0 `gg`:
 Enter this command to select the first cell in the currently selected column.

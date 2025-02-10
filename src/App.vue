@@ -78,6 +78,7 @@ body {
 table {
 	border-collapse: collapse;
 	margin-top: 24px;
+	z-index: 10;
 }
 
 .labels {

@@ -79,7 +79,8 @@ export default class Commands {
 		const cellCol = sheetManager.cellCurPos;
 		if (cellCol === 0) return;
 
-		let newForm = this.tempForm;
+		//let newForm = this.tempForm;
+		let newForm = sheetManager.tempForm;
 		newForm = newForm.slice(0, cellCol - 1) + newForm.slice(cellCol);
 
 		this.tempForm = newForm;
@@ -322,9 +323,8 @@ export default class Commands {
 
 	selectRowZero() {
 		let col = sheetManager.selCol;
-		this.tempForm = sheetManager.getFormula(row, col);
 		sheetManager.selectCell(0, col);
-		this.tempForm = sheetManager.getFormula(row, col);
+		this.tempForm = sheetManager.getFormula(0, col);
 		this.clearComLine();
 	}
 

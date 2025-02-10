@@ -139,11 +139,9 @@ td {
 	/*background-color: #091119;*/
 	background-color: transparent;
 	position: relative;
-	z-index: 10;
 }
 
 .cell {
-	z-index: 3;
 	/*background-color: #091119;*/
 	background-color: transparent;
 	border: none;
