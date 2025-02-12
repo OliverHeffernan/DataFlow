@@ -245,6 +245,14 @@ export default class CheckCommand {
 				sheetManager.deleteSelCol(amount);
 				this.clearCom(com);
 				break;
+			case "W":
+				commands.jumpWhiteSpace();
+				this.clearCom(com);
+				break;
+			case "w":
+				commands.jumpWord(amount);
+				this.clearCom(com);
+				break;
 		}
 		if (clear) {
 			document.getElementById("commandLine").value = "";

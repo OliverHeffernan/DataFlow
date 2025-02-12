@@ -343,4 +343,48 @@ export default class Commands {
 		this.tempForm = sheetManager.getFormula(row, col);
 		this.clearComLine();
 	}
+
+	jumpWhiteSpace() {
+		console.log("kia ora");
+		let form = sheetManager.tempForm;
+		let pos = sheetManager.cellCurPos;
+		
+		//form = form.substring(pos);
+		//pos += form.indexOf(" ") + 1;
+
+		let newPos = form.indexOf(" ", pos) + 1;
+		
+		// ensures the position increases, and doesn't cycle through the formula.
+		newPos = newPos > pos ? newPos : pos;
+
+		sheetManager.setCellCurPos(newPos, sheetManager.tempForm);
+	}
+
+	// different to the convention provided by neovim, but I prefer this.
+	// may need to conform to the convention in the future.
+	jumpWord(amount = 1) {
+		let form = sheetManager.tempForm;
+		let pos = sheetManager.cellCurPos;
+
+		let index;
+
+		for (let i = pos; i < form.length - 1; i++) {
+			// check if the previous character is punctuation, and that the current character is not punctuation, signifying the
+			// start of a word.
+			if (this.isPunctuation(form[i]) && !this.isPunctuation(form[i + 1])) {
+				amount--;
+				if (amount == 0) {
+					index = i + 1;
+					break;
+				}
+			}
+		}
+		console.log("kia ora");
+		sheetManager.setCellCurPos(index, sheetManager.tempForm);
+	}
+
+	isPunctuation(char) {
+		return /\p{P}|\p{Zs}/u.test(char);
+	}
+
 }
