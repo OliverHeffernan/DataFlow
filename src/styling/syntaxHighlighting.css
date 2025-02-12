@@ -1,7 +1,39 @@
 :root {
-	--symbols: #e23b60;
+	--operators: #e23b60;
+	--functions: #00FFAB;
 }
 
-.symbol {
-	color: var(--symbols);
+.operator {
+	color: var(--operators);
+}
+
+.function {
+	color: var(--functions);
+}
+
+.depth0 {
+	color: red;
+}
+
+.depth1 {
+	color: #77f1fc;
+}
+
+.depth2 {
+	color: #42FFAD;
+}
+
+.depth3 {
+	color: #93D8FC;
+}
+
+.depth4 {
+	color: #F0E67F;
+}
+.depth5 {
+	color: #fc996f;
+}
+
+.depth6 {
+	color: #9A7DFF;
 }

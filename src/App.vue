@@ -24,6 +24,7 @@
 </template>
 
 <script setup>
+	import "./styling/syntaxHighlighting.css";
 	import { ref } from 'vue';
 	import SheetManager from './classes/SheetManager.js';
 	import SheetRow from './components/SheetRow.vue';

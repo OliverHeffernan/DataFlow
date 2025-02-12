@@ -2,6 +2,7 @@ import { ref } from "vue";
 //import { reactive } from "vue";
 import { create, all } from "mathjs";
 import Formulas from "./FormulaFunctions.js";
+import SyntaxHighlighting from "./SyntaxHighlighting.js";
 const formulas = new Formulas();
 const config = {};
 const math = create(all, config);
@@ -225,12 +226,10 @@ export default class SheetManager {
 		try {
 			this.selRow = row;
 			this.selCol = col;
-			// display the formula of the new selected cell in the formula bar
-			//let bar = document.getElementById("formulaBar");
-			//bar.value = this.getFormula(row, col);
 
 			let newBar = document.getElementById("formText");
-			newBar.innerText = this.getFormula(row, col);
+			//newBar.innerText = this.getFormula(row, col);
+			newBar.innerHTML = new SyntaxHighlighting().highlight(this.getFormula(row, col),);
 
 			// if it is defined, remove the focussed class from the previously selected cell
 			if (this.getSelectedCell() != undefined) {
@@ -353,7 +352,10 @@ export default class SheetManager {
 	}
 
 	updateEditFormula(form) {
-		document.getElementById("formText").innerText = form;
+		console.log("update");
+		//document.getElementById("formText").innerText = form;
+		document.getElementById("formText").innerHTML =
+			new SyntaxHighlighting().highlight(form);
 	}
 
 	// called when the user yanks something
