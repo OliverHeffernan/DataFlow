@@ -84,6 +84,7 @@ export default class Commands {
 		newForm = newForm.slice(0, cellCol - 1) + newForm.slice(cellCol);
 
 		this.tempForm = newForm;
+		sheetManager.tempForm = newForm;
 
 		sheetManager.updateEditFormula(newForm);
 		//sheetManager.setCellCurPos(cellCol - 1, this.tempForm);

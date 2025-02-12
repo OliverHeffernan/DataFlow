@@ -1,0 +1,7 @@
+:root {
+	--symbols: #e23b60;
+}
+
+.symbol {
+	color: var(--symbols);
+}
