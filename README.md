@@ -198,3 +198,16 @@ If you want to paste the copy buffer between preexisting cells, you can use the 
 - `Pk`: paste above, creating new rows for the copy buffer to paste into.
 - `Pl`: paste to the right, creating new columns for the copy buffer to paste into.
 - `Ph`: paste to the left, creating new columns for the copy buffer to paste into.
+
+### Macros `q`:
+A macro is a recorded set of commands that can be repeated at any time.
+
+To start recording a macro press `q` in normal mode, then press a key to assign the macro to.
+
+For example, if I wanted assign a macro to `w`, I would type `qw`.
+
+Then execute the commands that you want in the macro.
+
+Then to end the recording, press `q` again.
+
+To use the macro, type `@` then the key that you assigned the macro to. In our example, we would type `@w`.
