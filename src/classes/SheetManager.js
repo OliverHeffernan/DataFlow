@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { create, all } from "mathjs";
 import Formulas from "./FormulaFunctions.js";
 import SyntaxHighlighting from "./SyntaxHighlighting.js";
+
 const formulas = new Formulas();
 const config = {};
 const math = create(all, config);
@@ -39,10 +40,10 @@ export default class SheetManager {
 		this.tempForm = "";
 
 		// create a 2D array of empty strings
-		for (let i = 0; i < this.numOfRows.value; i++) {
+		for (let i = 0; i < 50; i++) {
 			let row = [];
 			let styleRow = [];
-			for (let j = 0; j < this.numOfCols.value; j++) {
+			for (let j = 0; j < 50; j++) {
 				row.push("");
 				styleRow.push({
 					fg: "white",
@@ -343,11 +344,10 @@ export default class SheetManager {
 	}
 
 	setSpecFormula(value) {
+		const oldValue = this.getFormula(this.selRow, this.selCol);
+
 		this.rows[this.selRow][this.selCol] = value;
-		this.getCell(this.selRow, this.selCol).innerText = this.getValue(
-			this.selRow,
-			this.selCol,
-		);
+		this.getCell(this.selRow, this.selCol).innerText = this.getValue(this.selRow, this.selCol,);
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 	}
 

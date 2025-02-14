@@ -11,6 +11,8 @@ export default class MacroManager {
 
 		this.recordingMacro = [];
 		this.recordingTo = null;
+
+		MacroManager.instance = this;
 	}
 	
 

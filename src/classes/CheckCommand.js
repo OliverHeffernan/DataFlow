@@ -13,6 +13,7 @@ const macroManager = new MacroManager();
 import LaunchManager from "./LaunchManager.js";
 const launchManager = new LaunchManager();
 
+
 import Commands from "./Commands.js";
 const commands = new Commands();
 export default class CheckCommand {
@@ -208,11 +209,11 @@ export default class CheckCommand {
 				sheetManager.insertColRight(amount);
 				this.clearCom(com);
 				break;
-			case "[":
+			case "H":
 				sheetManager.cellMotion(-amount, commands.tempForm);
 				this.clearCom(com);
 				break;
-			case "]":
+			case "L":
 				sheetManager.cellMotion(amount, commands.tempForm);
 				this.clearCom(com);
 				break;
@@ -246,12 +247,35 @@ export default class CheckCommand {
 				this.clearCom(com);
 				break;
 			case "W":
-				commands.jumpWhiteSpace();
+				commands.jumpWhiteSpace(amount);
+				this.clearCom(com);
+				break;
+			case "B":
+				commands.jumpBackWhiteSpace(amount);
 				this.clearCom(com);
 				break;
 			case "w":
 				commands.jumpWord(amount);
 				this.clearCom(com);
+				break;
+			case "b":
+				commands.jumpBackWord(amount);
+				this.clearCom(com);
+				break;
+			case "e":
+				commands.jumpEndWord(amount);
+				this.clearCom(com);
+				break;
+			case "%":
+				commands.matchPairMotion();
+				this.clearCom(com);
+				break;
+			default:
+				if (command[0] == "f" && command.length > 1) {
+					console.log("kia ora");
+					commands.findCharacter(command[1]);
+					this.clearCom(com);
+				}
 				break;
 		}
 		if (clear) {
@@ -266,6 +290,7 @@ export default class CheckCommand {
 			this.changeMode("n");
 			return;
 		}
+
 		let com = document.getElementById("commandLine").value;
 		this.changeMode("n");
 		// save file with command :w

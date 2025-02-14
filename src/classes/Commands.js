@@ -344,18 +344,38 @@ export default class Commands {
 		this.clearComLine();
 	}
 
-	jumpWhiteSpace() {
+	jumpWhiteSpace(amount = 1) {
 		console.log("kia ora");
 		let form = sheetManager.tempForm;
 		let pos = sheetManager.cellCurPos;
 		
 		//form = form.substring(pos);
 		//pos += form.indexOf(" ") + 1;
+		
+		let newPos = pos;
 
-		let newPos = form.indexOf(" ", pos) + 1;
+		for (let i = 0; i < amount; i++) {
+			newPos = form.indexOf(" ", newPos) + 1;
+		}
 		
 		// ensures the position increases, and doesn't cycle through the formula.
 		newPos = newPos > pos ? newPos : pos;
+
+		sheetManager.setCellCurPos(newPos, sheetManager.tempForm);
+	}
+
+	jumpBackWhiteSpace(amount = 1) {
+		console.log("kia ora");
+		let form = sheetManager.tempForm;
+		let pos = sheetManager.cellCurPos;
+		
+		let newPos = pos;
+		for (let i = 0; i < amount; i++) {
+			newPos = form.substring(0, newPos - 1).lastIndexOf(" ") + 1;
+		}
+		
+		// ensures the position decreases, and doesn't cycle through the formula.
+		newPos = newPos < pos ? newPos : pos;
 
 		sheetManager.setCellCurPos(newPos, sheetManager.tempForm);
 	}
@@ -371,7 +391,46 @@ export default class Commands {
 		for (let i = pos; i < form.length - 1; i++) {
 			// check if the previous character is punctuation, and that the current character is not punctuation, signifying the
 			// start of a word.
-			if (this.isPunctuation(form[i]) && !this.isPunctuation(form[i + 1])) {
+			if (this.isStartOfWord(form[i], form[i + 1])) {
+				amount--;
+				if (amount == 0) {
+					index = i + 1;
+					break;
+				}
+			}
+		}
+		if (index) {
+			sheetManager.setCellCurPos(index, sheetManager.tempForm);
+		}
+	}
+
+	jumpEndWord(amount = 1) {
+		let form = sheetManager.tempForm;
+		let pos = sheetManager.cellCurPos;
+		let index;
+		for (let i = pos + 1; i < form.length - 1; i++) {
+			if (this.isEndOfWord(form[i], form[i + 1])) {
+				amount --;
+				if (amount == 0) {
+					index = i;
+					break;
+				}
+			}
+		}
+		index = index ? index : form.length - 1;
+		sheetManager.setCellCurPos(index, sheetManager.tempForm)
+	}
+
+	jumpBackWord(amount = 1) {
+		let form = sheetManager.tempForm;
+		let pos = sheetManager.cellCurPos;
+
+		let index;
+
+		for (let i = pos - 2; i >= 0; i--) {
+			// check if the previous character is punctuation, and that the current character is not punctuation, signifying the
+			// start of a word.
+			if (this.isStartOfWord(form[i], form[i + 1])) {
 				amount--;
 				if (amount == 0) {
 					index = i + 1;
@@ -380,6 +439,56 @@ export default class Commands {
 			}
 		}
 		console.log("kia ora");
+		index = index ? index : 0;
+		sheetManager.setCellCurPos(index, sheetManager.tempForm);
+	}
+
+	matchPairMotion() {
+		let form = sheetManager.tempForm;
+		let pos = sheetManager.cellCurPos;
+
+		let index;
+		let char;
+		for (let i = pos; i < form.length; i++) {
+			let tempChar = this.getOppositeChar(form[i]);
+			if (tempChar) {
+				char = tempChar;
+				index = i;
+				break;
+			}
+		}
+		
+		let startChar = form[index];
+		let depth = 0;
+
+		for (index > 0; index < form.length; index += char.dir) {
+			if (form[index] == startChar) {
+				depth++;
+			}
+			else if (form[index] == char.char) {
+				depth--;
+
+				if (depth <= 0) {
+					break;
+				}
+			}
+		}
+
+		sheetManager.setCellCurPos(index, sheetManager.tempForm);
+	}
+
+	findIndexOfCharacter(char) {
+		let form = sheetManager.tempForm;
+		let pos = sheetManager.cellCurPos;
+
+		let index = form.indexOf(char, pos + 1);
+		// if not found, it returns the original position.
+		return index >= 0 ? index : pos;
+	}
+
+	findCharacter(char) {
+		const index = this.findIndexOfCharacter(char);
+		if (!index) return;
 		sheetManager.setCellCurPos(index, sheetManager.tempForm);
 	}
 
@@ -387,4 +496,46 @@ export default class Commands {
 		return /\p{P}|\p{Zs}/u.test(char);
 	}
 
+	isStartOfWord(prev, char) {
+		return this.isPunctuation(prev) && !this.isPunctuation(char);
+	}
+
+	isEndOfWord(prev, char) {
+		return !this.isPunctuation(prev) && this.isPunctuation(char);
+	}
+
+	getOppositeChar(char) {
+		switch (char) {
+			case "(":
+				return {
+					char: ")",
+					dir: 1
+				}
+			case ")":
+				return {
+					char: "(",
+					dir: -1
+				}
+			case "[":
+				return {
+					char: "]",
+					dir: 1
+				}
+			case "]":
+				return {
+					char: "[",
+					dir: -1
+				}
+			case "{":
+				return {
+					char: "}",
+					dir: 1
+				}
+			case "}":
+				return {
+					char: "{",
+					dir: -1
+				}
+		}
+	}
 }
