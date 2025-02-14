@@ -15,6 +15,7 @@ export default class Commands {
 		this.selStartRow = null;
 		this.selStartCol = null;
 		this.tempForm = "";
+		console.log(sheetManager);
 		Commands.instance = this;
 	}
 

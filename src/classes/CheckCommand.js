@@ -4,8 +4,6 @@ import ArrowMovement from "./ArrowMovement.js";
 const arrowMovement = new ArrowMovement();
 import FileManager from "../classes/FileManager.js";
 const fileManager = new FileManager();
-import VisualManager from "./VisualManager.js";
-const visualManager = new VisualManager();
 
 import MacroManager from "./MacroManager.js";
 const macroManager = new MacroManager();
@@ -174,7 +172,6 @@ export default class CheckCommand {
 			macroManager.playMacro(macro, amount);
 			return;
 		}
-		//if (parseInt(com.substring(0, com.length - 2)) != "NaN") {
 		// movements
 		switch (command) {
 			case "h":
@@ -284,14 +281,17 @@ export default class CheckCommand {
 	}
 
 	handleEnter() {
-		macroManager.addToRecording("<CR>", "key");
+		let com = document.getElementById("commandLine").value;
+		this.handleEnterFromCom(com);
+	}
+
+	handleEnterFromCom(com) {
 		if (commands.mode == "i") {
 			commands.setFormula();
 			this.changeMode("n");
 			return;
 		}
 
-		let com = document.getElementById("commandLine").value;
 		this.changeMode("n");
 		// save file with command :w
 		if (com == ":w") {
@@ -319,6 +319,14 @@ export default class CheckCommand {
 			sheetManager.setStyles(com, row, col);
 		} else if (com == ":resetallstyles") {
 			sheetManager.resetAllStyles();
+		} else if (com[0] == "g") {
+			const coords = com.substring(1);
+			const col = coords.charCodeAt(0) - 65;
+			const row = parseInt(coords.slice(1));
+			const pattern = /^[A-Z]\d+$/
+			if (pattern.test(coords)) {
+				sheetManager.selectCell(row, col);
+			}
 		}
 		document.getElementById("commandLine").value = "";
 
@@ -328,6 +336,8 @@ export default class CheckCommand {
 		window.requestAnimationFrame(() => {
 			sheetManager.cellMotion(1);
 		});
+
+		macroManager.addToRecording(com, "c");
 	}
 
 	handleEsc() {

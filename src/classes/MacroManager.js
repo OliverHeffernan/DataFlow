@@ -82,6 +82,9 @@ export default class MacroManager {
 				} else if (action.com == "<B-SPACE>") {
 					commands.backspace();
 				}
+			// command line mode
+			} else if (action.mode == "c") {
+				checkCommand.handleEnterFromCom(action.com);
 			}
 
 

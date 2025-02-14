@@ -143,8 +143,8 @@ Enter this command to select the final cell in the currently selected column.
 ### Replace currently selected cell's formula `c`:
 Enter this command to replace the formula of the currently selected cell.
 
-### Cell Selector `;`:
-To choose a specic cell to select, press `;` in the command line, then type the reference for the cell you would like to select, for example "B23", then press `enter`.
+### Cell Selector `g{ref}`:
+To select a specific cell, type `g`, then the cell reference e.g. `A3`, then press enter.
 
 ** Macros not yet supported for this command.
 
