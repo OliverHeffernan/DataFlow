@@ -4,6 +4,9 @@ import { create, all } from "mathjs";
 import Formulas from "./FormulaFunctions.js";
 import SyntaxHighlighting from "./SyntaxHighlighting.js";
 
+import HistoryManager from "./HistoryManager.js";
+const historyManager = new HistoryManager();
+
 const formulas = new Formulas();
 const config = {};
 const math = create(all, config);
@@ -53,6 +56,7 @@ export default class SheetManager {
 			this.rows.push(row);
 			this.styles.push(styleRow);
 		}
+		historyManager.do(this);
 		SheetManager.instance = this;
 	}
 
@@ -90,7 +94,7 @@ export default class SheetManager {
 				try {
 					const styles = this.styles[y][x];
 					const com = `:hi bg ${styles.bg} fg ${styles.fg}`;
-					this.setStyles(com, y, x);
+					this.setStyles(com, y, x, false);
 				} catch (e) {
 					console.log(e.message);
 				}
@@ -98,7 +102,7 @@ export default class SheetManager {
 		}
 	}
 
-	setStyles(com, row, col) {
+	setStyles(com, row, col, recordUndo = true) {
 		const split = com.split(" ");
 		let validCom = true;
 		for (let i = 1; i < split.length; i++) {
@@ -126,6 +130,9 @@ export default class SheetManager {
 			} else if (split[i] == "resetall") {
 				this.resetAllStyles();
 			}
+		}
+		if (recordUndo) {
+			historyManager.do(this, 105);
 		}
 	}
 
@@ -159,6 +166,7 @@ export default class SheetManager {
 		this.styles = styles;
 
 		this.loadStyles();
+		historyManager.do(this, 141);
 	}
 
 	// function to get the formula for a specific cell
@@ -341,6 +349,7 @@ export default class SheetManager {
 		if (move) {
 			this.keyboardMotion(0, 1);
 		}
+		historyManager.do(this, 334);
 	}
 
 	setSpecFormula(value) {
@@ -349,10 +358,10 @@ export default class SheetManager {
 		this.rows[this.selRow][this.selCol] = value;
 		this.getCell(this.selRow, this.selCol).innerText = this.getValue(this.selRow, this.selCol,);
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
+		historyManager.do(this, 353);
 	}
 
 	updateEditFormula(form) {
-		console.log("update");
 		//document.getElementById("formText").innerText = form;
 		document.getElementById("formText").innerHTML =
 			new SyntaxHighlighting().highlight(form);
@@ -401,6 +410,7 @@ export default class SheetManager {
 				this.keyboardMotion(this.copyBuffer[0].length, 0);
 			}
 		}
+		historyManager.do(this, 397);
 	}
 
 	pasteInGapRow(amount, dir) {
@@ -542,6 +552,7 @@ export default class SheetManager {
 
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 		this.selectCell(this.selRow, this.selCol);
+		historyManager.do(this, 546);
 	}
 
 	deleteSelCol(amount) {
@@ -556,6 +567,7 @@ export default class SheetManager {
 		this.numOfRows.value--;
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 		this.selectCell(this.selRow, this.selCol);
+		historyManager.do(this, 563);
 	}
 
 	deleteSelRow(amount) {
@@ -582,6 +594,7 @@ export default class SheetManager {
 		this.numOfRows.value += amount;
 		this.selectCell(this.selRow, this.selCol);
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
+		historyManager.do(this, 578);
 	}
 
 	insertColumnAtIndex(index) {
@@ -596,6 +609,7 @@ export default class SheetManager {
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 
 		this.selectCell(this.selRow, this.selCol);
+		historyManager.do(this, 599);
 	}
 
 	insertRowBelow(amount = 1) {

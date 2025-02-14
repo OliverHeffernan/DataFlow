@@ -11,6 +11,8 @@ const macroManager = new MacroManager();
 import LaunchManager from "./LaunchManager.js";
 const launchManager = new LaunchManager();
 
+import HistoryManager from "./HistoryManager.js";
+const historyManager = new HistoryManager();
 
 import Commands from "./Commands.js";
 const commands = new Commands();
@@ -265,6 +267,14 @@ export default class CheckCommand {
 				break;
 			case "%":
 				commands.matchPairMotion();
+				this.clearCom(com);
+				break;
+			case "u":
+				historyManager.undo(sheetManager, amount);
+				this.clearCom(com);
+				break;
+			case "r":
+				historyManager.redo(sheetManager, amount);
 				this.clearCom(com);
 				break;
 			default:
