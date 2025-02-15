@@ -613,8 +613,5 @@ export default class Commands {
 				mode: "v"
 			}
 		];
-
-		console.log(returning);
-		return returning;
 	}
 }
