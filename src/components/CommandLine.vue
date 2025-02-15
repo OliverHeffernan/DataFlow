@@ -19,6 +19,7 @@
 		<button id="cancelButton" @click="closeWebFilePick()">Cancel</button>
 	</div>
 </template>
+
 <script setup>
 	import SheetManager from '../classes/SheetManager.js';
 	const sheetManager = new SheetManager();
@@ -65,9 +66,27 @@
 
 	function deleteOrBackspace(event) {
 		if (event.key === "Backspace") {
+			console.log("commandline.vue");
 			checkCommand.handleBackspace();
 		} else if (event.key === "Delete") {
 			checkCommand.handleDelete();
+		} else if (event.ctrlKey && !event.altKey && !event.metaKey) {
+			// if only the control key is pressed, don't do anything
+			if (event.key === "Control") return;
+			event.preventDefault();
+
+			// make it type ^ then the key that was pressed into the commandLine
+			const char = event.key.toLowerCase();
+			const comLine = document.getElementById("commandLine");
+			const cursorPos = comLine.selectionStart;
+			const value = comLine.value;
+
+			const firstPart = value.slice(0, cursorPos);
+			const lastPart = value.slice(cursorPos);
+			comLine.value = firstPart + "^" + char + lastPart;
+
+			// then need to check the command, as this command wasn't techincally inputted directly into the input field.
+			checkCommand.checkCommandDirect();
 		}
 	}
 </script>

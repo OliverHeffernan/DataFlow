@@ -68,7 +68,7 @@ export default class MacroManager {
 
 			const action = macro.shift()
 			const commands = new Commands();
-			if (action.mode == "n") {
+			if (action.mode == "n" || action.mode == "v") {
 				checkCommand.checkCommand(action.com);
 			} else if (action.mode == "i") {
 				commands.insertText(action.com);

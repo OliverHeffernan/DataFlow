@@ -78,6 +78,7 @@ export default class Commands {
 		const macroManager = new MacroManager();
 		macroManager.addToRecording("<B-SPACE>", "key");
 		const cellCol = sheetManager.cellCurPos;
+		console.log(sheetManager.tempForm);
 		if (cellCol === 0) return;
 
 		//let newForm = this.tempForm;
@@ -162,7 +163,7 @@ export default class Commands {
 		this.changeMode("v");
 		this.selStartRow = sheetManager.selRow;
 		this.selStartCol = sheetManager.selCol;
-		visualManager.startVisual(sheetManager.selRow, sheetManager.selCol);
+		visualManager.startVisual(sheetManager.selRow, sheetManager.selCol, sheetManager.cellCurPos);
 		this.clearComLine();
 	}
 
@@ -180,6 +181,8 @@ export default class Commands {
 	}
 
 	selectFirstColumn() {
+		const row = sheetManager.selRow;
+		let col = sheetManager.rows[row].findLastIndex((element) => element != "");
 		this.tempForm = sheetManager.getFormula(row, col);
 		sheetManager.selectCell(sheetManager.selRow, 0);
 		this.clearComLine();
@@ -209,10 +212,16 @@ export default class Commands {
 	}
 
 	clearSelection() {
+
+		// check if the selection spans across cells
 		const startRow = visualManager.startRow;
 		const startCol = visualManager.startCol;
 		const endRow = sheetManager.selRow;
 		const endCol = sheetManager.selCol;
+		if (startRow === endRow || startCol === endCol) {
+			this.replaceSelection();
+			return;
+		}
 
 		const sr = Math.min(startRow, endRow);
 		const sc = Math.min(startCol, endCol);
@@ -227,6 +236,44 @@ export default class Commands {
 
 		sheetManager.loadAllCells();
 		this.clearComLine();
+	}
+
+	// deletes for selections within formulae
+	deleteSelection() {
+		const row = visualManager.startRow;
+		const col = visualManager.startCol;
+
+		const endRow = sheetManager.selRow;
+		const endCol = sheetManager.selCol;
+
+		// check if the selection spans across cells
+		if (row !== endRow || col !== endCol) return;
+
+		const form = sheetManager.getFormula(row, col);
+		const cellCurPos = sheetManager.cellCurPos;
+		const visStart = visualManager.startCellCurPos;
+
+		const start = Math.min(cellCurPos, visStart);
+		const end = Math.max(cellCurPos, visStart);
+
+		//const newForm = form.slice(start, end + 1);
+		const newForm = form.substring(0, start) + form.substring(end + 1);
+		sheetManager.setSpecFormula(newForm);
+
+		visualManager.exitVisual();
+		this.changeMode("n");
+
+		sheetManager.selectCell(row, col);
+		sheetManager.cellMotion(start);
+
+		this.clearComLine();
+	}
+
+	replaceSelection() {
+		this.deleteSelection();
+		requestAnimationFrame(() => {
+			this.insert();
+		});
 	}
 
 	deleteSelectedRows() {
@@ -538,5 +585,36 @@ export default class Commands {
 					dir: -1
 				}
 		}
+	}
+
+	parseOpPendCommand(action) {
+		if (action.length < 2) { return false; }
+		const com = action[0];
+
+		if (!"dcy".includes(com)) { return false; }
+
+		const motion = action.substring(1);
+
+		if (!"ft".includes(motion[0]) && !"HLwWbBe^$".includes(motion[motion.length - 1])) { return false; }
+
+		if ("ft".includes(motion[0]) && motion.length !== 2) { return false; }
+
+		return [
+			{
+				com: "v",
+				mode: "n"
+			},
+			{
+				com: motion,
+				mode: "v"
+			},
+			{
+				com: com,
+				mode: "v"
+			}
+		];
+
+		console.log(returning);
+		return returning;
 	}
 }

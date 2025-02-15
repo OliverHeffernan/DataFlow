@@ -311,7 +311,7 @@ export default class SheetManager {
 			this.prevRow = this.selRow;
 			this.prevCol = this.selCol;
 
-			visualManager.setVisual(this.selRow, this.selCol, this.numOfCols.value);
+			visualManager.setVisual(this.selRow, this.selCol, this.cellCurPos, this.numOfCols.value);
 
 			this.setCellCurPos(0, this.getFormula(this.selRow, this.selCol));
 
@@ -457,8 +457,8 @@ export default class SheetManager {
 		const cell = this.getFormula(this.selRow, this.selCol);
 		this.cellCurPos = math.min(this.cellCurPos, this.tempForm.length);
 
-		document.getElementById("formCursor").style.marginLeft =
-			this.cellCurPos.toString() + "ch";
+		document.getElementById("formCursor").style.marginLeft = this.cellCurPos.toString() + "ch";
+		visualManager.setVisual(this.selRow, this.selCol, this.cellCurPos, this.numOfCols.value);
 	}
 
 	setCellCurPos(value, tempForm = "") {

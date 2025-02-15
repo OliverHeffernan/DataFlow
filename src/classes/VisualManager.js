@@ -1,3 +1,4 @@
+import SheetManager from "./SheetManager.js";
 export default class VisualManager {
 	constructor() {
 		if (VisualManager.instance) {
@@ -5,15 +6,17 @@ export default class VisualManager {
 		}
 		this.startRow = null;
 		this.startCol = null;
+		this.startCellCurPos = null;
 		this.line = false;
 		this.dragging = false;
 		VisualManager.instance = this;
 	}
 
-	startVisual(row, col, line = false, numOfCols) {
+	startVisual(row, col, cellCurPos, line = false, numOfCols) {
 		//checkCommand.changeMode("v");
 		this.startRow = row;
 		this.startCol = col;
+		this.startCellCurPos = cellCurPos;
 		this.line = line;
 		this.setVisual(this.startRow, this.startCol, numOfCols);
 	}
@@ -23,8 +26,19 @@ export default class VisualManager {
 		return element;
 	}
 
-	setVisual(endRow, endCol, numOfCols) {
+	setVisual(endRow, endCol, cellCurPos, numOfCols) {
 		if (this.startRow == null || this.startCol == null) return;
+
+		if (this.startRow == endRow && this.startCol == endCol) {
+			this.clearVisual();
+			const cursor = document.getElementById("formCursor");
+			cellCurPos = cellCurPos >= this.startCellCurPos ? cellCurPos + 1 : cellCurPos;
+			const tempStart = this.startCellCurPos >= cellCurPos ? this.startCellCurPos + 1 : this.startCellCurPos;
+			cursor.style.width = Math.abs(cellCurPos - tempStart) + "ch";
+			cursor.style.marginLeft = Math.min(cellCurPos, tempStart) + "ch";
+
+			return;
+		}
 
 		this.clearVisual();
 
@@ -52,6 +66,10 @@ export default class VisualManager {
 		for (let i = 0; i < visuals.length; i++) {
 			visuals[i].className = "sel inactive";
 		}
+		
+		const cursor = document.getElementById("formCursor");
+		cursor.style.width = "1ch";
+		cursor.style.marginLeft = new SheetManager().cellCurPos + "ch";
 	}
 
 	exitVisual() {

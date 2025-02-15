@@ -46,23 +46,28 @@ export default class CheckCommand {
 	}
 
 	handleBackspace() {
-		console.log("backspace");
 		const com = document.getElementById("commandLine").value;
-		if (com == "" && this.mode == "i") {
+		if (com == "" && commands.mode == "i") {
+			console.log("CheckCommand.js");
 			commands.backspace();
 		}
 	}
 
 	handleDelete() {
-		console.log("delete");
 		const com = document.getElementById("commandLine").value;
-		if (com == "" && this.mode == "i") {
+		if (com == "" && commands.mode == "i") {
 			commands.deleteKey();
 		}
 	}
 
 	// commands that do not need to have pressed enter to executre
 	checkCommand(com) {
+		console.log(commands.parseOpPendCommand(com));
+		const opPendCommand = commands.parseOpPendCommand(com);
+		if (opPendCommand) {
+			macroManager.throughMacro(opPendCommand, this);
+			return;
+		}
 		if (commands.mode == "i") {
 			commands.insertText(com);
 			macroManager.addToRecording(com, "i");
@@ -71,9 +76,11 @@ export default class CheckCommand {
 		}
 		// hide the right click menu if typing a command
 		if (document.getElementsByClassName("rcActive").length != 0) {
-			document.getElementsByClassName("rcActive")[0].className =
-				"cellRightClick rcInactive";
+			document.getElementsByClassName("rcActive")[0].className = "cellRightClick rcInactive";
 		}
+
+		this.mode = commands.mode;
+		console.log("mode", this.mode);
 
 		this.setPhMessage("");
 		let formBar = document.getElementById("formulaBar");
@@ -125,9 +132,11 @@ export default class CheckCommand {
 		// command to replace the formula
 		else if (com == "C" && this.mode == "n") {
 			commands.replaceFormula();
-		} else if ((com == "c" || com == "d") && this.mode == "v") {
+		} else if (com == "c" && this.mode == "v") {
 			commands.clearSelection();
 			this.handleEsc();
+		} else if (com == "d" && this.mode == "v") {
+			commands.deleteSelection();
 		} else if (com == "d" && this.mode == "V") {
 			commands.deleteSelectedRows();
 			this.handleEsc();
@@ -168,12 +177,12 @@ export default class CheckCommand {
 		let macro = "";
 
 		if (command[0] == "@" && command.length == 2) {
-			console.log("macro");
 			macro = command[1];
 			command = "@";
 			macroManager.playMacro(macro, amount);
 			return;
 		}
+
 		// movements
 		switch (command) {
 			case "h":
@@ -273,14 +282,19 @@ export default class CheckCommand {
 				historyManager.undo(sheetManager, amount);
 				this.clearCom(com);
 				break;
-			case "r":
+			case "^r":
 				historyManager.redo(sheetManager, amount);
 				this.clearCom(com);
 				break;
 			default:
-				if (command[0] == "f" && command.length > 1) {
-					console.log("kia ora");
+				if (command.length <= 1) break;
+				if (command[0] == "f") {
 					commands.findCharacter(command[1]);
+					this.clearCom(com);
+				} else if (command[0] == "t") {
+					sheetManager.cellMotion(1, commands.tempForm);
+					commands.findCharacter(command[1]);
+					sheetManager.cellMotion(-1, commands.tempForm);
 					this.clearCom(com);
 				}
 				break;
