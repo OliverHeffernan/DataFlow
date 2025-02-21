@@ -25,6 +25,15 @@ docOutline ul {
 docOutline ul li {
 	padding-left: 5px;
 	border-left: 1px solid #1F3643;
+	padding-bottom: 5px;
+	padding-top: 5px;
+	border-bottom: 1px solid #1F3643;
+	border-top: 1px solid #1F3643;
+}
+
+docOutline ul li:hover {
+	text-decoration: underline;
+	background-color: #243A4F;
 }
 
 docs {
