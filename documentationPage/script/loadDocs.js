@@ -53,7 +53,7 @@ async function getFileFromGitHub(fileURL) {
 async function loadOutline(md) {
 	const lines = md.split("\n");
 
-	let outline = "<ul>";
+	let outline = "<ul class='sublist'>";
 	for (let i = 0; i < lines.length; i++) {
 		if (lines[i].substring(0, 7) == "###### ") {
 			outline += `<li class="list6">${lines[i].substring(7, lines[i].length)}</li>`;

@@ -48,7 +48,6 @@ export default class CheckCommand {
 	handleBackspace() {
 		const com = document.getElementById("commandLine").value;
 		if (com == "" && commands.mode == "i") {
-			console.log("CheckCommand.js");
 			commands.backspace();
 		}
 	}
@@ -62,7 +61,6 @@ export default class CheckCommand {
 
 	// commands that do not need to have pressed enter to executre
 	checkCommand(com) {
-		console.log(commands.parseOpPendCommand(com));
 		const opPendCommand = commands.parseOpPendCommand(com);
 		if (opPendCommand) {
 			macroManager.throughMacro(opPendCommand, this);
@@ -80,14 +78,13 @@ export default class CheckCommand {
 		}
 
 		this.mode = commands.mode;
-		console.log("mode", this.mode);
 
 		this.setPhMessage("");
 		let formBar = document.getElementById("formulaBar");
 		let cellPicker = document.getElementById("cellPicker");
 		let clear = false;
 		// non repeatable commands here
-		if (com == "i") {
+		if (com === "i" && commands.mode === "n") {
 			this.changeMode("i");
 			commands.insert();
 			this.clearCom(com);
@@ -140,9 +137,16 @@ export default class CheckCommand {
 		} else if (com == "d" && this.mode == "V") {
 			commands.deleteSelectedRows();
 			this.handleEsc();
-		}
+		} else if (com == "iw" && this.mode == "v") {
+			commands.selectInWord();
+		} else if (com === "diw" && this.mode == "n") {
+			commands.selectInWord();
+			commands.deleteSelection();
+		} else if (com === "ciw" && this.mode == "n") {
+			commands.selectInWord();
+			commands.clearSelection();
 		// command to change the selected cell
-		else if (com == "zz") {
+		} else if (com == "zz") {
 			commands.viewportCenterCell();
 		} else if (com == "yf" && (this.mode == "v" || this.mode == "V")) {
 			commands.yankSelectionFormulae();

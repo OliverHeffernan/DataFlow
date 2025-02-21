@@ -57,6 +57,7 @@ export default class VisualManager {
 				this.getSelectionElement(y, x).className = "sel active" + dir;
 			}
 		}
+
 	}
 
 	// clears the styling of the visual selection,

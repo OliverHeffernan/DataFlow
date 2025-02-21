@@ -15,7 +15,6 @@ export default class Commands {
 		this.selStartRow = null;
 		this.selStartCol = null;
 		this.tempForm = "";
-		console.log(sheetManager);
 		Commands.instance = this;
 	}
 
@@ -78,7 +77,6 @@ export default class Commands {
 		const macroManager = new MacroManager();
 		macroManager.addToRecording("<B-SPACE>", "key");
 		const cellCol = sheetManager.cellCurPos;
-		console.log(sheetManager.tempForm);
 		if (cellCol === 0) return;
 
 		//let newForm = this.tempForm;
@@ -139,7 +137,6 @@ export default class Commands {
 		const row = sheetManager.selRow;
 		const col = sheetManager.selCol;
 		const form = sheetManager.getFormula(row, col);
-		console.log(form.length);
 
 		//sheetManager.setCellCurPos(form.length, this.tempForm);
 		sheetManager.setCellCurPos(form.length, sheetManager.tempForm);
@@ -193,7 +190,6 @@ export default class Commands {
 		//
 		const row = sheetManager.selRow;
 		let col = sheetManager.rows[row].findLastIndex((element) => element != "");
-		console.log("col", col);
 		col = Math.max(0, col);
 		col = Math.min(col, sheetManager.rows[row].length - 1);
 		this.tempForm = sheetManager.getFormula(row, col);
@@ -393,7 +389,6 @@ export default class Commands {
 	}
 
 	jumpWhiteSpace(amount = 1) {
-		console.log("kia ora");
 		let form = sheetManager.tempForm;
 		let pos = sheetManager.cellCurPos;
 		
@@ -413,7 +408,6 @@ export default class Commands {
 	}
 
 	jumpBackWhiteSpace(amount = 1) {
-		console.log("kia ora");
 		let form = sheetManager.tempForm;
 		let pos = sheetManager.cellCurPos;
 		
@@ -486,7 +480,6 @@ export default class Commands {
 				}
 			}
 		}
-		console.log("kia ora");
 		index = index ? index : 0;
 		sheetManager.setCellCurPos(index, sheetManager.tempForm);
 	}
@@ -545,11 +538,25 @@ export default class Commands {
 	}
 
 	isStartOfWord(prev, char) {
-		return this.isPunctuation(prev) && !this.isPunctuation(char);
+		//return this.isPunctuation(prev) && !this.isPunctuation(char) || this.isPunctuation(char);
+		const prevType = this.getCharType(prev);
+		const charType = this.getCharType(char);
+
+		if (prevType == charType) return false;
+		if (charType == "w") return false;
+		return true;
+		//if (prevType == "w" && charType != "w") return true;
+	}
+
+	getCharType(char) {
+		if (char == " ") return "w";
+		else if (this.isPunctuation(char)) return "p";
+		else return "c";
 	}
 
 	isEndOfWord(prev, char) {
-		return !this.isPunctuation(prev) && this.isPunctuation(char);
+		//return !this.isPunctuation(prev) && this.isPunctuation(char);
+		return this.isStartOfWord(char, prev);
 	}
 
 	getOppositeChar(char) {
@@ -613,5 +620,28 @@ export default class Commands {
 				mode: "v"
 			}
 		];
+	}
+
+	selectInWord() {
+		const form = sheetManager.tempForm;
+		const pos = sheetManager.cellCurPos;
+		
+		const prev = form[pos - 1] ? form[pos - 1] : " ";
+		const char = form[pos];
+		const next = form[pos + 1] ? form[pos + 1] : " ";
+
+		if (this.isEndOfWord(char, next) && this.isStartOfWord(prev, char)) {
+			visualManager.exitVisual();
+			this.startVisual();
+			return;
+		}
+
+		if (!this.isStartOfWord(prev, char)) {
+			this.jumpBackWord(1);
+		}
+		visualManager.exitVisual();
+		this.startVisual();
+
+		this.jumpEndWord(1);
 	}
 }

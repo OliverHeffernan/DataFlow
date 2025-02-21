@@ -18,6 +18,15 @@ docOutline {
 	background-color: #12202E;
 }
 
+docOutline ul {
+	list-style: none;
+}
+
+docOutline ul li {
+	padding-left: 5px;
+	border-left: 1px solid #1F3643;
+}
+
 docs {
 	position: fixed;
 	left: 300px;
