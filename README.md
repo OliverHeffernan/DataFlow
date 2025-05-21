@@ -1,5 +1,5 @@
 # DataFlow
-DataFlow is a spreadsheet app with keyboard commands, similar to Vim/Neovim. This allows for fast manipulation of your spreadsheets. You can access the web app <a href="https://oliverheffernan.github.io/DataFlow/">here</a>.
+DataFlow is a spreadsheet app with keyboard commands, similar to Vim/Neovim. This allows for fast manipulation of your spreadsheets.
 
 ## Local Installation
 ### MacOS:
