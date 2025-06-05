@@ -1,7 +1,7 @@
 # DataFlow
 DataFlow is a spreadsheet app with keyboard commands, similar to Vim/Neovim. This allows for fast manipulation of your spreadsheets.
 
-## Local Installation
+## Installation
 ### MacOS:
 You can clone this repository, and compile the app using the terminal command, `npm run tauri build`.
 
