@@ -33,5 +33,13 @@
 			"icons/icon.icns",
 			"icons/icon.ico"
 		]
+	},
+	"plugins": {
+		"updater": {
+			"pubkey": "",
+			"endpoints": [
+				"https://github.com/OliverHeffernan/DataFlow/releases/latest/download/latest.json"
+			]
+		}
 	}
 }

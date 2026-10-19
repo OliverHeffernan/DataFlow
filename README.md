@@ -3,7 +3,17 @@ DataFlow is a spreadsheet app with keyboard commands, similar to Vim/Neovim. Thi
 
 ## Installation
 ### MacOS:
-You can clone this repository, and compile the app using the terminal command, `npm run tauri build`.
+Once the first release is published, install the latest Intel or Apple Silicon build with:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/OliverHeffernan/DataFlow/main/install.sh | bash
+```
+
+Open `~/Applications/Dataflow.app`. If macOS blocks the first launch, use **System Settings → Privacy & Security → Open Anyway**; builds are ad-hoc signed, not Apple-notarized.
+
+For updates, choose **Dataflow → Check for Updates…** in the menu bar. Save your work before installing: the app restarts to finish the update. Each push to `main` automatically builds and publishes a new version after both Mac builds succeed.
+
+**Maintainers:** complete the [one-time signing-key setup](docs/releases.md#one-time-maintainer-setup) before the first release. The same guide covers releases, update behavior, and limitations. To build locally instead, clone the repository, run `npm ci`, then `npm run tauri build`.
 
 ### Amp orbs
 Executable `.agents/setup` prepares Debian orbs with Tauri's Linux libraries, a minimal stable Rust toolchain, and dependencies from both lockfiles. It uses the orb's Node/npm and caches Rust crates for the Linux host without compiling the app or starting servers. Amp can reuse the prepared environment in project snapshots; rerunning setup skips installed system packages and reuses package caches.

@@ -1,0 +1,159 @@
+name: Release Dataflow
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Keep releases in order, and never cancel a build halfway through publication.
+concurrency:
+  group: dataflow-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_id: ${{ steps.release.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: bash -n install.sh
+      - name: Check signing configuration
+        env:
+          PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$PUBLIC_KEY" || -z "$PRIVATE_KEY" ]]; then
+            echo 'Configure TAURI_UPDATER_PUBLIC_KEY (repository variable) and TAURI_SIGNING_PRIVATE_KEY (repository secret). See docs/releases.md.' >&2
+            exit 1
+          fi
+      - name: Assign an increasing version (including reruns)
+        id: version
+        run: echo "version=0.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+      - name: Create a draft release
+        id: release
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        with:
+          script: |
+            const { data } = await github.rest.repos.createRelease({
+              ...context.repo,
+              tag_name: `v${process.env.VERSION}`,
+              target_commitish: context.sha,
+              name: `Dataflow ${process.env.VERSION}`,
+              body: `Built from ${context.sha}.\n\nInstall with the one-line command in the README, or download the archive for your Mac below. Existing installations can use Dataflow → Check for Updates… .`,
+              draft: true,
+              prerelease: false,
+            });
+            return data.id;
+
+  build:
+    needs: prepare
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      # tauri-action merges latest.json; serialize uploads to avoid lost platforms.
+      max-parallel: 1
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+      - run: npm ci
+      - name: Configure the release version, public key, and ad-hoc Apple signature
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs';
+          writeFileSync(`${process.env.RUNNER_TEMP}/dataflow-release.json`, JSON.stringify({
+            version: process.env.VERSION,
+            bundle: { createUpdaterArtifacts: true, macOS: { signingIdentity: '-' } },
+            plugins: { updater: { pubkey: process.env.PUBLIC_KEY.trim() } },
+          }));
+          JS
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          uploadUpdaterJson: true
+          args: --target ${{ matrix.target }} --bundles app --config ${{ runner.temp }}/dataflow-release.json -- --locked
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate both updater platforms before publishing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          gh release download "v$VERSION" --pattern latest.json --dir "$RUNNER_TEMP"
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs';
+          import assert from 'node:assert/strict';
+          const manifest = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/latest.json`));
+          assert.equal(manifest.version.replace(/^v/, ''), process.env.VERSION);
+          for (const arch of ['aarch64', 'x86_64']) {
+            const platform = manifest.platforms[`darwin-${arch}`];
+            assert.ok(platform?.signature?.trim(), `Missing ${arch} signature`);
+            assert.ok(platform.url.startsWith(`https://github.com/${process.env.GITHUB_REPOSITORY}/releases/download/v${process.env.VERSION}/`));
+            assert.ok(platform.url.endsWith('.app.tar.gz'));
+          }
+          JS
+      - name: Publish the complete release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        with:
+          script: |
+            // A rerun of an older workflow must not replace a newer latest release.
+            try {
+              const { data } = await github.rest.repos.getLatestRelease(context.repo);
+              const previous = data.tag_name.replace(/^v/, '').split('.').map(Number);
+              const next = process.env.VERSION.split('.').map(Number);
+              const difference = next.map((part, i) => part - previous[i]).find(part => part !== 0);
+              if (!(difference > 0)) throw new Error('A newer or equal release is already published. Leaving this release as a draft.');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            await github.rest.repos.updateRelease({
+              ...context.repo,
+              release_id: Number(process.env.RELEASE_ID),
+              draft: false,
+              make_latest: 'true',
+            });
