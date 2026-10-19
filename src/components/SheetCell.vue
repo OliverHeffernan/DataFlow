@@ -3,10 +3,15 @@
 		<button
 			:id="colNo + ':' + rowNo"
 			class="cell"
+			:aria-label="value?.kind === 'chart' ? (value.title || `${value.type} chart`) : undefined"
+			:title="typeof value === 'string' && value.startsWith('Chart:') ? value : undefined"
 			@dblclick="handleDblClick"
 			@click="handleClick"
 			@contextmenu.prevent="handleRightClick"
-		></button>
+		>
+			<CellChart v-if="value?.kind === 'chart'" :chart="value" />
+			<template v-else>{{ value }}</template>
+		</button>
 		<div
 			:id="'visual'+colNo+':'+rowNo"
 			class="sel inactive"
@@ -15,7 +20,8 @@
 </template>
 
 <script setup>
-	import { ref, onMounted, defineProps } from 'vue';
+	import { computed, onMounted, defineProps } from 'vue';
+	import CellChart from './CellChart.vue';
 	import SheetManager from '../classes/SheetManager.js';
 	const sheetManager = new SheetManager();
 
@@ -43,6 +49,8 @@
 			required: true,
 		}
 	});
+
+	const value = computed(() => sheetManager.cellValues.value[props.rowNo]?.[props.colNo] ?? "");
 
 	onMounted(() => {
 		//if (props.rowNo == sheetManager.value.numOfRows.value - 1 && props.colNo == sheetManager.value.numOfCols.value - 1) {

@@ -73,6 +73,37 @@ There are more IF functions below:
 
 All of the above if functions take the same parameters as SUMIF.
 
+### Formula-defined charts: `CHART()`
+
+Enter a chart builder as a cell formula. Commit it with Enter to render an SVG chart over the grid, anchored to the formula's cell. The chart can cover multiple cells without changing any row heights or column widths. Click the chart to select its formula cell, or double-click to edit its original formula. No `.build()` call is needed.
+
+```
+=CHART().line().x(A1:A6).series(B1:B6, "Revenue").series(C1:C6, "Costs").title("Monthly performance").xLabel("Month").yLabel("NZD").size(360, 220).position(12, 8)
+```
+
+For a minimal chart, use `=CHART().series(B1:B6)`.
+
+| Builder method | Meaning |
+| --- | --- |
+| `.line()`, `.bar()`, `.scatter()` | Choose the chart type. Defaults to line; bars are grouped by series. |
+| `.x(range)` | Shared x-labels or x-values. Defaults to point numbers starting at 1. |
+| `.series(range, "name")` | Add a series. Repeat for multiple series; the name is optional. |
+| `.title("text")` | Set the title. |
+| `.xLabel("text")`, `.yLabel("text")` | Set axis labels. |
+| `.size(width, height)` | Overall chart dimensions in pixels, including title and axes. Defaults to 320 × 200. |
+| `.width(width)`, `.height(height)` | Set either dimension independently. |
+| `.position(x, y)` | Nonnegative pixel offsets from the formula cell's top-left corner. Defaults to (0, 0); larger offsets can place the chart over other cells. |
+
+Methods can appear in any order. Later configuration calls override earlier settings; `.series()` always adds another series. For example, `.size(360, 220).height(280)` produces a 360 × 280 chart. Sizes must be positive numeric literals; positions must be nonnegative numeric literals. Chart dimensions and offsets never change cell sizes. Charts move with their formula cells when the sheet scrolls. Very small charts scale their contents down to fit.
+
+Ranges must be a single row, a single column, or a single cell, in ascending order and within the sheet. Rows remain zero-based. Existing relative-reference notation works too: a chart in D6 can use `.series([-2]0:[-2]{-1})` to plot B0:B5. Source cells may contain numeric formulas; source edits update the chart automatically.
+
+Every series and the explicit x-range must have the same length. Line and bar charts space labels evenly; scatter charts require finite numeric x-values and position points by their numeric values. Blank y-values leave gaps (or omit bars/points) without shifting other values. Zero and negative y-values are supported; other nonnumeric or infinite y-values produce a cell error. A chart with no nonblank y-values displays “No data”.
+
+Text arguments use double quotes; escape embedded quotes as `\"` and backslashes as `\\`. Labels are displayed as text, never HTML. Malformed builders, invalid data, and circular references display readable errors in the cell. Chart cells cannot be used as numeric inputs to other formulas or charts.
+
+The builder text is stored in the existing sheet format, so charts survive save/load, undo/redo, and copy/paste. Copying a chart's value also copies its builder formula; the pasted chart is anchored to its new cell. There is no image export, drag-resizing, or drag-positioning in this version; use builder methods to size and position charts.
+
 ## Commands
 Commands are entered into the command line at the bottom of the window.
 

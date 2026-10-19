@@ -339,7 +339,7 @@ export default class VimKeyboard {
 		this.state.marks['['] = start; this.state.marks[']'] = end;
 		if (this.context === 'sheet') {
 			const left = linewise ? 0 : Math.min(start.col, end.col), right = linewise ? this.rows[0].length - 1 : Math.max(start.col, end.col);
-			const cells = this.rows.slice(start.row, end.row + 1).map((row, r) => row.slice(left, right + 1).map((value, c) => values ? String(this.sheet.getValue?.(start.row + r, left + c) ?? value) : value));
+			const cells = this.rows.slice(start.row, end.row + 1).map((row, r) => row.slice(left, right + 1).map((value, c) => values ? String(this.sheet.getCopyValue?.(start.row + r, left + c) ?? value) : value));
 			this.register = { cells, linewise, text: cells.map(row => row.join('\t')).join('\n') };
 			if (operator !== 'y' && !empty) {
 				if (linewise && operator === 'd') {

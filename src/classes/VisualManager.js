@@ -94,7 +94,7 @@ export default class VisualManager {
 			let line = [];
 			for (let x = startCol; x <= endCol; x++) {
 				if (formula) line.push(sheetManager.getFormula(y, x));
-				else line.push(sheetManager.getValue(y, x));
+				else line.push(sheetManager.getCopyValue(y, x));
 			}
 
 			buffer.push(line);

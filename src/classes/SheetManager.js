@@ -1,8 +1,9 @@
-import { ref } from "vue";
+import { ref, shallowRef } from "vue";
 //import { reactive } from "vue";
 import { create, all } from "mathjs";
 import Formulas from "./FormulaFunctions.js";
 import SyntaxHighlighting from "./SyntaxHighlighting.js";
+import { evaluateChart } from "./ChartFormula.js";
 
 import HistoryManager from "./HistoryManager.js";
 const historyManager = new HistoryManager();
@@ -23,6 +24,8 @@ export default class SheetManager {
 
 		this.rows = [];
 		this.styles = [];
+		this.cellValues = shallowRef([]);
+		this.evaluating = new Set();
 		this.defaultBG = "#091119";
 		this.defaultFG = "white";
 
@@ -182,11 +185,33 @@ export default class SheetManager {
 
 	// get the value of a specific cell
 	getValue(row, col) {
+		const key = `${row}:${col}`;
+		const nested = this.evaluating.size > 0;
+		if (this.evaluating.has(key)) throw new Error("circular logic detected");
+		this.evaluating.add(key);
+		try {
+			return this.evaluateCell(row, col);
+		} catch (error) {
+			if (nested) throw error;
+			return error.message;
+		} finally {
+			this.evaluating.delete(key);
+		}
+	}
+
+	evaluateCell(row, col) {
 		let expr = this.getFormula(row, col);
 
 		// if the cell is not a formula, return the expression with no changes
 		if (expr[0] !== "=") {
 			return expr;
+		}
+		if (/^=\s*CHART\b/.test(expr)) {
+			try {
+				return evaluateChart(expr, row, col, this);
+			} catch (error) {
+				throw new Error(`Chart: ${error.message}`);
+			}
 		}
 		// remove the equals sign from the expression
 		expr = expr.substring(1);
@@ -344,13 +369,9 @@ export default class SheetManager {
 	setFormula(move = true) {
 		// set the formula from the formula bar to the selected cell
 		this.rows[this.selRow][this.selCol] =
-			document.getElementById("formulaBar").value;
+			document.getElementById("formulaBar")?.value ?? this.tempForm;
 
 		// update the value of the selected cell
-		this.getCell(this.selRow, this.selCol).innerText = this.getValue(
-			this.selRow,
-			this.selCol,
-		);
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 
 		//this.moveDown(1);
@@ -364,7 +385,6 @@ export default class SheetManager {
 		const oldValue = this.getFormula(this.selRow, this.selCol);
 
 		this.rows[this.selRow][this.selCol] = value;
-		this.getCell(this.selRow, this.selCol).innerText = this.getValue(this.selRow, this.selCol,);
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 		historyManager.do(this, 353);
 	}
@@ -388,10 +408,15 @@ export default class SheetManager {
 		this.yank([[text]]);
 	}
 
+	getCopyValue(row, col) {
+		const value = this.getValue(row, col);
+		return value?.kind === "chart" ? this.getFormula(row, col) : value;
+	}
+
 	yankValue() {
 		let col = this.selCol;
 		let row = this.selRow;
-		let text = this.getValue(row, col);
+		let text = this.getCopyValue(row, col);
 		navigator.clipboard.writeText(text);
 		this.yank([[text]]);
 	}
@@ -531,17 +556,7 @@ export default class SheetManager {
 	}
 
 	loadAllCells(r, c) {
-		const rows = this.rows.length;
-		const cols = this.rows[0].length;
-		for (let i = 0; i < rows; i++) {
-			for (let j = 0; j < cols; j++) {
-				try {
-					this.getCell(i, j).innerText = this.getValue(i, j);
-				} catch {
-					console.log("cell not yet loaded");
-				}
-			}
-		}
+		this.cellValues.value = this.rows.map((row, i) => row.map((_, j) => this.getValue(i, j)));
 
 		// checks if new cells are being created, if they are, then it lets the styles be loaded once it is all mounted, otherwise it loads the styles right away.
 		if (r == null) this.loadStyles();
