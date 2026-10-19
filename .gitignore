@@ -28,3 +28,6 @@ coverage
 *.sw?
 
 *.tsbuildinfo
+
+# Orb portal manifests are specific to each running orb.
+.amp/portals/*

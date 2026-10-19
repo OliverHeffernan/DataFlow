@@ -5,6 +5,13 @@ DataFlow is a spreadsheet app with keyboard commands, similar to Vim/Neovim. Thi
 ### MacOS:
 You can clone this repository, and compile the app using the terminal command, `npm run tauri build`.
 
+### Amp orbs
+Executable `.agents/setup` prepares Debian orbs with Tauri's Linux libraries, a minimal stable Rust toolchain, and dependencies from both lockfiles. It uses the orb's Node/npm and caches Rust crates for the Linux host without compiling the app or starting servers. Amp can reuse the prepared environment in project snapshots; rerunning setup skips installed system packages and reuses package caches.
+
+`.agents/resume` only checks that the toolchains are available; it never reinstalls dependencies. No database or secrets are required.
+
+After setup, use `npm run build` for the frontend or `cargo check --locked --manifest-path src-tauri/Cargo.toml` for the native backend. Native macOS builds still require a Mac.
+
 ## Functions
 Functions are entered in the formula bar at the top of the screen. These are used to set the value of a cell mathematically.
 

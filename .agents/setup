@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+TIMEFORMAT='Step completed in %3R seconds'
+
+printf '\nChecking Tauri Linux prerequisites...\n'
+time {
+  packages=(
+    build-essential curl wget file pkg-config
+    libwebkit2gtk-4.1-dev libxdo-dev libssl-dev
+    libayatana-appindicator3-dev librsvg2-dev
+  )
+  missing=()
+  for package in "${packages[@]}"; do
+    if [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != 'install ok installed' ]]; then
+      missing+=("$package")
+    fi
+  done
+  if ((${#missing[@]})); then
+    sudo apt-get update
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+  fi
+}
+
+printf '\nPreparing Rust (the repository specifies a minimum version, not a toolchain pin)...\n'
+time {
+  if [[ -f "$HOME/.cargo/env" ]]; then
+    source "$HOME/.cargo/env"
+  fi
+  if ! command -v cargo >/dev/null 2>&1; then
+    curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs |
+      sh -s -- -y --profile minimal --no-modify-path
+    source "$HOME/.cargo/env"
+  fi
+
+  # Amp and supervised services start in separate login shells.
+  marker='# DataFlow orb: make the Rust toolchain available in login shells.'
+  if ! grep -Fqx "$marker" "$HOME/.bash_profile" 2>/dev/null; then
+    cat >> "$HOME/.bash_profile" <<'EOF'
+
+# DataFlow orb: make the Rust toolchain available in login shells.
+if [ -f "$HOME/.cargo/env" ]; then
+  . "$HOME/.cargo/env"
+fi
+EOF
+  fi
+  rustc --version
+  cargo --version
+}
+
+printf '\nInstalling locked frontend dependencies with the orb-provided Node/npm...\n'
+node --version
+npm --version
+time npm ci --include=dev --prefer-offline --no-audit --no-fund
+
+printf '\nCaching locked Rust dependencies for this Linux host...\n'
+host="$(rustc -vV | sed -n 's/^host: //p')"
+time cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target "$host"
+
+printf '\nDataFlow toolchains and dependencies are ready for the project snapshot.\n'

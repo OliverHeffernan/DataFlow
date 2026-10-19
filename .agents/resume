@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Dependencies survive snapshots and pauses. No authentication or services need repair.
+# Fail quickly if the prepared toolchain is missing; never install on wake.
+for tool in node npm cargo rustc; do
+  command -v "$tool" >/dev/null
+done
+printf 'DataFlow orb ready.\n'
