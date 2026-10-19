@@ -116,24 +116,38 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Validate both updater platforms before publishing
+      - name: Prepare public updater URLs and validate both platforms
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           gh release download "v$VERSION" --pattern latest.json --dir "$RUNNER_TEMP"
+          gh release view "v$VERSION" --json assets --jq '.assets' > "$RUNNER_TEMP/release-assets.json"
           node --input-type=module <<'JS'
-          import { readFileSync } from 'node:fs';
+          import { readFileSync, writeFileSync } from 'node:fs';
           import assert from 'node:assert/strict';
           const manifest = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/latest.json`));
+          const assets = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/release-assets.json`));
           assert.equal(manifest.version.replace(/^v/, ''), process.env.VERSION);
+          // tauri-action v1 emits asset API URLs. Publish stable, unauthenticated
+          // browser download URLs instead; draft browser URLs use temporary tags.
+          for (const platform of Object.values(manifest.platforms)) {
+            const asset = assets.find(asset => asset.apiUrl === platform.url || asset.url === platform.url);
+            assert.ok(asset, `Updater asset not found: ${platform.url}`);
+            assert.ok(asset.name.endsWith('.app.tar.gz'), `Not an app archive: ${asset.name}`);
+            assert.ok(assets.some(signature => signature.name === `${asset.name}.sig`), `Missing signature asset for ${asset.name}`);
+            assert.ok(platform.signature?.trim(), `Missing signature for ${asset.name}`);
+            platform.url = `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/download/v${process.env.VERSION}/${encodeURIComponent(asset.name)}`;
+          }
           for (const arch of ['aarch64', 'x86_64']) {
             const platform = manifest.platforms[`darwin-${arch}`];
             assert.ok(platform?.signature?.trim(), `Missing ${arch} signature`);
             assert.ok(platform.url.startsWith(`https://github.com/${process.env.GITHUB_REPOSITORY}/releases/download/v${process.env.VERSION}/`));
             assert.ok(platform.url.endsWith('.app.tar.gz'));
           }
+          writeFileSync(`${process.env.RUNNER_TEMP}/latest.json`, JSON.stringify(manifest, null, 2));
           JS
+          gh release upload "v$VERSION" "$RUNNER_TEMP/latest.json" --clobber
       - name: Publish the complete release
         uses: actions/github-script@v7
         env:
