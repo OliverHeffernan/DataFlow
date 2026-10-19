@@ -154,7 +154,9 @@ export default class Formulas {
 	replaceReferences(expr, sheetManager) {
 		// replacing cell references with their values
 		expr = expr.replace(/([A-Z])(\d+)/g, (match, letter, number) => {
-			return sheetManager.getValue(number, letter.charCodeAt(0) - 65);
+			const value = sheetManager.getValue(number, letter.charCodeAt(0) - 65);
+			if (value?.kind === "chart") throw new Error("Chart cells cannot be used in numeric formulas");
+			return value;
 		});
 		
 		return expr;
@@ -217,15 +219,10 @@ export default class Formulas {
 			// Iterate through the range and collect values
 			for (let i = startRow; i <= endRow; i++) {
 				for (let j = startCol; j <= endCol; j++) {
-					try {
-						const value = Number(sheetManager.getValue(i, j)); // Assume this.getValue retrieves cell value
-						sum += value;
-						//values.push(value);
-					} catch {
-						const nonNumericValue = sheetManager.getValue(i, j);
-						//values.push(`'${nonNumericValue}'`);
-					}
-					values.push(sheetManager.getValue(i, j));
+					const value = sheetManager.getValue(i, j);
+					if (value?.kind === "chart") throw new Error("Chart cells cannot be used in numeric formulas");
+					sum += Number(value);
+					values.push(value);
 					count++;
 				}
 			}

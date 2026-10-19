@@ -6,6 +6,7 @@
 	"scripts": {
 		"dev": "vite",
 		"serve": "vue-cli-service serve",
+		"test": "node --test src/classes/*.test.js",
 		"build": "vite build",
 		"preview": "vite preview",
 		"tauri": "tauri"

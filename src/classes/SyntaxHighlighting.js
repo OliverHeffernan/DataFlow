@@ -1,4 +1,4 @@
-const operators = ["&#47", "+", "-", "*", "&lt;", "&gt;", "&#61;"];
+const operators = ["&#47;", "+", "-", "*", "&lt;", "&gt;", "&#61;"];
 const functions = ["SUM", "SUMIF", "AVG", "AVGIF", "COUNT", "COUNTIF"].sort((a, b) => b.length - a.length);
 export default class SyntaxHighlighting {
 	highlight(form) {
@@ -10,6 +10,17 @@ export default class SyntaxHighlighting {
 		}/* else {
 			form = form.substring(1);
 		}*/
+
+		if (/^=\s*CHART\b/.test(form)) {
+			// Keep quoted labels intact, including method names, references and brackets.
+			return form.split(/("(?:\\.|[^"\\])*(?:"|$))/g).map((part, i) => {
+				const escaped = this.preventHtmlInjection(part);
+				return i % 2 ? escaped : escaped.replace(
+					/\b(CHART|line|bar|scatter|x|series|title|xLabel|yLabel|size|width|height|position)(?=\s*\()/g,
+					"<span class='function'>$1</span>",
+				);
+			}).join("");
+		}
 
 		form = this.preventHtmlInjection(form);
 
@@ -30,10 +41,11 @@ export default class SyntaxHighlighting {
 	}
 
 	preventHtmlInjection(form) {
+		form = form.replaceAll("&", "&amp;");
 		form = form.replaceAll("<", "&lt;");
 		form = form.replaceAll(">", "&gt;");
 		form = form.replaceAll("=", "&#61;");
-		form = form.replaceAll("/", "&#47");
+		form = form.replaceAll("/", "&#47;");
 		return form;
 	}
 

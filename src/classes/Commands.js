@@ -201,6 +201,9 @@ export default class Commands {
 		const formBar = this.byId("formulaBar");
 		//formBar.value = "";
 		this.tempForm = "";
+		sheetManager.tempForm = "";
+		sheetManager.updateEditFormula("");
+		sheetManager.setCellCurPos(0, "");
 		//formBar.focus();
 		this.changeMode("i");
 		sheetManager.setFormula(false);
@@ -337,7 +340,7 @@ export default class Commands {
 	yankSelectionValues() {
 		let col = sheetManager.selCol;
 		let row = sheetManager.selRow;
-		let text = sheetManager.getValue(row, col);
+		let text = sheetManager.getCopyValue(row, col);
 		navigator.clipboard.writeText(text);
 
 		visualManager.yankSelection(sheetManager, false);

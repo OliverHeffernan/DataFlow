@@ -78,7 +78,7 @@
 	function copySelectionValue() {
 		let col = sheetManager.selCol;
 		let row = sheetManager.selRow;
-		let text = sheetManager.getValue(row, col);
+		let text = sheetManager.getCopyValue(row, col);
 		navigator.clipboard.writeText(text);
 		visualManager.yankSelection(sheetManager, false);
 		hideDialog();
