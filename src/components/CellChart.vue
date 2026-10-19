@@ -55,7 +55,7 @@ const shorten = (value, length) => {
 const format = value => Number(value.toPrecision(3)).toString();
 const frameStyle = computed(() => ({
 	width: `${props.chart.width}px`, height: `${props.chart.height}px`,
-	paddingLeft: `${props.chart.position.x}px`, paddingTop: `${props.chart.position.y}px`,
+	left: `${props.chart.position.x}px`, top: `${props.chart.position.y}px`,
 }));
 const description = computed(() => props.chart.series.map(series =>
 	`${series.name}: ${series.values.map((value, i) => `${props.chart.x[i]}: ${value ?? "blank"}`).join(", ")}`
@@ -120,7 +120,8 @@ const layout = computed(() => {
 </script>
 
 <style scoped>
-.chart-frame { display: block; box-sizing: content-box; }
+.chart-frame { position: absolute; z-index: 2; display: block; }
+.focussed > .chart-frame { outline: 2px solid white; outline-offset: -2px; }
 .chart { display: block; overflow: hidden; font: 10px ui-monospace, monospace; }
 .background { fill: #0d1925; stroke: #253847; }
 text { fill: #a5bacb; }
