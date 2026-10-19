@@ -9,7 +9,8 @@ import { Menu, MenuItem } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export default class FileManager {
-	constructor() {
+	constructor(onOpen) {
+		this.onOpen = onOpen;
 		FileManager.instance = this;
 	}
 
@@ -86,6 +87,7 @@ export default class FileManager {
 				sheetManager.loadAllCells(prevNumOfRows, prevNumOfCols);
 				sheetManager.path = path;
 
+				this.onOpen?.();
 				this.setPhMessage("Opened file from " + path + " successfully");
 			} else if (path.split(".").pop() == "heff") {
 				sheetManager.rows = JSON.parse(file);
@@ -95,6 +97,7 @@ export default class FileManager {
 
 				sheetManager.path = path;
 
+				this.onOpen?.();
 				this.setPhMessage("Opened file from " + path + " successfully");
 			} else {
 				this.setPhMessage("Invalid file type");

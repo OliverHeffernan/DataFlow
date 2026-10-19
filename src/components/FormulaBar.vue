@@ -6,12 +6,18 @@
 	</div>
 </template>
 <script setup>
+import { onMounted, onUnmounted } from 'vue';
 import NewFormBar from "./NewFormBar.vue";
 import SheetManager from '../classes/SheetManager.js';
 const sheetManager = new SheetManager();
 
 import CheckCommand from "../classes/CheckCommand.js";
 const checkCommand = new CheckCommand();
+const resize = new ResizeObserver(([entry]) => {
+	document.documentElement.style.setProperty('--formula-bar-height', `${entry.target.offsetHeight}px`);
+});
+onMounted(() => resize.observe(document.getElementById('topBar')));
+onUnmounted(() => resize.disconnect());
 function handleEnter() {
 	sheetManager.setFormula();
 	checkCommand.changeMode("n");
@@ -24,17 +30,18 @@ function handleEscape() {
 }
 
 function selectCell() {
-	let coords = document.getElementById("cellPicker").value;
-	let col = coords.charCodeAt(0) - 65;
-	let row = parseInt(coords.slice(1));
-	const pattern = /^[A-Z]\d+$/
-	if (pattern.test(coords)) {
-		sheetManager.selectCell(row, col);
+	const match = document.getElementById("cellPicker").value.match(/^([A-Z]+)(\d+)$/);
+	if (match) {
+		const col = [...match[1]].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0) - 1;
+		checkCommand.keyboard.context = 'sheet';
+		checkCommand.keyboard.move({ row: Number(match[2]), col });
+		checkCommand.render();
 	}
 }
 
 function focusFormulaBar() {
-	document.getElementById("formulaBar").focus();
+	checkCommand.editCell();
+	document.getElementById("commandLine").focus();
 }
 
 </script>

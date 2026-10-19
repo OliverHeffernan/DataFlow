@@ -1,5 +1,6 @@
 <template>
 	<div id="newFormBar">
+		<div id="formSelection" aria-hidden="true"></div>
 		<div id="formCursor" class="n"></div>
 		<div id="formText"></div>
 	</div>
@@ -8,15 +9,29 @@
 <style scoped>
 #newFormBar {
 	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	min-height: 20px;
+	max-height: 30vh;
+	overflow: auto;
+	line-height: 20px;
 	z-index: 300;
 	background-color: #15202E;
 }
 
 #formCursor {
 	position: absolute;
-	height: 25px;
+	height: 20px;
 	width: 1ch;
 	z-index: 305;
+	pointer-events: none;
+}
+
+#formSelection :deep(span) {
+	position: absolute;
+	background: rgba(160, 254, 255, 0.3);
+	pointer-events: none;
 }
 
 #formCursor.n {
