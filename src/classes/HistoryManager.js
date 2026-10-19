@@ -1,78 +1,31 @@
-//import SheetManager from "./SyntaxHighlighting.js";
-
 export default class HistoryManager {
 	constructor() {
-		if (HistoryManager.instance) {
-			return HistoryManager.instance;
-		}
-		this._undo = [];
-		this._redo = [];
-		// if the last action was an undo this is true
-		this.lastUndo = false;
-		// and vice versa
-		this.lastRedo = false;
-		this.maxLength = 50;
-
+		if (HistoryManager.instance) return HistoryManager.instance;
+		this._undo = []; this._redo = []; this.maxLength = 50;
 		HistoryManager.instance = this;
 	}
-
-	do(sheetManager, line) {
-		this.lastUndo = false;
-		this.lastRedo = false;
-		//console.log("do", line);
-		this._undo.push({
-			rows: sheetManager.rows.map(row => [...row]),
-			styles: sheetManager.styles.map(row => [...row])
-		});
-		this._redo = [];
-		this.fitLength();
+	reset(sheetManager) { this._undo = []; this._redo = []; this.do(sheetManager); }
+	do(sheetManager) {
+		const state = { rows: sheetManager.rows.map(row => [...row]), styles: sheetManager.styles.map(row => row.map(style => ({ ...style }))) };
+		if (JSON.stringify(this._undo.at(-1)) === JSON.stringify(state)) return;
+		this._undo.push(state); this._redo = [];
+		if (this._undo.length > this.maxLength) this._undo.shift();
 	}
-
 	undo(sheetManager, amount = 1) {
-		if (this._undo.length == 0 ) return;
-		//const state = this._undo.pop();
-		let state;
-		if (!this.lastUndo) {
-			amount++;
-		}
-		for (let i = 0; i < amount; i++) {
-			state = this._undo.pop();
-			this._redo.push(state);
-		}
-
-		this.loadState(sheetManager, state);
-		this.lastUndo = true;
-		this.lastRedo = false;
+		while (amount-- > 0 && this._undo.length > 1) this._redo.push(this._undo.pop());
+		if (this._undo.length) this.loadState(sheetManager, this._undo.at(-1));
 	}
-
 	redo(sheetManager, amount = 1) {
-		if (this._redo.length == 0 ) return;
-		let state;
-
-		if (!this.lastRedo) {
-			amount++;
-		}
-		for (let i = 0; i < amount; i++) {
-			state = this._redo.pop();
-			this._undo.push(state);
-		}
-
-		this.loadState(sheetManager, state);
-		this.lastUndo = false;
-		this.lastRedo = true;
+		while (amount-- > 0 && this._redo.length) this._undo.push(this._redo.pop());
+		if (this._undo.length) this.loadState(sheetManager, this._undo.at(-1));
 	}
-
-
 	loadState(sheetManager, state) {
-		sheetManager.rows = state.rows;
-		sheetManager.styles = state.styles;
-		sheetManager.loadAllCells(sheetManager.numOfRows.value, sheetManager.numOfCols.value);
-		sheetManager.loadStyles();
-	}
-
-	fitLength() {
-		if (this._undo.length > this.maxLength) {
-			this._undo.splice(0, this._undo.length - this.maxLength);
-		}
+		sheetManager.rows = state.rows.map(row => [...row]);
+		sheetManager.styles = state.styles.map(row => row.map(style => ({ ...style })));
+		sheetManager.numOfRows.value = sheetManager.rows.length;
+		sheetManager.numOfCols.value = sheetManager.rows[0].length;
+		sheetManager.selRow = Math.min(sheetManager.selRow, sheetManager.rows.length - 1);
+		sheetManager.selCol = Math.min(sheetManager.selCol, sheetManager.rows[0].length - 1);
+		sheetManager.loadAllCells();
 	}
 }

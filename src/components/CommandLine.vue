@@ -6,13 +6,12 @@
 			placeholder="command line here"
 			spellcheck="false"
 			type="text"
-			@input="checkCommand.checkCommandDirect()"
-			@keyup.enter="checkCommand.handleEnter()"
-			@keyup.esc="checkCommand.handleEsc()"
-			@keydown="deleteOrBackspace"
+			@input="checkCommand.checkCommandDirect($event)"
+			@paste.prevent="checkCommand.insertText($event.clipboardData.getData('text/plain'))"
+			@keydown="checkCommand.handleKeydown($event)"
 		/>
-		<!--@keyup.delete="checkCommand.handleBackspace()"-->
 	</div>
+	<input id="luaConfigInput" type="file" accept=".lua" hidden @change="checkCommand.importConfig($event.target.files[0])" />
 	<div id="webFileUpload">
 		<input id="fileInput" type="file" />
 		<button id="readFileBtn" @click="openFileWeb()">Read File</button>
@@ -42,16 +41,17 @@
 	function openFileWeb() {
 		const fileInput = document.getElementById('fileInput');
 		const file = fileInput.files[0];
-
-		console.log("web view");
+		if (!file) return;
 
 		const reader = new FileReader();
 
 		reader.onload = function(e) {
-			console.log(e.target.result);
-			sheetManager.rows = JSON.parse(e.target.result);
+			const data = JSON.parse(e.target.result);
+			sheetManager.rows = Array.isArray(data) ? data : data.rows;
+			sheetManager.styles = data.styles || sheetManager.rows.map(row => row.map(() => ({ ...sheetManager.defaultStyling })));
 			sheetManager.numOfRows.value = sheetManager.rows.length;
 			sheetManager.numOfCols.value = sheetManager.rows[0].length;
+			checkCommand.newSheet();
 			sheetManager.loadAllCells();
 		}
 
@@ -62,32 +62,6 @@
 	}
 	function handleClick() {
 		document.getElementById("commandLine").focus();
-	}
-
-	function deleteOrBackspace(event) {
-		if (event.key === "Backspace") {
-			console.log("commandline.vue");
-			checkCommand.handleBackspace();
-		} else if (event.key === "Delete") {
-			checkCommand.handleDelete();
-		} else if (event.ctrlKey && !event.altKey && !event.metaKey) {
-			// if only the control key is pressed, don't do anything
-			if (event.key === "Control") return;
-			event.preventDefault();
-
-			// make it type ^ then the key that was pressed into the commandLine
-			const char = event.key.toLowerCase();
-			const comLine = document.getElementById("commandLine");
-			const cursorPos = comLine.selectionStart;
-			const value = comLine.value;
-
-			const firstPart = value.slice(0, cursorPos);
-			const lastPart = value.slice(cursorPos);
-			comLine.value = firstPart + "^" + char + lastPart;
-
-			// then need to check the command, as this command wasn't techincally inputted directly into the input field.
-			checkCommand.checkCommandDirect();
-		}
 	}
 </script>
 <style>
@@ -110,7 +84,9 @@
 
 #modeDisplay {
 	font-size: 11px;
-	width: 70px;
+	flex-shrink: 0;
+	min-width: 70px;
+	white-space: nowrap;
 }
 
 #statusBar {

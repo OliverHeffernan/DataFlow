@@ -8,15 +8,15 @@
 			<tr>
 				<th class="rowLabelType rowLabels">abs</th>
 				<th class="rowLabelType relRow">rel</th>
-				<th v-for="(cell, index) in sheetManager.numOfRows" :key="index" class="labels colLabels">{{ String.fromCharCode(index + 65) }}</th>
+				<th v-for="(cell, index) in sheetManager.numOfCols" :key="index" class="labels colLabels">{{ sheetManager.columnLabel(index) }}</th>
 			</tr>
 		</thead>
 		<tbody>
 			<SheetRow
-				v-for="(row, index) in sheetManager.rows"
-				:key="index"
-				:row="row"
-				:rowNo="index"
+				v-for="index in sheetManager.numOfRows"
+				:key="index - 1"
+				:row="sheetManager.rows[index - 1]"
+				:rowNo="index - 1"
 			/>
 		</tbody>
 	</table>
@@ -78,7 +78,7 @@ body {
 
 table {
 	border-collapse: collapse;
-	margin-top: 24px;
+	margin-top: var(--formula-bar-height, 24px);
 	z-index: 10;
 }
 
@@ -93,7 +93,7 @@ table {
 
 .colLabels {
 	position: sticky;
-	top: 24px;
+	top: var(--formula-bar-height, 24px);
 	z-index: 30;
 }
 
@@ -111,7 +111,7 @@ table {
 
 .rowLabelType {
 	z-index: 40;
-	top: 24px;
+	top: var(--formula-bar-height, 24px);
 	background-color: #091119;
 }
 </style>

@@ -225,8 +225,16 @@ export default class SheetManager {
 		}
 	}
 
+	columnLabel(col) {
+		let label = '';
+		for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26)) label = String.fromCharCode(65 + (n - 1) % 26) + label;
+		return label;
+	}
+
 	// function to select a specific cell
 	selectCell(row, col) {
+		row = Math.max(0, Math.min(row, this.rows.length - 1));
+		col = Math.max(0, Math.min(col, this.rows[0].length - 1));
 		if (document.getElementsByClassName("rcActive").length != 0) {
 			document.getElementsByClassName("rcActive")[0].className =
 				"cellRightClick rcInactive";
@@ -247,7 +255,7 @@ export default class SheetManager {
 
 			// update the cell picker value
 			document.getElementById("cellPicker").value =
-				String.fromCharCode(col + 65) + row;
+				this.columnLabel(col) + row;
 
 			// add the focussed class to the new selected cell
 			this.getCell(row, col).className = "focussed cell";

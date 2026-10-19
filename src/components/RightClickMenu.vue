@@ -2,26 +2,26 @@
 	<div id="rightClickMenu" class="rcInactive">
 		<ul id="rcn">
 			<li @click="deleteRow()" class="delete">Delete Row <span class="com">dd</span></li>
-			<li @click="deleteColumn()" class="delete">Delete Column<span class="com">dc</span></li>
+			<li @click="deleteColumn()" class="delete">Delete Column<span class="com">:deletecol</span></li>
 			<li>--</li>
-			<li @click="rowAbove()">Insert Row Above<span class="com">ok</span></li>
-			<li @click="rowBelow()">Insert Row Below<span class="com">oj</span></li>
-			<li @click="colLeft()">Insert Column Left<span class="com">oh</span></li>
-			<li @click="colRight()">Insert Column Right<span class="com">ol</span></li>
+			<li @click="run('O&lt;Esc&gt;&lt;Esc&gt;')">Insert Row Above<span class="com">O</span></li>
+			<li @click="run('o&lt;Esc&gt;&lt;Esc&gt;')">Insert Row Below<span class="com">o</span></li>
+			<li @click="ex(':insertleft')">Insert Column Left<span class="com">:insertleft</span></li>
+			<li @click="ex(':insertright')">Insert Column Right<span class="com">:insertright</span></li>
 			<li>--</li>
-			<li @click="copyFormula()">Copy Cell Formula<span class="com">yf</span></li>
-			<li @click="copyValue()">Copy Cell Value<span class="com">ys</span></li>
+			<li @click="ex(':yankcell')">Copy Cell Formula<span class="com">:yankcell</span></li>
+			<li @click="ex(':yankvalue')">Copy Cell Value<span class="com">:yankvalue</span></li>
 			<li>--</li>
 			<li @click="paste()">Paste<span class="com">p</span></li>
-			<li @click="pasteAbove()">Paste Above<span class="com">Pk</span></li>
-			<li @click="pasteBelow()">Paste Below<span class="com">Pj</span></li>
-			<li @click="pasteLeft()">Paste Left<span class="com">Ph</span></li>
-			<li @click="pasteRight()">Paste Right<span class="com">Pl</span></li>
+			<li @click="ex(':putabove')">Paste Above<span class="com">:putabove</span></li>
+			<li @click="ex(':putbelow')">Paste Below<span class="com">:putbelow</span></li>
+			<li @click="ex(':putleft')">Paste Left<span class="com">:putleft</span></li>
+			<li @click="ex(':putright')">Paste Right<span class="com">:putright</span></li>
 			<li @click="openHelp()">Help ...</li>
 		</ul>
 		<ul id="rcv">
-			<li @click="copySelection()">Copy Selection Formulae <span class="com">yf</span></li>
-			<li @click="copySelectionValue()">Copy Selection Value <span class="com">ys</span></li>
+			<li @click="run('y')">Copy Selection Formulae <span class="com">y</span></li>
+			<li @click="ex(':yankvalue')">Copy Selection Value <span class="com">:yankvalue</span></li>
 		</ul>
 		<ul id="rcV">
 			<li @click="deleteRows()">Delete Rows <span class="com">d</span></li>
@@ -44,101 +44,15 @@
 	}
 
 	function openHelp() {
-		open("https://oliverheffernan.github.io/DataFlow/documentationPage/");
+		ex(':help');
 	}
 
-	// rcV functions, some crossover between rcV and rcv
-	function deleteRows() {
-		const startRow = visualManager.startRow;
-		const endRow = sheetManager.selRow;
-		const selCol = sheetManager.selCol;
-
-		const sr = Math.min(startRow, endRow);
-		const er = Math.max(startRow, endRow);
-
-		const amount = er - sr;
-
-		sheetManager.selectCell(sr, selCol);
-
-		sheetManager.deleteSelRow(amount + 1);
-		checkCommand.handleEsc();
-		hideDialog();
-	}
-
-	// rcv functions
-	function copySelection() {
-		let col = sheetManager.selCol;
-		let row = sheetManager.selRow;
-		let text = sheetManager.getFormula(row, col);
-		navigator.clipboard.writeText(text);
-		visualManager.yankSelection(sheetManager);
-		hideDialog();
-	}
-
-	function copySelectionValue() {
-		let col = sheetManager.selCol;
-		let row = sheetManager.selRow;
-		let text = sheetManager.getValue(row, col);
-		navigator.clipboard.writeText(text);
-		visualManager.yankSelection(sheetManager, false);
-		hideDialog();
-	}
-
-	// rcn functions
-	function deleteRow() {
-		sheetManager.deleteSelRow(1);
-		hideDialog();
-	}
-
-	function deleteColumn() {
-		sheetManager.deleteSelCol(1);
-		hideDialog();
-	}
-
-	function rowAbove() {
-		sheetManager.insertRowAbove();
-		hideDialog();
-	}
-
-	function rowBelow() {
-		sheetManager.insertRowBelow();
-		hideDialog();
-	}
-
-	function copyFormula() {
-		sheetManager.yankFormula();
-		hideDialog();
-	}
-
-	function copyValue() {
-		sheetManager.yankValue();
-		hideDialog();
-	}
-
-	function paste() {
-		sheetManager.paste(1);
-		hideDialog();
-	}
-
-	function pasteBelow() {
-		sheetManager.pasteInGapRow(1, 1);
-		hideDialog();
-	}
-
-	function pasteAbove() {
-		sheetManager.pasteInGapRow(1, -1);
-		hideDialog();
-	}
-
-	function pasteLeft() {
-		sheetManager.pasteInGapCol(1, -1);
-		hideDialog();
-	}
-
-	function pasteRight() {
-		sheetManager.pasteInGapCol(1, 1);
-		hideDialog();
-	}
+	function run(keys) { checkCommand.keyboard.feed(keys, false); hideDialog(); }
+	function ex(command) { checkCommand.handleEnterFromCom(command); hideDialog(); }
+	function deleteRows() { run('d'); }
+	function deleteRow() { run('dd'); }
+	function deleteColumn() { ex(':deletecol'); }
+	function paste() { run('p'); }
 
 </script>
 

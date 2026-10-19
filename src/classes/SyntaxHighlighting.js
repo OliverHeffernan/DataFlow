@@ -6,7 +6,7 @@ export default class SyntaxHighlighting {
 		// this is the same reasons that we do the / first.
 		// there should only be one highlighted equal sign in a formula
 		if (form[0] !== "=") {
-			return form;
+			return form.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 		}/* else {
 			form = form.substring(1);
 		}*/
@@ -30,6 +30,7 @@ export default class SyntaxHighlighting {
 	}
 
 	preventHtmlInjection(form) {
+		form = form.replaceAll("&", "&amp;");
 		form = form.replaceAll("<", "&lt;");
 		form = form.replaceAll(">", "&gt;");
 		form = form.replaceAll("=", "&#61;");

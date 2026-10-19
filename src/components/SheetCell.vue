@@ -68,28 +68,26 @@
 	}
 			
 	function handleClick(event) {
-		console.log(checkCommand.mode);
-		if (event.shiftKey && checkCommand.mode == "n") {
-			checkCommand.changeMode("v");
-			visualManager.startVisual(sheetManager.selRow, sheetManager.selCol);
-		}
-		else if (!event.shiftKey && checkCommand.mode == "v") {
-			checkCommand.handleEsc();
-		}
-		sheetManager.selectCell(props.rowNo, props.colNo);
+		const keyboard = checkCommand.keyboard;
+		if (keyboard.mode === 'i') keyboard.escape();
+		keyboard.pending = ''; keyboard.command = null; keyboard.mappingKeys = [];
+		keyboard.context = 'sheet'; keyboard.formulaCursor = 0;
+		if (event.shiftKey) { keyboard.anchor ||= keyboard.point; keyboard.mode = 'v'; }
+		else { keyboard.anchor = null; keyboard.mode = 'n'; }
+		keyboard.move({ row: props.rowNo, col: props.colNo });
 		document.getElementById("commandLine").focus();
+		return keyboard.render();
 	}
 
 	function handleDblClick() {
 		sheetManager.selectCell(props.rowNo, props.colNo);
-		document.getElementById("formulaBar").focus();
+		checkCommand.editCell();
+		document.getElementById("commandLine").focus();
 	}
 
-	const rcMenu = document.getElementById("rightClickMenu");
-	function handleRightClick(event) {
-		const thisRow = props.rowNo;
-		const thisCol = props.colNo;
-		sheetManager.selectCell(thisRow, thisCol);
+	async function handleRightClick(event) {
+		const rcMenu = document.getElementById("rightClickMenu");
+		if (!checkCommand.keyboard.anchor) await handleClick(event);
 		rcMenu.className = "rcActive";
 		modalRightClick();
 
@@ -113,7 +111,7 @@
 			rcn.style.display = "none";
 		}
 
-		if (mode == "v") {
+		if (mode == "v" || mode == "b") {
 			rcv.style.display = "block";
 		}
 		else {

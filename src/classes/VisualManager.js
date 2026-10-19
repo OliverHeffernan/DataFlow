@@ -18,7 +18,7 @@ export default class VisualManager {
 		this.startCol = col;
 		this.startCellCurPos = cellCurPos;
 		this.line = line;
-		this.setVisual(this.startRow, this.startCol, numOfCols);
+		this.setVisual(this.startRow, this.startCol, cellCurPos, numOfCols);
 	}
 
 	getSelectionElement(row, col) {
@@ -29,7 +29,7 @@ export default class VisualManager {
 	setVisual(endRow, endCol, cellCurPos, numOfCols) {
 		if (this.startRow == null || this.startCol == null) return;
 
-		if (this.startRow == endRow && this.startCol == endCol) {
+		if (!this.sheetSelection && !this.line && this.startRow == endRow && this.startCol == endCol) {
 			this.clearVisual();
 			const cursor = document.getElementById("formCursor");
 			cellCurPos = cellCurPos >= this.startCellCurPos ? cellCurPos + 1 : cellCurPos;
@@ -78,11 +78,12 @@ export default class VisualManager {
 		this.clearVisual();
 		this.startRow = null;
 		this.startCol = null;
+		this.sheetSelection = false;
 	}
 
 	yankSelection(sheetManager, formula = true) {
 		let endRow = sheetManager.selRow;
-		let endCol = this.line ? sheetManager.numOfCols.value : sheetManager.selCol;
+		let endCol = this.line ? sheetManager.numOfCols.value - 1 : sheetManager.selCol;
 		let startRow = Math.min(this.startRow, endRow);
 		endRow = Math.max(this.startRow, endRow);
 
