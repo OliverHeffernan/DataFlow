@@ -226,6 +226,47 @@ function stack(name, arrays) {
 	return arrays[0].map((_, i) => arrays.flatMap(array => array[i]));
 }
 
+// Record keys deliberately differ from spreadsheet comparisons: blanks never match, booleans
+// are distinct from numbers, and decimals compare exactly rather than with mathjs's tolerance.
+function recordKeys(array, name, argument) {
+	return array.map((row, r) => {
+		let blank = false;
+		const parts = row.map((value, c) => {
+			if (typeof value === "number") value = math.bignumber(String(value));
+			if (math.isBigNumber(value) && value.isFinite()) return ["number", value.toString()];
+			if (typeof value === "boolean") return ["boolean", value];
+			if (typeof value === "string") {
+				if (value === "") blank = true;
+				return ["text", value];
+			}
+			throw new FormulaError("#VALUE!", `${name} ${argument} key at row ${r}, column ${c} must be text, a boolean, or a finite real number`);
+		});
+		// JSON preserves component boundaries and escaping; decimal strings preserve precision.
+		return blank ? null : JSON.stringify(parts);
+	});
+}
+
+function matchingRows(name, queryKeys, sourceKeys) {
+	if (queryKeys[0].length !== sourceKeys[0].length) {
+		throw new FormulaError("#VALUE!", `${name} key arrays must have the same number of columns (got ${shapeText(queryKeys)} and ${shapeText(sourceKeys)})`);
+	}
+	const queries = recordKeys(queryKeys, name, "query");
+	const sources = recordKeys(sourceKeys, name, "source");
+	const index = new Map();
+	sources.forEach((key, row) => {
+		if (key === null) return;
+		if (!index.has(key)) index.set(key, []);
+		index.get(key).push(row);
+	});
+	return queries.map(key => index.get(key) ?? []);
+}
+
+function checkMatchSize(name, rows, cols) {
+	if (rows * cols > 1_000_000) {
+		throw new FormulaError("#CALC!", `${name} result ${rows}×${cols} exceeds the limit of 1,000,000 cells`);
+	}
+}
+
 // Spreadsheet functions receive unevaluated argument nodes, so IF/IFERROR/FILTER can be lazy.
 const FUNCTIONS = {
 	SUM: (args, evaluate) => { arity("SUM", args, 1, Infinity); return sumOf(args.map(evaluate)); },
@@ -263,6 +304,51 @@ const FUNCTIONS = {
 		if (rows.length) return rows.map(row => [...row]);
 		if (args.length === 3) return evaluate(args[2]);
 		throw new FormulaError("#CALC!", "FILTER found no matching rows");
+	},
+	LOOKUP(args, evaluate) {
+		arity("LOOKUP", args, 3, 4);
+		const [queries, keys, values] = args.slice(0, 3).map(arg => to2D(evaluate(arg)));
+		if (keys.length !== values.length) {
+			throw new FormulaError("#VALUE!", `LOOKUP sourceKeys and values must have the same number of rows (got ${shapeText(keys)} and ${shapeText(values)})`);
+		}
+		const matches = matchingRows("LOOKUP", queries, keys);
+		const duplicate = matches.findIndex(rows => rows.length > 1);
+		if (duplicate >= 0) {
+			throw new FormulaError("#VALUE!", `LOOKUP query row ${duplicate} matches multiple source rows ${matches[duplicate].join(", ")}; use JOIN for all matches`);
+		}
+		const width = values[0].length;
+		checkMatchSize("LOOKUP", queries.length, width);
+		const missing = matches.findIndex(rows => !rows.length);
+		let fallback;
+		if (missing >= 0) {
+			if (args.length < 4) throw new FormulaError("#N/A", `LOOKUP query row ${missing} has no match`);
+			const value = unwrap(evaluate(args[3]));
+			if (isArray(value) && (value.length !== 1 || value[0].length !== width)) {
+				throw new FormulaError("#VALUE!", `LOOKUP ifMissing must be a scalar or 1×${width} row (got ${shapeText(value)})`);
+			}
+			fallback = isArray(value) ? value[0] : Array(width).fill(value);
+		}
+		return matches.map(rows => [...(rows.length ? values[rows[0]] : fallback)]);
+	},
+	JOIN(args, evaluate) {
+		arity("JOIN", args, 4, 5);
+		const [left, leftKeys, right, rightKeys] = args.slice(0, 4).map(arg => to2D(evaluate(arg)));
+		const kind = args.length === 5 ? unwrap(evaluate(args[4])) : "left";
+		if (kind !== "left" && kind !== "inner") throw new FormulaError("#VALUE!", 'JOIN kind must be "left" or "inner"');
+		if (left.length !== leftKeys.length || right.length !== rightKeys.length) {
+			throw new FormulaError("#VALUE!", `JOIN each data array and its keys must have the same number of rows (left ${shapeText(left)}, keys ${shapeText(leftKeys)}; right ${shapeText(right)}, keys ${shapeText(rightKeys)})`);
+		}
+		const matches = matchingRows("JOIN", leftKeys, rightKeys);
+		const rows = matches.reduce((total, match) => total + (match.length || (kind === "left" ? 1 : 0)), 0);
+		checkMatchSize("JOIN", rows, left[0].length + right[0].length);
+		if (!rows) throw new FormulaError("#CALC!", "JOIN found no matching rows");
+		const padding = Array(right[0].length).fill("");
+		const result = [];
+		left.forEach((row, i) => {
+			if (matches[i].length) matches[i].forEach(j => result.push([...row, ...right[j]]));
+			else if (kind === "left") result.push([...row, ...padding]);
+		});
+		return result;
 	},
 	VSTACK: (args, evaluate) => { arity("VSTACK", args, 1, Infinity); return stack("VSTACK", args.map(arg => to2D(evaluate(arg)))); },
 	HSTACK: (args, evaluate) => { arity("HSTACK", args, 1, Infinity); return stack("HSTACK", args.map(arg => to2D(evaluate(arg)))); },
@@ -486,6 +572,12 @@ export function referenceSpans(text) {
 		if (!prefix && (text[i] === '"' || text[i] === "'")) { i = stringEnd(text, i); continue; }
 		if (/[\w.]/u.test(text[i - 1] ?? '')) { i++; continue; }
 		const at = i + (prefix?.[0].length ?? 0);
+		const mark = text.slice(at).match(/^`([A-Za-z_][A-Za-z0-9_]*)(?:\.([A-Za-z_][A-Za-z0-9_]*))?/);
+		if (mark) {
+			const end = at + mark[0].length;
+			spans.push({ start: i, end, source: text.slice(i, end), reference: mark[0], kind: 'mark', name: mark[1], column: mark[2], prefix: prefix?.[0] ?? '' });
+			i = end; continue;
+		}
 		let end = endpointEnd(text, at);
 		if (end < 0 || /\w/u.test(text[end] ?? '')) { i++; continue; }
 		const colon = text.slice(end).match(/^\s*:\s*/);
@@ -504,25 +596,45 @@ export const sheetPrefix = name => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? `${na
 
 // Only actual references change: text cells and quoted formula/chart labels remain literal.
 export function rewriteSheetReferences(text, oldName, newName) {
+	return rewriteReferences(text, span => span.prefix !== '#REF!' && span.sheetName?.toLowerCase() === oldName.toLowerCase()
+		? newName === null ? '#REF!' : sheetPrefix(newName) : span.prefix ?? '');
+}
+
+export function rewriteMarkReferences(text, oldName, newName, column = null, newColumn = null) {
+	return rewriteReferences(text, span => {
+		if (span.kind !== 'mark' || span.prefix === '#REF!' || span.name.toLowerCase() !== oldName.toLowerCase()
+			|| (column !== null && span.column?.toLowerCase() !== column.toLowerCase())) return span.prefix ?? '';
+		if (newName === null) return '#REF!';
+		span.reference = '`' + newName + (span.column ? '.' + (column === null ? span.column : newColumn) : '');
+		return '';
+	});
+}
+
+function rewriteReferences(text, prefixFor) {
 	if (typeof text !== 'string' || !text.startsWith('=')) return text;
 	for (const span of referenceSpans(text).reverse()) {
+		const prefix = prefixFor(span);
 		let reference = '';
 		for (let i = 0; i < span.reference.length;) {
 			const char = span.reference[i];
 			if (char === '[' || char === '{') {
 				const end = matching(span.reference, i);
-				reference += char + rewriteSheetReferences('=' + span.reference.slice(i + 1, end), oldName, newName).slice(1) + span.reference[end];
+				reference += char + rewriteReferences('=' + span.reference.slice(i + 1, end), prefixFor).slice(1) + span.reference[end];
 				i = end + 1;
 			} else reference += span.reference[i++];
 		}
-		const prefix = span.prefix !== '#REF!' && span.sheetName?.toLowerCase() === oldName.toLowerCase()
-			? newName === null ? '#REF!' : sheetPrefix(newName) : span.prefix ?? '';
 		text = text.slice(0, span.start) + prefix + reference + text.slice(span.end);
 	}
 	return text;
 }
 
 export function resolveReference(source, row, col, ctx) {
+	const span = referenceSpans(source)[0];
+	if (span?.kind === 'mark' && span.start === 0 && span.end === source.length) {
+		if (span.prefix) throw new FormulaError('#REF!', 'Marks are workbook-wide; no sheet qualifier is allowed');
+		if (!ctx.mark) throw new FormulaError('#NAME?', `Unknown mark: ${span.name}`);
+		return ctx.mark(span.name, span.column);
+	}
 	const resolved = normaliseFormula(source, row, col, ctx);
 	const match = resolved.match(/^(?:RANGE__)?([A-Z]+)(\d+)(?:__([A-Z]+)(\d+))?$/);
 	if (!match) throw new FormulaError('#REF!', `Invalid reference: ${source}`);
@@ -639,7 +751,16 @@ function evaluateExpression(source, row, col, ctx, depth) {
 		// Matrix literals must keep their ArrayNode; defer only actual reference/calculation syntax.
 		const matrix = token[0] === '[' && !span && splitTopLevel(token, 1, token.length - 1, ',;').length > 1;
 		if (matrix) { deferred += '['; at++; continue; }
-		if (span?.sheetName !== undefined) {
+		if (span?.kind === 'mark') {
+			const name = `DFREF__${references.size}`;
+			references.set(name, () => {
+				const ref = resolveReference(span.source, row, col, ctx);
+				if (ref.height === 0) throw new FormulaError('#CALC!', `Dataset ${span.name} has no records`);
+				const target = ctx.sheet(ref.sheetName);
+				return ref.mode === 'cell' ? target.ref(ref.r0, ref.c0) : target.range(ref.r0, ref.c0, ref.r1, ref.c1);
+			});
+			deferred += name;
+		} else if (span?.sheetName !== undefined) {
 			const name = `DFREF__${references.size}`;
 			references.set(name, () => {
 				if (span.prefix === '#REF!' || !ctx.sheet) throw new FormulaError('#REF!', `Unknown sheet: ${span.sheetName}`);

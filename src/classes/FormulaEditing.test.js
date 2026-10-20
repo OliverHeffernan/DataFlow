@@ -60,6 +60,22 @@ test('completion and signatures respect nested calls, relative calculations and 
 	assert.equal(keyboard.context, 'sheet');
 });
 
+test('lookup and join completion exposes signatures through nested arrays and quoted sheet names', () => {
+	const assist = text => formulaAssist(text, Array.from(text).length);
+	assert.deepEqual(assist('=loo').suggestions, ['LOOKUP']);
+	assert.deepEqual(assist('=JO').suggestions, ['JOIN']);
+	assert.equal(assist('=LOOKUP(HSTACK("a,b", "NZ"), \'Prices, 2026\'!A0:B4, C0:C4, ').signature.argument, 3);
+	assert.deepEqual(assist('=JOIN(A0:B2, A0:A2, HSTACK(C0:C2,D0:D2), E0:E2, ').signature,
+		{ name: 'JOIN', args: ['left', 'leftKeys', 'right', 'rightKeys', '[kind = "left"]'], argument: 4 });
+	const { keyboard } = setup('');
+	keyboard.feed('i=LO<Tab>"x","x",7<End><CR>');
+	assert.equal(keyboard.formula, '=LOOKUP("x","x",7)');
+	assert.equal(keyboard.sheet.getValue(5, 3), 7);
+	keyboard.feed('cic=JO<Tab>7,1,8,1<End><CR>');
+	assert.equal(keyboard.formula, '=JOIN(7,1,8,1)');
+	assert.deepEqual(keyboard.sheet.getValue(5, 3), [[7, 8]]);
+});
+
 test('CHART builder completion and signatures follow chains without leaking into ordinary formulas or strings', () => {
 	const assist = text => formulaAssist(text, Array.from(text).length);
 	assert.deepEqual(assist('=CHART().').suggestions, ['.line', '.bar', '.scatter', '.pie', '.x', '.series']);
@@ -242,4 +258,28 @@ test('built-in shortcut hints expose only the next key through operators and tex
 	]);
 	keyboard.feed('<Esc>vg');
 	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'J' && hint.description === 'Fill down'));
+});
+
+test('marks and dataset columns complete without calls, share reference colors, and stay named under F4', () => {
+	const { sheet, keyboard } = setup('');
+	sheet.rows[0][0] = 'item'; sheet.rows[0][1] = 'amount'; sheet.rows[1][1] = '17';
+	sheet.setMark('sales', { r0: 0, c0: 0, r1: 2, c1: 1 }, 'dataset');
+	sheet.setMark('tax_rate', { r0: 0, c0: 3, r1: 0, c1: 3 });
+	const assist = text => formulaAssist(text, Array.from(text).length, sheet);
+	assert.deepEqual(assist('=SUM(`sa').suggestions, ['`sales']);
+	assert.deepEqual(assist('=SUM(`sales.AM').suggestions, ['`sales.amount']);
+	assert.deepEqual(assist('="`sales.am').suggestions, []);
+	assert.equal(assist('=SUM(`sales.AM').signature.name, 'SUM');
+	keyboard.feed('i=SUM(`sa<Tab>.am<Tab>)');
+	assert.equal(keyboard.formula, '=SUM(`sales.amount)');
+	keyboard.feed('<Left><F4>'); assert.equal(keyboard.formula, '=SUM(`sales.amount)');
+	const text = '=SUM(`sales.amount)+SUM(B1:B2)+`tax_rate+IF(TRUE,"`sales.item",0)';
+	const refs = formulaReferences(text, 5, 3, sheet);
+	assert.deepEqual(refs.map(ref => ref.source), ['`sales.amount', 'B1:B2', '`tax_rate']);
+	assert.equal(refs[0].color, refs[1].color);
+	assert.deepEqual(refs[0].region, { r0: 1, c0: 1, r1: 2, c1: 1 });
+	assert.ok(new SyntaxHighlighting().highlight(text, refs).includes('>`sales.amount</span>'));
+	sheet.createSheet('Report');
+	const foreign = formulaReferences('=SUM(`sales.amount)', 5, 3, sheet)[0];
+	assert.equal(foreign.region, null); assert.deepEqual(foreign.coordinates, refs[0].coordinates);
 });

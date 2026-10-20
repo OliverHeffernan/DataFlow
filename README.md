@@ -124,6 +124,51 @@ An array formula **spills** into empty cells below and to its right. A dashed ou
 
 Occupied destinations, overlapping spills and sheet edges produce `#SPILL!` without overwriting anything. The footer and the cell tooltip explain errors. A FILTER mask or stack dimension mismatch gives `#VALUE!`; out-of-sheet references give `#REF!`. This is a focused array-function set, not complete Excel formula compatibility: FILTER filters rows, IF conditions are scalar, and stacks reject incompatible dimensions instead of padding them.
 
+### Lookups and joins
+
+Use `LOOKUP` to attach one unambiguous record per key, or `JOIN` to return every matching pair. Both accept rectangular ranges or array expressions, including references to other sheets and whole spill sources. Results use the usual spill protection; source data is never modified. Headers are ordinary rows, so leave them out of the input ranges when they are not data. Row references and row offsets in error explanations remain **zero-based**.
+
+#### `LOOKUP(queryKeys, sourceKeys, values, [ifMissing])`
+
+Each row of `queryKeys` is one query. `sourceKeys` and `values` must have the same number of rows; the two key arrays must have the same number of columns. Return the corresponding values row for each query, keeping query order and repeated queries. The result has one row per query and the same width as `values`. A 1×1 result becomes a scalar.
+
+No match gives `#N/A`, failing the whole formula unless `ifMissing` is supplied. A scalar default fills all returned columns; alternatively supply a single row with exactly the width of `values`. The default is evaluated at most once per invocation, only when a query is missing. Multiple source matches for a queried key give `#VALUE!`, even if their values are identical; unrelated duplicate keys are allowed. Matched duplicates are rejected before evaluating the missing-key default.
+
+For example, if `Products!A0:C2` contains `P1, Screw, 0.10`, `P2, Bolt, 0.20`, and `P3, Nut, 0.30`, and `Sales!A0:A3` contains `P2`, `P1`, `P9`, `P2`:
+
+```text
+=LOOKUP(Sales!A0:A3, Products!A0:A2, Products!B0:C2, HSTACK("Unknown", 0))
+```
+
+The 4×2 result is `Bolt, 0.20`; `Screw, 0.10`; `Unknown, 0`; `Bolt, 0.20`.
+
+#### `JOIN(left, leftKeys, right, rightKeys, [kind = "left"])`
+
+Each data array must have the same row count as its own keys, and both key arrays must have the same width. Return all supplied left columns followed by all supplied right columns. Keys need not be part of the returned data; select columns with ranges or `HSTACK` before joining. If both supplied data arrays contain key columns, both remain in the result.
+
+Duplicate keys produce every matching pair, in left-row order, then right-row order within each left row. The default `"left"` join keeps unmatched left rows and pads the right columns with blanks. `"inner"` omits unmatched rows; no output rows gives `#CALC!`. These are the only accepted kinds, spelled exactly as shown. The functions do not sort or deduplicate.
+
+```text
+=JOIN(Sales!A0:B3, Sales!A0:A3, Products!B0:C2, Products!A0:A2)
+=JOIN(Sales!A0:B3, Sales!A0:A3, Products!B0:C2, Products!A0:A2, "inner")
+```
+
+The first formula appends descriptions and prices while retaining the unknown P9 sale with blank product fields; the second omits that sale. Adding another P2 product makes `LOOKUP` ambiguous, whereas `JOIN` returns both products for each P2 sale. Include the right key in the returned columns if you need to distinguish a missing match from a matched record whose payload is all blank.
+
+#### Exact keys and composite keys
+
+Key matching is stricter than ordinary spreadsheet comparisons. Text matches exactly, including case, whitespace, and Unicode representation. Booleans match only the same boolean. Finite real numbers match exactly at their represented decimal precision, without comparison tolerance or native-number conversion: `1.00` matches `1`, and `0.1+0.2` matches `0.3`. Numeric cell text is already converted to numbers by the evaluator (`001` becomes 1); quoted formula text such as `"001"` stays text and does not match numeric 1. Returned decimals also retain their precision through subsequent formulas and spills; display/API precision is unchanged.
+
+Blank keys (`""`) never match, even other blanks or zero. Any blank component makes a composite key unmatched. A space is text, not a blank. Nonfinite numbers, units, complex numbers, and other unsupported key objects give `#VALUE!`.
+
+Multiple key columns form a composite key; every component must match. A horizontal row is one composite key, not multiple queries. Scalars are 1×1 inputs; key arrays are never flattened, transposed, or broadcast. Use `VSTACK` for multiple queries and `HSTACK` for composite keys:
+
+```text
+=LOOKUP(HSTACK("P2", "NZ"), HSTACK(Products!A0:A2, Products!D0:D2), Products!C0:C2)
+```
+
+All required input expressions evaluate normally, including unmatched values rows. Source errors, invalid dimensions, and ambiguous matches are not missing keys and are not caught by `ifMissing`. An unused default may contain invalid runtime references, but the complete formula must still parse. Actual formula errors propagate; error-looking strings remain ordinary text. Circular references cannot be hidden by defaults or `IFERROR`. Both functions reject outputs exceeding **1,000,000 cells** with `#CALC!` before constructing result rows; they never silently truncate. This limit does not bound the memory used by their input expressions.
+
 ### Editing formulas with the keyboard
 
 In FORMULA INSERT, **Ctrl-h/j/k/l** inserts a relative reference to a nearby cell. Further presses adjust that reference. **Shift-h/j/k/l** extends the active reference into a rectangular range, anchored at the current reference. Start with Ctrl-direction, then use Shift-direction to extend. Normal typing or moving the text caret finishes the reference; shifted letters outside a reference session remain text so function names are typeable. The next Ctrl-direction shortcut starts from the edited cell again.
@@ -175,6 +220,18 @@ Type commands directly while the spreadsheet is focused. The bottom bar is a rea
 **Formula normal:** press `Enter` to navigate the selected cell's text. `i/a/I/A` enter insert mode. Plain `j/k` leave formula normal and move down/up a cell; `gj/gk` navigate formula text lines. `Esc` leaves insert for formula normal; another `Esc` returns to the sheet. `Enter` commits insert directly to sheet NORMAL without moving cells; `Shift-Enter` inserts a newline.
 
 `v` selects a cell rectangle, `V` selects whole rows, and `Ctrl-v` selects a block. Use `d/c/y` with a motion or selection, `dd/cc/yy` for rows, `p/P` to put, `u/Ctrl-r` to undo/redo, and `.` to repeat an edit. `qa … q` records a macro; `@a` plays it.
+
+**Persistent marks:** `ma` names a cell, or a visual rectangle; backtick then `a` jumps back. Long names use `:mark tax_rate B0` or `:mark expenses B1:B8`. Names are workbook-wide and case-insensitive. Reference them with a backtick, not Excel-style names:
+
+```text
+=`tax_rate * B3
+=SUM(`expenses)
+:dataset sales A0:B2
+=SUM(`sales.amount)
+=CHART().bar().series(`sales.amount).x(`sales.item)
+```
+
+A dataset adds literal unique column headers and a bounded record body to a mark. Adjacent committed writes expand it into blank rows within its fixed columns; `:datasetappend sales 3` explicitly includes three blank records. Headers rename through `:datasetcolumnrename`; datasets do not add in-place sorting/filtering, validation, grouping, or automatic formula filling. `:marks`, `:markgoto`, `:markrename`, and `:delmarks[!]` manage definitions. Marks, schemas and cell changes save together in v3 `.dflo` and participate in chronological workbook undo. Legacy files remain readable. See the [mark/dataset rules](docs/keyboard.md#persistent-marks-name-inputs-and-ranges) for bounds, rename/delete and expansion details.
 
 **Lua configuration:** `:configcreate` creates an `init.lua` template. Edit it and use `:source` to reload. In a browser, download the template, edit it, and import it with `:config`; valid configurations persist in browser storage.
 

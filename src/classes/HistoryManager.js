@@ -1,21 +1,24 @@
 export default class HistoryManager {
 	constructor() {
 		if (HistoryManager.instance) return HistoryManager.instance;
-		this.histories = new WeakMap(); this.maxLength = 50;
+		this.histories = new WeakMap(); this.maxLength = 50; this.maxBytes = 64 * 1024 * 1024;
 		HistoryManager.instance = this;
 	}
 	historyFor(sheetManager) {
-		const sheet = sheetManager.activeSheet ?? sheetManager;
-		if (!this.histories.has(sheet)) this.histories.set(sheet, { undo: [], redo: [] });
-		return this.histories.get(sheet);
+		if (!this.histories.has(sheetManager)) this.histories.set(sheetManager, { undo: [], redo: [] });
+		return this.histories.get(sheetManager);
 	}
 	reset(sheetManager) { const history = this.historyFor(sheetManager); history.undo = []; history.redo = []; this.do(sheetManager, false); }
 	do(sheetManager, notify = true) {
 		const history = this.historyFor(sheetManager);
-		const state = { rows: sheetManager.rows.map(row => [...row]), styles: sheetManager.styles.map(row => row.map(style => ({ ...style }))) };
-		if (JSON.stringify(history.undo.at(-1)) === JSON.stringify(state)) return false;
-		history.undo.push(state); history.redo = [];
-		if (history.undo.length > this.maxLength) history.undo.shift();
+		const state = sheetManager.serializeWorkbook?.() ?? { rows: sheetManager.rows, styles: sheetManager.styles };
+		// Navigation is persisted, but never creates an undo entry.
+		const { activeSheet, ...content } = state;
+		const text = JSON.stringify(content);
+		if (history.undo.at(-1)?.text === text) return false;
+		history.undo.push({ state: JSON.parse(JSON.stringify(state)), text, bytes: text.length * 2 }); history.redo = [];
+		let bytes = history.undo.reduce((total, item) => total + item.bytes, 0);
+		while (history.undo.length > 1 && (history.undo.length > this.maxLength || bytes > this.maxBytes)) bytes -= history.undo.shift().bytes;
 		if (notify) sheetManager.notifyWorkbookChanged?.();
 		return true;
 	}
@@ -31,11 +34,13 @@ export default class HistoryManager {
 		while (amount-- > 0 && history.redo.length) history.undo.push(history.redo.pop());
 		if (history.undo.length !== before) this.loadState(sheetManager, history.undo.at(-1));
 	}
-	rewrite(sheet, transform) {
-		const history = this.historyFor(sheet);
-		for (const state of [...history.undo, ...history.redo]) state.rows = state.rows.map(row => row.map(transform));
-	}
-	loadState(sheetManager, state) {
+	loadState(sheetManager, entry) {
+		const state = JSON.parse(JSON.stringify(entry.state));
+		if (sheetManager.restoreWorkbook) {
+			sheetManager.restoreWorkbook(state);
+			sheetManager.notifyWorkbookChanged?.();
+			return;
+		}
 		sheetManager.rows = state.rows.map(row => [...row]);
 		sheetManager.styles = state.styles.map(row => row.map(style => ({ ...style })));
 		sheetManager.numOfRows.value = sheetManager.rows.length;
