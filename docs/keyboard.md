@@ -93,6 +93,14 @@ In the rule list, `j/k` selects, `a` creates, Enter or `i` edits, `x` deletes, a
 
 `.range()` takes one local absolute cell/rectangle with zero-based rows. `.when()` evaluates the existing formula language once per target cell, with that cell as the reference origin: `[]{}` reads that cell, `C{}` reads column C on its row, `[-1]{}` reads its left neighbour, and `A0` always reads A0. Cross-sheet coordinates keep the same origin on the target sheet. Backtick marks and dataset columns use the workbook's existing read-only descriptors. No Excel `$` anchoring or separate expression language is introduced.
 
+Omit `.when()` to apply colours across the whole range, equivalent to `.when(TRUE)`. New drafts include an example condition; remove that line for an unconditional rule:
+
+```text
+=CF().range(A1:D6).bg("#40381c").fg("#f4d779")
+```
+
+The range and at least one colour are still required. An explicitly empty `.when()` is invalid. Omitted conditions save as written, though structural edits may rewrite them as `.when(TRUE)`. Older builds that require `.when()` cannot open rules saved without it; include `.when(TRUE)` when sharing with those builds.
+
 Examples of conditions:
 
 ```text
