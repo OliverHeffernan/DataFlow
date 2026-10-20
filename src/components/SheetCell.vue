@@ -4,13 +4,13 @@
 			:id="colNo + ':' + rowNo"
 			class="cell"
 			:aria-label="value?.kind === 'chart' ? (value.title || `${value.type} chart`) : undefined"
-			:title="sheetManager.cellErrors.get(`${rowNo}:${colNo}`) || undefined"
+			:title="sheetManager.cellErrors.get(`${rowNo}:${colNo}`) || presentation?.warning || undefined"
 			@dblclick="handleDblClick"
 			@click="handleClick"
 			@contextmenu.prevent="handleRightClick"
 		>
 			<CellChart v-if="value?.kind === 'chart'" :chart="value" />
-			<template v-else>{{ value }}</template>
+			<template v-else>{{ presentation?.text ?? value }}</template>
 		</button>
 		<div
 			:id="'visual'+colNo+':'+rowNo"
@@ -51,6 +51,7 @@
 	});
 
 	const value = computed(() => sheetManager.cellValues.value[props.rowNo]?.[props.colNo] ?? "");
+	const presentation = computed(() => sheetManager.cellPresentation.value[props.rowNo]?.[props.colNo]);
 
 	onMounted(() => {
 		//if (props.rowNo == sheetManager.value.numOfRows.value - 1 && props.colNo == sheetManager.value.numOfCols.value - 1) {
@@ -77,6 +78,7 @@
 			
 	function handleClick(event) {
 		const keyboard = checkCommand.keyboard;
+		keyboard.finishFormat();
 		if (keyboard.mode === 'i') keyboard.escape();
 		keyboard.pending = ''; keyboard.command = null; keyboard.mappingKeys = [];
 		keyboard.context = 'sheet'; keyboard.formulaCursor = 0;
