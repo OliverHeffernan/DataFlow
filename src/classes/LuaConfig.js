@@ -28,7 +28,7 @@ local function setKeymap(modes, lhs, rhs, opts, group)
   if type(modes) == "string" then modes = { modes } end
   assert(type(modes) == "table", "mode must be a string or list")
   for _, mode in ipairs(modes) do
-    assert(mode == "n" or mode == "f" or mode == "i" or mode == "v" or mode == "x" or mode == "o" or mode == "c", "unsupported mode: " .. tostring(mode))
+    assert(mode == "n" or mode == "f" or mode == "i" or mode == "v" or mode == "x" or mode == "o" or mode == "c" or mode == "format", "unsupported mode: " .. tostring(mode))
     local function expand(s)
       s = s:gsub("<[Ll]eader>", function() return vim.g.mapleader end)
       return s:gsub("<[Ll]ocal[Ll]eader>", function() return vim.g.maplocalleader end)

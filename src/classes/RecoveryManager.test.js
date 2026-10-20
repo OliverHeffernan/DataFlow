@@ -30,7 +30,7 @@ beforeEach(() => {
 afterEach(async () => { await manager.close(); delete sheet.recovery; });
 
 function keyboard() {
-	return new VimKeyboard(sheet, { change: () => history.do(sheet), undo: (redo, count) => history[redo ? 'redo' : 'undo'](sheet, count) });
+	return new VimKeyboard(sheet, { change: () => history.do(sheet), formatChange: () => history.do(sheet), undo: (redo, count) => history[redo ? 'redo' : 'undo'](sheet, count) });
 }
 function files(io) {
 	const file = new FileManager(undefined, io);
@@ -291,4 +291,52 @@ test('structural INSERT and chronological undo checkpoint cells, marks and metad
 		assert.equal(manager.state.dirty, false);
 		assert.equal((await manager.store.list()).length, 0);
 	} finally { unsubscribe(); }
+});
+
+test('FORMAT previews stay transient while committed flat styles survive save, chronological undo and detached recovery', async () => {
+	dataset();
+	sheet.styles[1][1] = { ...sheet.styles[1][1], fg: 'gold', wrap: true, align: 'right' };
+	history.reset(sheet); manager.opened();
+	const raw = JSON.stringify(sheet.sheets.map(sheet => sheet.rows)), keys = keyboard();
+	keys.feed('jlgFfj<CR>%d1<CR>'); await manager.flush();
+	assert.equal(sheet.cellPresentation.value[1][1].text, '1300.0%');
+	assert.equal(manager.state.dirty, false);
+	assert.equal((await manager.store.list()).length, 0);
+	let saved;
+	const file = files({ native: true, invoke: async (_, args) => { saved = JSON.parse(args.content); return args.path; } });
+	assert.equal((await file.saveFile()).status, 'saved');
+	assert.equal(saved.sheets[0].styles[1][1].formatKind, undefined, 'saving does not commit a preview');
+	keys.feed('<Esc>'); await manager.flush();
+	const checkpoint = (await manager.store.list())[0].generations[0];
+	const format = checkpoint.workbook.sheets[0].styles[1][1];
+	assert.deepEqual(format, { fg: 'gold', bg: 'transparent', wrap: true, align: 'right',
+		formatKind: 'number', formatDigits: 1, formatGroup: false, formatPercent: true });
+	assert.equal(manager.state.dirty, true);
+	assert.equal(JSON.stringify(checkpoint.workbook.sheets.map(sheet => sheet.rows)), raw);
+	for (const field of ['formatPreview', 'cellPresentation', 'calculated']) assert.equal(Object.hasOwn(checkpoint.workbook, field), false);
+	keys.feed('gFd4<CR>');
+	const leaving = manager.guard('quit DataFlow'); await settle();
+	assert.equal(manager.state.dialog.kind, 'leave');
+	keys.finishFormat(); // The panel's outside-pointer handler uses this entry point.
+	assert.equal(sheet.styles[1][1].formatDigits, 1, 'a modal cannot commit its underlying FORMAT draft');
+	assert.equal(keys.mappingMode, 'format');
+	manager.answer('cancel'); assert.equal(await leaving, false);
+	keys.feed('u<Esc>'); // Revert that preview without creating another content edit.
+	assert.equal((await file.saveFile()).status, 'saved');
+	assert.deepEqual(saved.sheets[0].styles[1][1], format);
+	sheet.switchSheet('Totals'); history.undo(sheet); await manager.flush();
+	assert.equal(sheet.activeSheet.name, 'Totals');
+	assert.equal(sheet.sheets[0].styles[1][1].formatKind, undefined);
+	assert.equal(manager.state.dirty, true);
+	history.redo(sheet); await manager.flush();
+	assert.equal(manager.state.dirty, false);
+	records.set('format-copy', { id: 'format-copy', active: false, generations: [{ ...checkpoint, id: 'format-copy' }] });
+	await manager.refreshList(); await manager.restore(0);
+	assert.equal(sheet.path, null);
+	assert.equal(manager.state.dirty, true);
+	assert.deepEqual(sheet.sheets[0].styles[1][1], format);
+	assert.equal(sheet.cellPresentation.value[1][1].text, '1300.0%');
+	assert.equal(JSON.stringify(sheet.sheets.map(sheet => sheet.rows)), raw);
+	assert.deepEqual(sheet.workbook.title, { keep: 'workbook metadata' });
+	assert.equal(sheet.describeDataset('sales').rowCount, 1);
 });

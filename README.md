@@ -260,6 +260,8 @@ Recovery writes **separate local copies, never the original workbook**, for save
 
 Snapshots preserve persistent marks/datasets and workbook/sheet metadata. Pending dataset growth is projected with the same preflight as committing the edit, without changing live bounds or history. Invalid headers or blocked growth defer checkpoints/saves with an error and retain the last readable generation; incomplete formula text remains recoverable.
 
+Only committed FORMAT styles are saved or recovered. Open FORMAT previews remain session-only and do not dirty or checkpoint the workbook; finish FORMAT with Done to include its styles.
+
 | Command | Action |
 | --- | --- |
 | `:recover` | List recovery copies; `j/k` or arrows select, Enter restores, `d` asks to discard, Escape dismisses |
