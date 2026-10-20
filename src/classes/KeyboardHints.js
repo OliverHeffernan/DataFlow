@@ -1,10 +1,10 @@
 const normal = [
 	[['h', 'j', 'k', 'l'], 'Move'], [['i', 'a'], 'Edit'], [['<CR>'], 'Formula'],
-	[['v'], 'Select'], [['d', 'c', 'y'], 'Operator…'], [['g'], 'Go / fill…'], [['u'], 'Undo'], [['<C-r>'], 'Redo'], [[':'], 'Command'],
+	[['v'], 'Select'], [['d', 'c', 'y'], 'Operator…'], [['g'], 'Go / fill…'], [['u'], 'Undo'], [['<C-r>'], 'Redo'], [['<C-w>'], 'Window…'], [[':'], 'Command'],
 ];
 const formula = [
 	[['h', 'l', 'w', 'b'], 'Text motion'], [['j', 'k'], 'Leave + move cell'], [['i', 'a'], 'Insert'],
-	[['v'], 'Select text'], [['d', 'c', 'y'], 'Operator…'], [['g'], 'Go / text lines…'], [['<F4>'], 'Relative ↔ absolute'], [['<Esc>'], 'Sheet'],
+	[['v'], 'Select text'], [['d', 'c', 'y'], 'Operator…'], [['g'], 'Go / text lines…'], [['<F4>'], 'Relative ↔ absolute'], [['<C-w>'], 'Window…'], [['<Esc>'], 'Sheet'],
 ];
 const insert = [
 	[['<CR>'], 'Commit → NORMAL'], [['<Esc>'], 'Formula NORMAL'],
@@ -20,6 +20,7 @@ const formulaObjects = [
 	[['"', "'", '`'], 'Quoted text'], [['(', ')', 'b', '[', ']', '{', '}', 'B', '<', '>'], 'Block'], [['t'], 'Tag'],
 ];
 const prefixes = {
+	'<C-w>': [[['h'], 'Left window'], [['j'], 'Lower window'], [['k'], 'Upper window'], [['l'], 'Right window'], [['c'], 'Close window'], [['<Esc>'], 'Cancel']],
 	g: [[['g'], 'First row / line'], [['e', 'E'], 'Previous word end'], [['j', 'k'], 'Text line'], [['0', '$'], 'Visible edges'], [['v'], 'Previous selection'], [[';', ','], 'Changes']],
 	z: [[['z'], 'Center'], [['t'], 'Top'], [['b'], 'Bottom'], [['h', 'l'], 'Scroll horizontally']],
 	'[': [[['(', '{'], 'Unmatched opening'], [["'", '`'], 'Previous mark'], [['['], 'Previous block']],
@@ -71,6 +72,11 @@ export function keyboardHints(keyboard) {
 		else if (operator) defaults = [[[operator], 'Whole row / line'], ...motions];
 		else if (visual) defaults = [...(keyboard.context === 'sheet' ? [[['g'], 'Go / fill…']] : []), [['h', 'j', 'k', 'l'], 'Extend selection'], [['d'], 'Delete'], [['c'], 'Change'], [['y'], 'Yank'], [['i', 'a'], 'Text object…'], [['o'], 'Swap corner'], [['<Esc>'], 'Cancel']];
 		else defaults = keyboard.context === 'formula' ? formula : normal;
+	}
+	if (keyboard.textBuffer && keyboard.command === null && !keyboard.pending) {
+		defaults = defaults.filter(([keys]) => !['<F4>', '<C-h>', 'H'].includes(keys[0])).map(([keys, description]) => [keys,
+			keys[0] === '<CR>' ? 'Apply rule' : keys[0] === '<Esc>' ? 'Keep draft · NORMAL' : keys[0] === 'j' ? 'Text line' : description]);
+		if (keyboard.mode === 'n') defaults = [[['<CR>'], 'Apply rule'], ...defaults];
 	}
 	const overridden = new Set(maps.map(map => map.lhs[0]));
 	return [...custom, ...defaults.map(([keys, description]) => ({ key: label(keys.filter(key => !overridden.has(key))), description })).filter(hint => hint.key)];

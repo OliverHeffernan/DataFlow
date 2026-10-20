@@ -13,6 +13,8 @@ import { formulaAssist, formulaReferences } from './FormulaEditing.js';
 import { keyboardHints } from './KeyboardHints.js';
 import SyntaxHighlighting from './SyntaxHighlighting.js';
 import { cellLabel, referenceSpans, resolveReference } from './FormulaFunctions.js';
+import WindowManager from './WindowManager.js';
+import ConditionalSession from './ConditionalSession.js';
 import { summarizeFormats } from './CellFormatting.js';
 import { formatShortcut } from './FormatKeymaps.js';
 
@@ -23,15 +25,26 @@ export default class CheckCommand {
 		this.sheet = new SheetManager();
 		this.history = new HistoryManager();
 		this.visual = new VisualManager();
+		this.windows = new WindowManager(this.sheet.activeSheet);
+		this.currentWindow = this.windows.active;
 		this.ui = shallowRef({ hints: [], assist: { suggestions: [], signature: null }, error: '', spill: '' });
-		this.keyboard = new VimKeyboard(this.sheet, {
+		this.keyboard = this.createKeyboard();
+		this.currentWindow.keyboard = this.keyboard;
+		this.loadConfig().catch(error => this.setPhMessage(`init.lua: ${error.message}`));
+	}
+	createKeyboard() {
+		return new VimKeyboard(this.sheet, {
+			active: () => this.keyboard,
 			render: () => this.render(),
 			message: text => this.setPhMessage(text),
 			ex: command => this.handleEnterFromCom(command),
-			change: () => { this.syncSize(); this.history.do(this.sheet); nextTick(() => this.sheet.loadAllCells()); },
+			change: () => { this.syncSize(); this.history.do(this.sheet); nextTick(() => { this.sheet.loadAllCells(); this.render(); }); },
+			canFormat: () => this.currentWindow.content === 'sheet',
 			formatChange: () => this.history.do(this.sheet),
-			sheetChanged: () => { this.renderedRow = null; nextTick(() => this.sheet.loadStyles()); },
-			undo: (redo, count) => { this.history[redo ? 'redo' : 'undo'](this.sheet, count); this.keyboard.move(this.keyboard.point); },
+			sheetChanged: () => { this.currentWindow.sheet = this.sheet.activeSheet; this.renderedRow = null; nextTick(() => this.sheet.loadStyles()); },
+			undo: (redo, count) => { this.preserveWindows(() => this.history[redo ? 'redo' : 'undo'](this.sheet, count)); this.keyboard.move(this.keyboard.point); },
+			window: action => this.windowAction(action),
+			key: key => this.ruleKey?.(key) ?? false,
 			copy: register => {
 				if (register.cells) this.sheet.yank(register.cells);
 				navigator.clipboard?.writeText(register.text).catch(() => {});
@@ -40,27 +53,188 @@ export default class CheckCommand {
 			viewport: keyboard => this.viewport(keyboard),
 			scroll: (action, count, explicit) => this.scroll(action, count, explicit),
 		});
-		this.loadConfig().catch(error => this.setPhMessage(`init.lua: ${error.message}`));
 	}
 	get mode() { return this.keyboard.mode; }
 	setPhMessage(text) { const display = document.getElementById('commandLine'); if (display) display.dataset.message = text; }
 	focus() { document.getElementById('app').focus({ preventScroll: true }); }
 	get footerHeight() { return document.getElementById('statusBar')?.offsetHeight ?? 24; }
+	get viewportElement() { return document.getElementById('sheetViewport'); }
+
+	saveWindow() {
+		const pane = this.currentWindow;
+		if (pane.content === 'sheet') { pane.row = this.sheet.selRow; pane.col = this.sheet.selCol; }
+	}
+	captureWindowContext() {
+		if (this.currentWindow.content !== 'sheet') throw new Error('Open a sheet window first');
+		return { windowId: this.currentWindow.id, sheetName: this.sheet.activeSheet.name,
+			cursor: { row: this.sheet.selRow, col: this.sheet.selCol }, selection: this.selectedRange() };
+	}
+	// Wrap synchronous live publication, never a worker's detached calculations or an async picker.
+	preserveWindows(publish) {
+		this.keyboard.finishFormat();
+		this.saveWindow();
+		try { return publish(); }
+		finally {
+			this.windows.reconcile(this.sheet.sheets);
+			const pane = this.currentWindow;
+			this.sheet.workbook.activeSheetIndex = this.sheet.sheets.indexOf(pane.sheet);
+			this.sheet.selRow = pane.row; this.sheet.selCol = pane.col;
+			this.syncSize(); this.syncActiveValues(); this.renderedRow = null;
+			this.render();
+		}
+	}
+	adoptKeyboard(keyboard) {
+		const previous = this.keyboard;
+		this.keyboard = keyboard;
+		keyboard.register = previous.register;
+		keyboard.mappings = previous.mappings; keyboard.timeoutlen = previous.timeoutlen;
+		keyboard.macros = previous.macros; keyboard.recording = previous.recording; keyboard.lastMacro = previous.lastMacro;
+		keyboard.pending = ''; keyboard.mappingKeys = [];
+		clearTimeout(this.mappingTimer);
+	}
+	async activateWindow(id) {
+		if (!this.windows.windows.some(pane => pane.id === id)) return;
+		if (id !== this.currentWindow.id) {
+			this.keyboard.finishFormat();
+			this.saveWindow(); this.visual.exitVisual();
+			document.getElementById('gridOverlays')?.replaceChildren();
+			this.sheet.getSelectedCell()?.classList.remove('focussed');
+			this.windows.focus(id); this.windows.reconcile(this.sheet.sheets);
+			const pane = this.windows.active;
+			this.currentWindow = pane;
+			this.sheet.workbook.activeSheetIndex = this.sheet.sheets.indexOf(pane.sheet);
+			this.sheet.selRow = pane.row; this.sheet.selCol = pane.col;
+			pane.keyboard ??= this.createKeyboard();
+			this.adoptKeyboard(pane.rules?.state.editing ? pane.rules.editor : pane.keyboard);
+			this.syncActiveValues(); this.renderedRow = null;
+		}
+		await this.render(); this.focus();
+	}
+	syncActiveValues() {
+		const result = this.sheet.sheetResults.value.get(this.sheet.activeSheet);
+		if (!result) { this.sheet.recalculate(); return; }
+		this.sheet.cellValues.value = result.values;
+		this.sheet.spillCells.clear(); result.spills.forEach((value, key) => this.sheet.spillCells.set(key, value));
+		this.sheet.cellErrors.clear(); result.errors.forEach((value, key) => this.sheet.cellErrors.set(key, value));
+		this.sheet.calculated = { sheet: this.sheet.activeSheet, typed: result.typed };
+		this.sheet.cellPresentation.value = result.presentation;
+	}
+	async windowAction(action) {
+		if (action === 'c') return this.handleEnterFromCom(':close');
+		const id = this.windows.neighbor(action);
+		if (id !== null) await this.activateWindow(id);
+	}
 	syncSize() { this.sheet.numOfRows.value = this.sheet.rows.length; this.sheet.numOfCols.value = this.sheet.rows[0].length; }
 	async newSheet(resetHistory = true, keepCursor = false) {
 		const point = { row: this.sheet.selRow, col: this.sheet.selCol };
+		this.adoptKeyboard(this.currentWindow.keyboard);
 		this.keyboard.resetNavigation();
 		if (keepCursor) this.keyboard.move(point);
 		if (resetHistory) this.history.reset(this.sheet);
+		this.windows.reconcile(this.sheet.sheets);
+		this.currentWindow.sheet = this.sheet.activeSheet;
+		this.currentWindow.content = 'sheet';
+		this.currentWindow.rules = null;
+		this.currentWindow.keyboard = this.keyboard;
 		this.sheet.recalculate(); this.renderedRow = null;
 		await this.render();
 		this.sheet.loadStyles();
 	}
 
-	async render() {
-		const keyboard = this.keyboard;
-		this.syncSize();
+	selectedRange() {
+		const point = { row: this.sheet.selRow, col: this.sheet.selCol };
+		const anchor = this.keyboard.context === 'sheet' ? this.keyboard.anchor ?? point : point;
+		const linewise = this.keyboard.context === 'sheet' && this.keyboard.mode === 'V';
+		return { r0: Math.min(anchor.row, point.row), r1: Math.max(anchor.row, point.row),
+			c0: linewise ? 0 : Math.min(anchor.col, point.col),
+			c1: linewise ? this.sheet.rows[0].length - 1 : Math.max(anchor.col, point.col) };
+	}
+	rulesFor(pane = this.currentWindow) {
+		pane.keyboard ??= this.createKeyboard();
+		pane.rules ??= new ConditionalSession(this.sheet, pane, pane.keyboard.hooks);
+		return pane.rules;
+	}
+	async cfCommand(action = '', argument) {
+		const pane = this.currentWindow;
+		if (pane.content === 'sheet') {
+			pane.target = this.selectedRange(); this.saveWindow();
+			this.visual.exitVisual(); pane.content = 'cf';
+			pane.keyboard.context = 'sheet'; pane.keyboard.mode = 'n'; pane.keyboard.anchor = null;
+		}
+		const session = this.rulesFor();
+		try {
+			this.setPhMessage('');
+			if (argument !== undefined && !['edit', 'delete'].includes(action)) throw new Error(`:cf ${action} takes no argument`);
+			switch (action) {
+				case '': break;
+				case 'list': session.guard(); session.discard(); break;
+				case 'new': session.begin(null, pane.target ?? { r0: pane.row, r1: pane.row, c0: pane.col, c1: pane.col }); break;
+				case 'edit':
+					if (argument === undefined && !session.selected) throw new Error('Create a rule with a or :cf new first');
+					session.begin(argument === undefined ? session.selected.id : Number(argument)); break;
+				case 'apply': session.apply(); break;
+				case 'discard': session.discard(); break;
+				case 'delete': session.remove(argument === undefined ? undefined : Number(argument)); break;
+				case 'up': case 'down': session.reorder(action === 'up' ? -1 : 1); break;
+				default: throw new Error('Usage: :cf [new|edit [id]|apply|discard|delete [id]|up|down]');
+			}
+		} catch (error) { session.state.error = error.explanation ?? error.message; this.setPhMessage(session.state.error); }
+		this.adoptKeyboard(session.state.editing ? session.editor : pane.keyboard);
+		this.renderedRow = null;
+		await this.render(); this.focus();
+	}
+	ruleKey(key) {
+		if (this.currentWindow.content !== 'cf') return false;
+		const session = this.rulesFor(), keyboard = this.keyboard;
+		if (keyboard.command !== null) return false;
+		if (session.state.editing) {
+			if (key === '<CR>' && !keyboard.pending && !keyboard.anchor) { this.cfCommand('apply'); return true; }
+			return false;
+		}
+		if (['<C-w>', 'q', '@'].includes(keyboard.pending) || ['<C-w>', 'q', '@', ':', 'u', '<C-r>', '<Esc>'].includes(key)) return false;
+		if (['j', '<Down>'].includes(key)) session.select(1);
+		else if (['k', '<Up>'].includes(key)) session.select(-1);
+		else if (key === 'G') session.select(session.rules.length);
+		else if (key === 'g') session.select(-session.rules.length);
+		else if (key === 'a') this.cfCommand('new');
+		else if (key === '<CR>' || key === 'i') this.cfCommand('edit');
+		else if (key === 'x' || key === '<Del>') this.cfCommand('delete');
+		else if (key === 'J' || key === 'K') this.cfCommand(key === 'J' ? 'down' : 'up');
+		return true;
+	}
+	guardDrafts() {
+		if (this.windows.windows.some(pane => pane.rules?.dirty)) throw new Error('Unapplied rule draft in a window; apply or :cf discard before replacing or saving workbook data');
+	}
+	async renderRules() {
+		this.visual.exitVisual();
+		const session = this.rulesFor(), keyboard = this.keyboard;
+		if (session.state.editing) {
+			document.getElementById('formText').innerHTML = new SyntaxHighlighting().highlight(session.state.draft);
+			this.sheet.cellCurPos = keyboard.formulaCursor; this.renderFormulaCursor();
+		}
+		document.getElementById('modeDisplay').innerText = `-- CF ${session.state.editing ? (keyboard.mode === 'i' ? 'INSERT' : 'NORMAL') : 'RULES'} --`;
+		const display = document.getElementById('commandLine');
+		display.textContent = keyboard.command ?? keyboard.pending + keyboard.mappingKeys.join('');
+		display.classList.toggle('typing-command', keyboard.command !== null);
+		this.ui.value = { hints: session.state.editing || keyboard.command !== null || keyboard.pending || keyboard.mappingKeys.length ? keyboardHints(keyboard) : [
+			{ key: 'j k', description: 'Select rule' }, { key: 'a', description: 'New rule' }, { key: 'Enter', description: 'Edit' },
+			{ key: 'x', description: 'Delete' }, { key: 'J K', description: 'Reorder' }, { key: 'u / Ctrl R', description: 'Undo / redo' },
+			{ key: 'Ctrl W → h j k l', description: 'Window' }, { key: ':', description: 'Command' },
+		], assist: session.state.editing ? { ...formulaAssist(session.state.draft, keyboard.formulaCursor, this.sheet, 'CF'), inserting: keyboard.mode === 'i', selected: keyboard.completionIndex } : { suggestions: [], signature: null }, error: session.state.error, spill: '' };
 		await nextTick();
+		document.documentElement.style.setProperty('--formula-bar-height', `${document.getElementById('topBar').offsetHeight}px`);
+		document.documentElement.style.setProperty('--status-bar-height', `${this.footerHeight}px`);
+	}
+
+	async render() {
+		this.syncSize();
+		this.windows.reconcile(this.sheet.sheets);
+		this.saveWindow();
+		const version = this.renderVersion = (this.renderVersion ?? 0) + 1;
+		await nextTick();
+		if (version !== this.renderVersion) return;
+		const keyboard = this.keyboard;
+		if (this.windows.active.content === 'cf') return this.renderRules();
 		this.visual.exitVisual();
 		const row = this.sheet.selRow, col = this.sheet.selCol;
 		// Keep scrolling a motion's responsibility; formula edits and Ex typing must not reset the viewport.
@@ -112,13 +286,19 @@ export default class CheckCommand {
 		const heights = { '--formula-bar-height': document.getElementById('topBar').offsetHeight, '--status-bar-height': this.footerHeight };
 		const resized = Object.entries(heights).some(([name, height]) => style.getPropertyValue(name) !== `${height}px`);
 		for (const [name, height] of Object.entries(heights)) style.setProperty(name, `${height}px`);
-		if (moved || resized) this.sheet.getCell(row, col)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+		if (moved || resized) this.sheet.ensureCellVisible(row, col);
 		this.renderOverlays(references, owner);
+	}
+	refreshOverlays() {
+		if (this.windows.active.content !== 'sheet') return;
+		const { selRow: row, selCol: col } = this.sheet;
+		this.renderOverlays(this.keyboard.context === 'formula' ? formulaReferences(this.keyboard.formula, row, col, this.sheet) : [], this.sheet.spillCells.get(`${row}:${col}`));
 	}
 
 	renderOverlays(references, owner) {
 		const layer = document.getElementById('gridOverlays');
 		if (!layer) return;
+		const viewport = this.viewportElement, base = viewport.getBoundingClientRect();
 		layer.replaceChildren();
 		const outline = (region, color, spill = false) => {
 			const first = this.sheet.getCell(region.r0, region.c0)?.parentElement.getBoundingClientRect();
@@ -128,7 +308,7 @@ export default class CheckCommand {
 			box.className = spill ? 'spill-outline' : 'reference-outline';
 			box.dataset.range = `${this.sheet.columnLabel(region.c0)}${region.r0}:${this.sheet.columnLabel(region.c1)}${region.r1}`;
 			box.style.setProperty('--reference-color', color);
-			Object.assign(box.style, { left: `${first.left + window.scrollX}px`, top: `${first.top + window.scrollY}px`, width: `${last.right - first.left}px`, height: `${last.bottom - first.top}px` });
+			Object.assign(box.style, { left: `${first.left - base.left + viewport.scrollLeft}px`, top: `${first.top - base.top + viewport.scrollTop}px`, width: `${last.right - first.left}px`, height: `${last.bottom - first.top}px` });
 			layer.append(box);
 		};
 		if (owner) outline({ r0: owner.row, c0: owner.col, r1: owner.row + owner.rows - 1, c1: owner.col + owner.cols - 1 }, '#8ba5c6', true);
@@ -143,6 +323,7 @@ export default class CheckCommand {
 	renderFormulaCursor() {
 		const keyboard = this.keyboard, bar = document.getElementById('newFormBar'), text = document.getElementById('formText');
 		const cursor = document.getElementById('formCursor'), selection = document.getElementById('formSelection');
+		if (!bar || !text || !cursor || !selection) return;
 		selection.replaceChildren();
 		// Give a trailing empty line a measurable caret and line box without changing the formula.
 		const endMarker = document.createElement('span');
@@ -242,24 +423,26 @@ export default class CheckCommand {
 			const bar = document.getElementById('newFormBar'), width = parseFloat(getComputedStyle(bar).fontSize) * 0.6;
 			return { top: Math.ceil(bar.scrollTop / 20), bottom: Math.min(keyboard.rows.length - 1, Math.floor((bar.scrollTop + bar.clientHeight) / 20) - 1), left: Math.ceil(bar.scrollLeft / width), right: Math.min(keyboard.rows[keyboard.point.row].length - 1, Math.floor((bar.scrollLeft + bar.clientWidth) / width) - 1) };
 		}
-		const visibleRows = [], visibleCols = [];
-		const top = document.getElementById('topBar').getBoundingClientRect().bottom + document.querySelector('thead').offsetHeight;
+		const visibleRows = [], visibleCols = [], viewport = this.viewportElement;
+		if (!viewport) return { top: 0, bottom: this.sheet.rows.length - 1, left: 0, right: this.sheet.rows[0].length - 1 };
+		const bounds = viewport.getBoundingClientRect(), top = bounds.top + viewport.querySelector('thead').offsetHeight;
 		for (let row = 0; row < this.sheet.rows.length; row++) {
 			const rect = this.sheet.getCell(row, this.sheet.selCol)?.getBoundingClientRect();
-			if (rect && rect.top >= top && rect.bottom <= window.innerHeight - this.footerHeight) visibleRows.push(row);
+			if (rect && rect.top >= top && rect.bottom <= bounds.bottom) visibleRows.push(row);
 		}
 		for (let col = 0; col < this.sheet.rows[0].length; col++) {
 			const rect = this.sheet.getCell(this.sheet.selRow, col)?.getBoundingClientRect();
-			if (rect && rect.left >= 75 && rect.right <= window.innerWidth) visibleCols.push(col);
+			if (rect && rect.left >= bounds.left + 90 && rect.right <= bounds.right) visibleCols.push(col);
 		}
 		return { top: visibleRows[0] ?? this.sheet.selRow, bottom: visibleRows.at(-1) ?? this.sheet.selRow, left: visibleCols[0] ?? this.sheet.selCol, right: visibleCols.at(-1) ?? this.sheet.selCol };
 	}
 	scroll(action, count, explicit = false) {
 		const keyboard = this.keyboard, formula = keyboard.context === 'formula', bar = document.getElementById('newFormBar');
 		const rect = (formula ? document.getElementById('formCursor') : this.sheet.getCell(this.sheet.selRow, this.sheet.selCol)).getBoundingClientRect();
-		const bounds = formula ? bar.getBoundingClientRect() : { top: document.getElementById('topBar').getBoundingClientRect().bottom + document.querySelector('thead').offsetHeight, left: 75, right: window.innerWidth, bottom: window.innerHeight - this.footerHeight };
+		const pane = this.viewportElement, paneRect = pane?.getBoundingClientRect();
+		const bounds = formula ? bar.getBoundingClientRect() : { top: paneRect.top + pane.querySelector('thead').offsetHeight, left: paneRect.left + 90, right: paneRect.right, bottom: paneRect.bottom };
 		const width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
-		const scroll = (x, y) => formula ? bar.scrollBy(x, y) : window.scrollBy(x, y);
+		const scroll = (x, y) => (formula ? bar : pane).scrollBy(x, y);
 		if (['zz', 'z.', 'zt', 'z<CR>', 'zb', 'z-'].includes(action)) {
 			const target = ['zz', 'z.'].includes(action) ? bounds.top + (height - rect.height) / 2 : ['zt', 'z<CR>'].includes(action) ? bounds.top : bounds.bottom - rect.height;
 			scroll(0, rect.top - target); return;
@@ -333,6 +516,7 @@ export default class CheckCommand {
 			this.setPhMessage(this.sheet.sheets.map((sheet, i) => `${i === this.sheet.workbook.activeSheetIndex ? '*' : ''}${i + 1}: ${sheet.name}`).join(' · '));
 			return;
 		}
+		if (this.currentWindow.content === 'cf') this.currentWindow.rules?.guard();
 		const before = this.sheet.activeSheet;
 		switch (action) {
 			case 'sheetnew': this.sheet.createSheet(argument || undefined); break;
@@ -347,7 +531,9 @@ export default class CheckCommand {
 			case 'sheetdelete': this.sheet.deleteSheet(argument || undefined, Boolean(force)); break;
 		}
 		new LaunchManager().hide();
+		this.currentWindow.sheet = this.sheet.activeSheet;
 		if (before !== this.sheet.activeSheet) await this.newSheet(false, true);
+		else if (this.currentWindow.content === 'cf' && action === 'sheet') await this.newSheet(false, true);
 		else { this.sheet.recalculate(); await this.render(); this.sheet.loadStyles(); }
 		this.setPhMessage(`Sheet ${this.sheet.workbook.activeSheetIndex + 1}/${this.sheet.sheets.length}: ${this.sheet.activeSheet.name}`);
 	}
@@ -402,9 +588,17 @@ export default class CheckCommand {
 
 	async handleEnterFromCom(command) {
 		try {
-			const marks = command.trim().match(/^:(marks|markrename|markgoto|mark|delmarks|datasetappend|datasetcolumnrename|dataset)(!?)(?:\s+(.*))?$/);
-			if (marks) return await this.markCommand(marks[1], marks[3], marks[2]);
+			this.keyboard.finishFormat();
+			command = command.trim();
+			const marks = command.match(/^:(marks|markrename|markgoto|mark|delmarks|datasetappend|datasetcolumnrename|dataset)(!?)(?:\s+(.*))?$/);
+			if (marks) {
+				if (this.currentWindow.content !== 'sheet' && marks[1] !== 'marks') throw new Error('Open a sheet window to change or jump to marks');
+				return await this.markCommand(marks[1], marks[3], marks[2]);
+			}
+			const conditional = command.match(/^:cf(?:\s+(\w+)(?:\s+(\d+))?)?$/);
+			if (conditional) return await this.cfCommand(conditional[1], conditional[2]);
 			if (/^:(?:fill|series)(?:\s|!|$)/.test(command.trim())) {
+				if (this.currentWindow.content !== 'sheet') throw new Error('Open a sheet window to fill cells');
 				this.keyboard.changeKeys = []; // Failed/no-op Ex input must not leak into the next edit's dot recording.
 				const range = command.trim().match(/^:(fill|series)\s+(down|right|up|left)(?:\s+(\d+))?(?:\s+step\s+(\S+))?$/);
 				if (!range || (range[1] === 'fill' && range[4] !== undefined)) throw new Error('Usage: :fill <direction> [count] or :series <direction> [count] [step <number>]');
@@ -412,9 +606,24 @@ export default class CheckCommand {
 				this.keyboard.fill(range[2], range[3] === undefined ? undefined : Number(range[3]), range[1] === 'series' ? range[4] ?? '1' : undefined);
 				this.render(); return;
 			}
+			if ([':splitv', ':splith'].includes(command)) {
+				this.saveWindow();
+				const before = this.currentWindow, anchor = this.keyboard.anchor, mode = this.keyboard.mode;
+				const pane = this.windows.split(command === ':splitv' ? 'vertical' : 'horizontal');
+				if (before.content === 'sheet') {
+					pane.keyboard = this.createKeyboard(); pane.keyboard.anchor = anchor && { ...anchor }; pane.keyboard.mode = mode;
+				}
+				return await this.activateWindow(pane.id);
+			}
+			if (command === ':close' || command === ':close!') {
+				if (this.currentWindow.rules?.dirty && command !== ':close!') throw new Error('Unapplied rule draft; use :cf discard or :close!');
+				return await this.activateWindow(this.windows.close().id);
+			}
 			const sheetCommand = command.trim().match(/^:(sheets|sheetnew|sheetduplicate|sheetrename|sheetnext|sheetprev|sheetmove|sheetdelete|sheet)(!?)(?:\s+(.*))?$/);
 			if (sheetCommand) return await this.sheetCommand(sheetCommand[1], sheetCommand[3]?.trim(), sheetCommand[2]);
-			const files = new FileManager(() => this.newSheet());
+			if ([':o', ':clear', ':w', ':wa'].includes(command)) this.guardDrafts();
+			if (this.currentWindow.content !== 'sheet' && ![':config', ':configload', ':configcreate', ':source', ':configreload', ':w', ':wa', ':o', ':clear', ':help'].includes(command)) throw new Error('Open a sheet window for cell commands; :cf manages rules');
+			const files = new FileManager(() => this.newSheet(), () => this.guardDrafts());
 			if ([':config', ':configload', ':configcreate', ':source', ':configreload'].includes(command)) await this.configCommand(command);
 			else if (command === ':w') return await files.saveFile();
 			else if (command === ':wa') return await files.saveFile(true);

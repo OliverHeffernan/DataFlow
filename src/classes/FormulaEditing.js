@@ -19,7 +19,10 @@ export const functionHelp = {
 	'.x': ['labelRange'], '.series': ['valueRange', '["name"]'],
 	'.title': ['"text"'], '.xLabel': ['"text"'], '.yLabel': ['"text"'],
 	'.size': ['width', 'height'], '.width': ['pixels'], '.height': ['pixels'], '.position': ['x', 'y'],
+	CF: [], '.range': ['A0:D3'], '.when': ['condition per target cell'],
+	'.fg': ['"colour"'], '.bg': ['"colour"'], '.name': ['"text"'],
 };
+const conditionalMethods = new Set(['.range', '.when', '.fg', '.bg', '.name']);
 
 export function quotedEnd(text, at) {
 	const quote = text[at];
@@ -79,10 +82,10 @@ export function toggleReference(keyboard) {
 	return true;
 }
 
-export function formulaAssist(text, cursor, sheet) {
+export function formulaAssist(text, cursor, sheet, builder = null) {
 	if (!text.startsWith('=')) return { suggestions: [], signature: null };
 	const before = Array.from(text).slice(0, cursor).join(''), stack = [];
-	let chartEnd = -1;
+	let builderEnd = -1, root = null;
 	for (let i = 1; i < before.length; i++) {
 		const char = before[i];
 		if (char === '"' || char === "'") {
@@ -91,12 +94,13 @@ export function formulaAssist(text, cursor, sheet) {
 			i = end - 1;
 		} else if ('([{'.includes(char)) {
 			let name = char === '(' ? before.slice(0, i).match(/([A-Za-z]+)\s*$/)?.[1] : null;
-			const method = char === '(' && !stack.length && chartEnd >= 0 && /^\s*\.\s*[A-Za-z]+\s*$/.test(before.slice(chartEnd, i));
+			const method = char === '(' && !stack.length && builderEnd >= 0 && /^\s*\.\s*[A-Za-z]+\s*$/.test(before.slice(builderEnd, i));
 			if (method) name = `.${name}`;
-			stack.push({ name, argument: 0, chart: method || (name === 'CHART' && !stack.length) });
+			if (!stack.length && ['CHART', 'CF'].includes(name)) root = name;
+			stack.push({ name, argument: 0, builder: method || (['CHART', 'CF'].includes(name) && !stack.length) });
 		} else if (')]}'.includes(char)) {
 			const call = stack.pop();
-			if (!stack.length) chartEnd = call?.chart ? i + 1 : -1;
+			if (!stack.length) builderEnd = call?.builder ? i + 1 : -1;
 		}
 		else if (char === ',' && stack.length) stack.at(-1).argument++;
 	}
@@ -111,11 +115,12 @@ export function formulaAssist(text, cursor, sheet) {
 		}
 		return { kind: 'mark', prefix, suggestions: candidates.filter(name => name.toLowerCase().startsWith(prefix.toLowerCase())).slice(0, 6), signature: call ? { name: call.name, args: functionHelp[call.name], argument: call.argument } : null };
 	}
-	const method = !stack.length && chartEnd >= 0 && /^\s*\.\s*[A-Za-z]*$/.test(before.slice(chartEnd));
+	const method = !stack.length && builderEnd >= 0 && /^\s*\.\s*[A-Za-z]*$/.test(before.slice(builderEnd));
 	const prefix = method ? before.match(/\.\s*[A-Za-z]*$/)[0] : before.match(/(?:^|[^\w.])([A-Za-z]+)$/)?.[1] ?? '';
 	const matchPrefix = method ? prefix.replace(/\s/g, '') : prefix;
 	const after = Array.from(text).slice(cursor).join('');
 	const suggestions = prefix && !/^(?:\w|\s*\()/.test(after)
-		? Object.keys(functionHelp).filter(name => name.toLowerCase().startsWith(matchPrefix.toLowerCase())).slice(0, 6) : [];
+		? Object.keys(functionHelp).filter(name => name.toLowerCase().startsWith(matchPrefix.toLowerCase())
+			&& (method ? conditionalMethods.has(name) === (root === 'CF') : name !== 'CF' || builder === 'CF')).slice(0, 6) : [];
 	return { prefix, suggestions, signature: call ? { name: call.name, args: functionHelp[call.name], argument: call.argument } : null };
 }

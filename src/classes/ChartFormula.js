@@ -1,48 +1,5 @@
 import { referenceSpans, resolveReference, toCellValue } from "./FormulaFunctions.js";
-
-// Read only builder calls and their arguments, never executable JavaScript.
-function calls(source) {
-	let rest = source.replace(/^=\s*CHART\s*\(\s*\)/, "");
-	if (rest === source) throw new Error("Start with CHART()");
-	const result = [];
-	while (rest.trim()) {
-		const method = rest.match(/^\s*\.\s*([A-Za-z]+)\s*\(/);
-		if (!method) throw new Error("Expected a builder method such as .series(B1:B6)");
-		rest = rest.slice(method[0].length);
-		const args = [];
-		const stack = [];
-		let quoted = null;
-		let start = 0;
-		let end = -1;
-		for (let i = 0; i < rest.length; i++) {
-			const char = rest[i];
-			if (quoted) {
-				if (char === "\\") i++;
-				else if (char === "'" && quoted === "'" && rest[i + 1] === "'") i++;
-				else if (char === quoted) quoted = null;
-				continue;
-			}
-			if (char === '"' || char === "'") quoted = char;
-			else if ("([{".includes(char)) stack.push(char);
-			else if (char === ")" && stack.length === 0) {
-				const arg = rest.slice(start, i).trim();
-				if (arg || args.length) args.push(arg);
-				end = i;
-				break;
-			} else if (")]}".includes(char)) {
-				const expected = { ")": "(", "]": "[", "}": "{" }[char];
-				if (stack.pop() !== expected) throw new Error("Mismatched brackets");
-			} else if (char === "," && stack.length === 0) {
-				args.push(rest.slice(start, i).trim());
-				start = i + 1;
-			}
-		}
-		if (end < 0) throw new Error("Unclosed method or quoted string");
-		result.push({ method: method[1], args });
-		rest = rest.slice(end + 1);
-	}
-	return result;
-}
+import { builderCalls } from './FormulaBuilder.js';
 
 function text(arg) {
 	if (!arg?.startsWith('"')) throw new Error("Text must be in double quotes");
@@ -72,7 +29,7 @@ export function evaluateChart(source, row, col, ctx) {
 	};
 	let xRange;
 	const seriesRanges = [];
-	for (const { method, args } of calls(source)) {
+	for (const { method, args } of builderCalls(source, 'CHART')) {
 		const arity = {
 			line: [0], bar: [0], scatter: [0], pie: [0], x: [1], series: [1, 2],
 			title: [1], xLabel: [1], yLabel: [1], size: [2], width: [1], height: [1], position: [2],

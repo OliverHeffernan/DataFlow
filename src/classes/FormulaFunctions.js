@@ -406,6 +406,25 @@ const BLOCKED_MATH = new Set([
 	"parser", "typed", "leafCount", "symbolicEqual",
 ]);
 
+// Conditional formatting uses the same expression evaluator, but cannot advance an RNG, modify the
+// math instance, invoke callbacks or acquire new capabilities when mathjs adds an export.
+const PURE_MATH = new Set([
+	'abs', 'sqrt', 'cbrt', 'round', 'floor', 'ceil', 'fix', 'min', 'max', 'sum', 'mean', 'median',
+	'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'log', 'log10', 'log2', 'exp', 'pow', 'mod',
+	'isNumeric', 'isNaN', 'isInteger', 'isPositive', 'isNegative', 'isZero', 'equalText', 'compareText',
+]);
+
+function validatePureTree(tree) {
+	const supported = new Set(['ConstantNode', 'ParenthesisNode', 'SymbolNode', 'ConditionalNode', 'ArrayNode', 'RangeNode', 'RelationalNode', 'OperatorNode', 'FunctionNode']);
+	tree.traverse(node => {
+		if (!supported.has(node.type)) throw new FormulaError('#VALUE!', `Unsupported predicate syntax: ${node.type}`);
+		if (node.type === 'FunctionNode') {
+			const name = node.fn?.type === 'SymbolNode' ? node.fn.name : '';
+			if (!Object.hasOwn(FUNCTIONS, name) && !PURE_MATH.has(name)) throw new FormulaError('#NAME?', `Function ${name || node.toString()} is not available in conditional rules`);
+		}
+	});
+}
+
 const REF = /^([A-Z]+)(\d+)$/;
 const RANGE = /^RANGE__([A-Z]+)(\d+)__([A-Z]+)(\d+)$/;
 
@@ -500,6 +519,7 @@ function operator(node, evaluate) {
 function call(node, ctx, evaluate) {
 	const name = node.fn?.type === "SymbolNode" ? node.fn.name : null;
 	if (!name) throw new FormulaError("#VALUE!", `Unsupported function call: ${node.toString()}`);
+	if (ctx.pure && !Object.hasOwn(FUNCTIONS, name) && !PURE_MATH.has(name)) throw new FormulaError('#NAME?', `Function ${name} is not available in conditional rules`);
 	if (Object.hasOwn(FUNCTIONS, name)) return FUNCTIONS[name](node.args, evaluate);
 	if (typeof math[name] !== "function" || BLOCKED_MATH.has(name) || !Object.hasOwn(math, name)) {
 		throw new FormulaError("#NAME?", `Unknown function ${name}`);
@@ -751,6 +771,19 @@ function evaluateExpression(source, row, col, ctx, depth) {
 		// Matrix literals must keep their ArrayNode; defer only actual reference/calculation syntax.
 		const matrix = token[0] === '[' && !span && splitTopLevel(token, 1, token.length - 1, ',;').length > 1;
 		if (matrix) { deferred += '['; at++; continue; }
+		if (ctx.pure && (span || bracket >= 0)) {
+			// Validate deferred coordinate expressions too, including unused IF branches. Validation
+			// must never read a sheet or execute a predicate while a builder is being edited/loaded.
+			for (let i = 0; i < token.length; i++) {
+				if (token[i] === '"' || token[i] === "'") { i = stringEnd(token, i) - 1; continue; }
+				if (!'[{'.includes(token[i])) continue;
+				const close = matching(token, i);
+				if (close < 0) throw new FormulaError('#ERROR!', 'Unclosed relative reference');
+				const inner = token.slice(i + 1, close);
+				if (inner.trim()) evaluateExpression(inner, row, col, { ...ctx, validateOnly: true }, depth + 1);
+				i = close;
+			}
+		}
 		if (span?.kind === 'mark') {
 			const name = `DFREF__${references.size}`;
 			references.set(name, () => {
@@ -782,6 +815,8 @@ function evaluateExpression(source, row, col, ctx, depth) {
 	} catch (error) {
 		throw new FormulaError(error.message);
 	}
+	if (ctx.pure) validatePureTree(tree);
+	if (ctx.validateOnly) return false;
 	return normalise(evaluateNode(tree, { ...ctx, references }));
 }
 
@@ -793,6 +828,11 @@ function evaluateExpression(source, row, col, ctx, depth) {
 export function evaluateFormula(source, row, col, ctx) {
 	const value = evaluateExpression(source, row, col, ctx, 0);
 	return unwrap(value);
+}
+
+export function validatePredicate(source) {
+	if (typeof source !== 'string' || !source.trim()) throw new FormulaError('#VALUE!', 'Add a .when(condition) predicate');
+	evaluateFormula(source, 0, 0, { pure: true, validateOnly: true });
 }
 
 export default class Formulas {
