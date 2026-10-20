@@ -486,6 +486,12 @@ export function referenceSpans(text) {
 		if (!prefix && (text[i] === '"' || text[i] === "'")) { i = stringEnd(text, i); continue; }
 		if (/[\w.]/u.test(text[i - 1] ?? '')) { i++; continue; }
 		const at = i + (prefix?.[0].length ?? 0);
+		const mark = text.slice(at).match(/^`([A-Za-z_][A-Za-z0-9_]*)(?:\.([A-Za-z_][A-Za-z0-9_]*))?/);
+		if (mark) {
+			const end = at + mark[0].length;
+			spans.push({ start: i, end, source: text.slice(i, end), reference: mark[0], kind: 'mark', name: mark[1], column: mark[2], prefix: prefix?.[0] ?? '' });
+			i = end; continue;
+		}
 		let end = endpointEnd(text, at);
 		if (end < 0 || /\w/u.test(text[end] ?? '')) { i++; continue; }
 		const colon = text.slice(end).match(/^\s*:\s*/);
@@ -504,25 +510,45 @@ export const sheetPrefix = name => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? `${na
 
 // Only actual references change: text cells and quoted formula/chart labels remain literal.
 export function rewriteSheetReferences(text, oldName, newName) {
+	return rewriteReferences(text, span => span.prefix !== '#REF!' && span.sheetName?.toLowerCase() === oldName.toLowerCase()
+		? newName === null ? '#REF!' : sheetPrefix(newName) : span.prefix ?? '');
+}
+
+export function rewriteMarkReferences(text, oldName, newName, column = null, newColumn = null) {
+	return rewriteReferences(text, span => {
+		if (span.kind !== 'mark' || span.prefix === '#REF!' || span.name.toLowerCase() !== oldName.toLowerCase()
+			|| (column !== null && span.column?.toLowerCase() !== column.toLowerCase())) return span.prefix ?? '';
+		if (newName === null) return '#REF!';
+		span.reference = '`' + newName + (span.column ? '.' + (column === null ? span.column : newColumn) : '');
+		return '';
+	});
+}
+
+function rewriteReferences(text, prefixFor) {
 	if (typeof text !== 'string' || !text.startsWith('=')) return text;
 	for (const span of referenceSpans(text).reverse()) {
+		const prefix = prefixFor(span);
 		let reference = '';
 		for (let i = 0; i < span.reference.length;) {
 			const char = span.reference[i];
 			if (char === '[' || char === '{') {
 				const end = matching(span.reference, i);
-				reference += char + rewriteSheetReferences('=' + span.reference.slice(i + 1, end), oldName, newName).slice(1) + span.reference[end];
+				reference += char + rewriteReferences('=' + span.reference.slice(i + 1, end), prefixFor).slice(1) + span.reference[end];
 				i = end + 1;
 			} else reference += span.reference[i++];
 		}
-		const prefix = span.prefix !== '#REF!' && span.sheetName?.toLowerCase() === oldName.toLowerCase()
-			? newName === null ? '#REF!' : sheetPrefix(newName) : span.prefix ?? '';
 		text = text.slice(0, span.start) + prefix + reference + text.slice(span.end);
 	}
 	return text;
 }
 
 export function resolveReference(source, row, col, ctx) {
+	const span = referenceSpans(source)[0];
+	if (span?.kind === 'mark' && span.start === 0 && span.end === source.length) {
+		if (span.prefix) throw new FormulaError('#REF!', 'Marks are workbook-wide; no sheet qualifier is allowed');
+		if (!ctx.mark) throw new FormulaError('#NAME?', `Unknown mark: ${span.name}`);
+		return ctx.mark(span.name, span.column);
+	}
 	const resolved = normaliseFormula(source, row, col, ctx);
 	const match = resolved.match(/^(?:RANGE__)?([A-Z]+)(\d+)(?:__([A-Z]+)(\d+))?$/);
 	if (!match) throw new FormulaError('#REF!', `Invalid reference: ${source}`);
@@ -639,7 +665,16 @@ function evaluateExpression(source, row, col, ctx, depth) {
 		// Matrix literals must keep their ArrayNode; defer only actual reference/calculation syntax.
 		const matrix = token[0] === '[' && !span && splitTopLevel(token, 1, token.length - 1, ',;').length > 1;
 		if (matrix) { deferred += '['; at++; continue; }
-		if (span?.sheetName !== undefined) {
+		if (span?.kind === 'mark') {
+			const name = `DFREF__${references.size}`;
+			references.set(name, () => {
+				const ref = resolveReference(span.source, row, col, ctx);
+				if (ref.height === 0) throw new FormulaError('#CALC!', `Dataset ${span.name} has no records`);
+				const target = ctx.sheet(ref.sheetName);
+				return ref.mode === 'cell' ? target.ref(ref.r0, ref.c0) : target.range(ref.r0, ref.c0, ref.r1, ref.c1);
+			});
+			deferred += name;
+		} else if (span?.sheetName !== undefined) {
 			const name = `DFREF__${references.size}`;
 			references.set(name, () => {
 				if (span.prefix === '#REF!' || !ctx.sheet) throw new FormulaError('#REF!', `Unknown sheet: ${span.sheetName}`);

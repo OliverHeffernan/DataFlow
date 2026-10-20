@@ -25,11 +25,13 @@ Each `.dflo` file is a workbook. The footer lists its numbered sheets and highli
 | `:sheetduplicate [name]` | Copy the current sheet's stored formulae and styles into a new sheet; explicit sheet references still point to their original targets |
 | `:sheetmove 2` | Move the current sheet to this one-based position |
 | `:sheetdelete [name or number]` | Delete the target (current sheet if omitted), only if it is empty, unstyled, and unreferenced |
-| `:sheetdelete! [name or number]` | Permanently delete even a populated/referenced sheet; references to it become `#REF!`. The last sheet cannot be deleted |
+| `:sheetdelete! [name or number]` | Delete even a populated/referenced sheet; references to it become `#REF!`. Undo restores the sheet and its references together. The last sheet cannot be deleted |
 
 Names are case-insensitively unique and may contain spaces: `:sheetnew Sales 2026`, then `:sheet Sales 2026`. Use the whole name without surrounding quotes in commands. All-digit switch/delete arguments mean sheet numbers. Invalid names, targets, and positions leave the workbook unchanged.
 
-Each sheet retains its cursor position, dimensions, data, styling, and separate undo/redo history while switching. Switching resets marks, jumps, searches, and visual selections so they cannot accidentally target another sheet. Registers, macros, mappings, and repeat edits remain session-wide; yanking on one sheet and putting on another works. Sheet creation, renaming, reordering, and deletion are not undone by `u`; rename/delete also update stored references in cell undo histories. `:clear` clears only the current sheet and resets its navigation and undo history.
+Each sheet retains its cursor position, dimensions, data and styling while switching. Undo/redo is chronological across the workbook: `u` undoes the latest edit regardless of the visible sheet. Sheet creation, renaming, reordering, deletion and `:clear` are undoable; references and workbook/sheet metadata restore together. Switching sheets and moving the cursor do not create history entries. Undo keeps the visible sheet/cursor where possible, clamping to restored dimensions. History is session-only, retaining at most 50 snapshots with a 64 MiB estimated serialized-data budget (a single oversized current state remains usable). Opening a workbook starts new history.
+
+Sheet-switch commands reset transient navigation marks, jumps, searches, and visual selections. Persistent workbook marks remain available on every sheet. Registers, macros, mappings, and repeat edits remain session-wide; yanking on one sheet and putting on another works. `:clear` clears only the current sheet and resets transient navigation, not workbook undo history.
 
 `:w` saves **all sheets**, their names, styles, and the active sheet; `:wa` saves the workbook as another file. Browser saves download the same workbook format as desktop saves. `:o` still reads old single-sheet `{rows, styles}` `.dflo` files and rows-only JSON arrays (including `.heff` files); each becomes Sheet1 with default styling where absent. Saving upgrades to the workbook format; older app versions do not understand new workbook files. Invalid files do not replace the current workbook.
 
@@ -58,6 +60,59 @@ vim.keymap.set("n", "<Leader>sn", ":sheetnew<CR>", { desc = "New sheet" })
 vim.keymap.set("n", "<Leader>sr", ":sheetrename ", { desc = "Rename sheet" })
 vim.keymap.set("n", "<Leader>ss", ":sheet ", { desc = "Switch sheet" })
 ```
+
+### Persistent marks name inputs and ranges
+
+In sheet NORMAL, `ma` marks the current cell; in sheet VISUAL, `ma` marks the selected rectangle. Backtick followed by `a` jumps to its top-left cell, including on another sheet; `'a` jumps to the first nonblank cell in that row. Ctrl-o / Ctrl-i returns through these cross-sheet jumps. `g` before either mark motion omits the jump-list entry. Visual/operator ranges cannot cross sheets.
+
+Long names use the same registry and formula syntax:
+
+```text
+:mark tax_rate B0
+:mark expenses B1:B8
+:mark source 'Sales 2026'!A0:C8
+:markgoto expenses
+:marks
+:markrename tax_rate vat_rate
+:delmarks expenses
+:delmarks! expenses
+```
+
+Omit the absolute reference to use the current cell/visual rectangle. Names are workbook-wide identifiers (`[A-Za-z_][A-Za-z0-9_]*`), case-insensitively unique; `a` and `A` are the same mark, unlike Neovim's local/global distinction. Backticks distinguish marks from coordinates and function names, so `A0` and `SUM` are valid mark names. There is no sheet-qualified mark namespace. Resetting an existing static mark deliberately retargets its formula consumers; a dataset cannot be replaced this way.
+
+```text
+=`tax_rate * B3
+=SUM(`expenses)
+=FILTER(`source, `source > 0)
+```
+
+A cell mark reads a scalar or its source's complete shaped spill; an explicitly marked rectangle (even `B0:B0`) reads displayed elements within its bounds. Marks are fixed rectangles, not formula definitions. They share existing precision, lazy `IF`/`IFERROR`, cross-sheet calculation and circular-reference detection. F4 leaves named references named; completion after a backtick inserts a mark without parentheses. Named and ordinary references to the same visible rectangle share highlighting; foreign references do not outline unrelated cells.
+
+Rename rewrites real reference tokens throughout the workbook, including chart arguments and calculations inside relative coordinates, but not strings or chart labels. Deleting a referenced mark requires `:delmarks!`; old references become `#REF!` and do not revive if that name is recreated. Ordinary deletion removes only the definition, never its cell data. Undo restores definitions and rewritten formulae together.
+
+Static marks move when rows/columns are inserted before them, grow when inserted inside them, and shrink when part is deleted. Deleting every marked cell leaves an invalid `#REF!` definition rather than silently selecting another cell. Clearing values preserves static marks. Sheet rename keeps their targets; forced sheet deletion invalidates consumers and removes owned definitions. Duplicating a sheet copies its cells/metadata, not the workbook-wide mark definitions: named references still target their original marks.
+
+### Datasets add bounded records and a header schema
+
+Select a header and its existing records, then use `:dataset sales`, or supply `:dataset sales A0:B2`. Each header must be a literal identifier, unique ignoring case within that dataset; formula/blank/duplicate headers are rejected. Different datasets may reuse column names but cannot overlap. Their columns stay fixed until the definition is removed. The header cells remain ordinary stored cells, protected from raw editing; use `:datasetcolumnrename sales amount total` to rename a header and rewrite its column references atomically.
+
+```text
+=SUM(`sales.amount)
+=FILTER(`sales, `sales.amount > 10)
+=CHART().bar().series(`sales.amount).x(`sales.item)
+:datasetappend sales
+:datasetappend sales 3
+```
+
+The bare dataset returns only its body rectangle; `.amount` returns that body column, never the header. Matching is case-insensitive. A header-only dataset has zero records; trying to materialize its body gives `#CALC!` (catchable with `IFERROR`), rather than inventing a row of zeroes.
+
+Committing nonblank content immediately below the body expands it through the contiguous rows written in that edit, only when all destinations are confined to its columns. An explicit multirow put retains trailing blank records. Growth requires every newly included cell to have been blank and not spill-covered; it cannot absorb existing data, another dataset, an unwritten gap, or cells beyond the finite sheet. Distant edits and edits spanning outside the columns do not grow the definition. Unchanged/blank-only writes do not append records; `:datasetappend` explicitly includes blank trailing rows, subject to the same blank/bounds checks. Clear body cells without removing records; delete body rows to shrink it.
+
+Row insertion/deletion within the body changes its extent. Inserting before its header or columns shifts the entire definition. Deleting the header, deleting a dataset column, or inserting inside its columns is rejected; remove the definition first to reshape the schema. Array spills cannot originate inside or spill into datasets. Scalar formulas remain supported; formulas outside a dataset can read and spill its body. Nothing auto-copies formulas or styles into new records. There is no record validation, sorting/filtering in place, grouping, or totals-row behavior.
+
+`:delmarks sales` removes the dataset definition but leaves the grid intact (requires `!` when referenced). `:clear` removes datasets on the cleared sheet and invalidates their consumers, because their header schemas are gone. Dataset creation, growth, schema rename, deletion and structural edits each undo with their cell/formula changes. Saving writes v3 `.dflo` with marks plus existing workbook/sheet metadata; old single-sheet and v1/v2 workbooks remain readable, but older DataFlow versions cannot read v3. History, navigation marks, jumps and formula-text marks are not saved.
+
+For other features, `SheetManager.resolveMark(name, column?)` returns a detached `{name, sheetName, mode: 'cell'|'range', r0, c0, r1, c1, height, width}` descriptor. `describeDataset(name)` adds `header`, ordered `columns: [{name, col}]`, and `rowCount`. Bounds are inclusive, zero-based, finite; an empty body has `height: 0` and `r1: r0 - 1`. These methods resolve metadata, not values, and do not mutate history or navigation. Staged writers can call the pure `prepareMarkWrites(writes)` against untouched rows after validating the payload and current spills, then publish returned marks with the writes and one caller-owned history commit. It is not itself a general mutation API.
 
 ### Formula insert assistance
 
@@ -138,7 +193,7 @@ Use `[count]d/c/y[count]{motion}`. Counts multiply (`2d3w` covers six words); do
 
 `p/P` puts the unnamed register. Character/block sheet ranges overwrite existing cells from the selected cell, clipping at sheet edges; linewise registers insert complete rows below/above. Text registers insert into formula text. Copied formulae are literal; put does not rewrite relative references or copy styling. `:yankcell` and `:yankvalue` copy cell formulae or evaluated values, including a selection. Formula editing and row/column edits participate in `u` / Ctrl-r undo/redo (50 snapshots). `.` repeats an edit, and `qa … q`, `@a`, `@@` record/replay session macros; recursive replay is blocked.
 
-`ma` sets a session mark. Formula marks are local to their cell, separate from sheet marks; their text coordinates do not track text insertions/deletions. Sheet marks follow inserted/deleted rows and columns; marks in deleted rows/columns are removed. Marks are coordinates, not persistent spreadsheet references, and undo does not restore mark history. Ctrl-o / Ctrl-i (Tab) traverse jumps, including across sheet/formula contexts. `g;` / `g,` traverse changes. Opening or clearing a sheet resets marks, selections, jumps and undo history. Registers/macros/mappings remain available in the session.
+`ma` in the sheet sets a persistent cell/range mark as described above. In formula NORMAL it still sets a session-only text mark local to that cell; these text coordinates do not track text insertions/deletions and reset when switching sheets. Special navigation marks remain transient, separate from persistent reference definitions. Ctrl-o / Ctrl-i (Tab) traverse jumps, including across sheet/formula contexts. `g;` / `g,` traverse changes. Opening or clearing a sheet resets transient navigation; only opening resets workbook undo history. Registers/macros/mappings remain available in the session.
 
 ### Fill and numeric series
 
@@ -160,7 +215,7 @@ Numeric series accept finite literal numeric seeds and decimal/scientific steps,
 
 The entire operation is rejected if any target is outside the allocated sheet or any source/target belongs to a live array spill, **including its owner**. There is no `!` bypass, clipping, or partial write. Copied formulas may calculate new arrays; normal spill rules apply, so blockers are never overwritten and edge/overlap errors display `#SPILL!`. Formula errors are calculation results, not command rollback.
 
-Each changed invocation is **one `u` / Ctrl-r undo/redo step on the active sheet**. Failed or unchanged commands preserve history, selection, cursor, and the previous repeat. Success exits visual mode; the cursor ends at the far destination in the first lane (bottom-left for down, top-right for right, top-left for up/left). `gv` restores the original visual selection. `.` repeats the direction, shape, and step from the new cursor, reading fresh seeds on the active sheet rather than retaining copied data. `3.` performs three invocations, not one combined undo step. Macros record selection motions and commands through the same path; a macro is not an atomic transaction.
+Each changed invocation is **one `u` / Ctrl-r step in chronological workbook history**, including any dataset growth. Failed or unchanged commands preserve history, selection, cursor, and the previous repeat. Success exits visual mode; the cursor ends at the far destination in the first lane (bottom-left for down, top-right for right, top-left for up/left). `gv` restores the original visual selection. `.` repeats the direction, shape, and step from the new cursor, reading fresh seeds on the active sheet rather than retaining copied data. `3.` performs three invocations, not one combined undo step. Macros record selection motions and commands through the same path; a macro is not an atomic transaction.
 
 Lua mappings can use the native keys or Ex forms without additional APIs:
 
@@ -248,7 +303,7 @@ Reload is atomic: syntax/runtime/API errors keep the previous mappings, group la
 | `oj/ok` | `o/O`, inserting a row and entering insert |
 | `Pj/Pk/Ph/Pl` gap paste | `:putbelow` / `:putabove` / `:putleft` / `:putright`; `P` is put-before |
 
-Coverage follows the families in [Neovim motion.txt](https://neovim.io/doc/user/motion.html), with the spreadsheet translations above. It does **not** claim byte-for-byte Neovim parity. Searches use JavaScript Unicode regular expressions, not Vim regex syntax or search offsets. Text motions count Unicode code points, not grapheme clusters or tab-expanded screen columns. Formula section/method/comment/tag/bracket navigation is lexical, without language parsing, nroff macros, configurable matchpairs, or matchit. Marks are session-local; uppercase marks do not open other files and numbered ShaDa marks are unavailable.
+Coverage follows the families in [Neovim motion.txt](https://neovim.io/doc/user/motion.html), with the spreadsheet translations above. It does **not** claim byte-for-byte Neovim parity. Searches use JavaScript Unicode regular expressions, not Vim regex syntax or search offsets. Text motions count Unicode code points, not grapheme clusters or tab-expanded screen columns. Formula section/method/comment/tag/bracket navigation is lexical, without language parsing, nroff macros, configurable matchpairs, or matchit. Sheet marks are persistent workbook references; formula text/special navigation marks are session-local. Uppercase marks do not open other files and numbered ShaDa marks are unavailable.
 
 Definition/declaration and tag motions (`gd/gD`, Ctrl-], `g]`, `g<C-]>`, Ctrl-t), file/include navigation (`gf`, `gF`, Ctrl-w variants, `[i/]i`), folds (`zj/zk`), diff (`[c/]c`), diagnostics (`[d/]d`), quickfix/location lists and Neovim window/buffer switching have no backing subsystem. Use the sheet commands above to switch workbook sheets. Unsupported motions are not silently redirected to unrelated cells. Neovim Select mode, named/numbered registers, arbitrary operators (`gq`, `=`, shell filters, folds), Ex ranges/scripts and full insert/replace-mode command parity are outside this implementation.
 

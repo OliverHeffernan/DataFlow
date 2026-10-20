@@ -45,7 +45,16 @@ export default class VimKeyboard {
 	get formula() { return this.sheet.rows[this.sheet.selRow][this.sheet.selCol]; }
 	get point() { return this.context === 'sheet' ? { row: this.sheet.selRow, col: this.sheet.selCol } : pointAt(this.rows, this.formulaCursor); }
 	get state() {
-		if (this.context === 'sheet') return this.states.sheet;
+		if (this.context === 'sheet') {
+			if (this.sheet.marks) {
+				for (const key of Object.keys(this.states.sheet.marks)) if (/^[a-z]$/i.test(key)) delete this.states.sheet.marks[key];
+				for (const mark of this.sheet.marks) if (mark.bounds && mark.sheetName === this.sheet.activeSheet.name && /^[a-z]$/i.test(mark.name)) {
+					const point = { row: mark.bounds.r0, col: mark.bounds.c0 };
+					this.states.sheet.marks[mark.name.toLowerCase()] = point; this.states.sheet.marks[mark.name.toUpperCase()] = point;
+				}
+			}
+			return this.states.sheet;
+		}
 		const key = `${this.sheet.selRow}:${this.sheet.selCol}`;
 		if (!this.formulaStates.has(key)) this.formulaStates.set(key, { marks: {} });
 		return this.formulaStates.get(key);
@@ -98,7 +107,8 @@ export default class VimKeyboard {
 		this.literalKey = key;
 		if (!(key === '<End>' && this.pending.endsWith('g'))) key = aliases[key] || key;
 		this.pending += key;
-		this.executePending();
+		try { this.executePending(); }
+		catch (error) { this.message(error.explanation || error.message); this.done(); }
 		this.render();
 	}
 
@@ -138,16 +148,37 @@ export default class VimKeyboard {
 		if (!keepColumn) this.state.preferredColumn = this.point.col;
 	}
 	leaveFormula() { this.context = 'sheet'; this.reference = null; }
-	location() { return { context: this.context, row: this.sheet.selRow, col: this.sheet.selCol, cursor: this.formulaCursor }; }
+	location() { return { context: this.context, sheetName: this.sheet.activeSheet?.name, row: this.sheet.selRow, col: this.sheet.selCol, cursor: this.formulaCursor }; }
 	restore(location) {
 		if (!location) return;
+		if (location.sheetName && location.sheetName !== this.sheet.activeSheet.name) {
+			if (!this.sheet.sheets.some(sheet => sheet.name === location.sheetName)) return;
+			this.sheet.switchSheet(location.sheetName); this.hooks.sheetChanged?.();
+			this.states.sheet = { marks: {} }; this.formulaStates.clear(); this.lastVisual = null;
+		}
 		this.context = location.context; this.reference = null;
 		this.sheet.selRow = clamp(location.row, 0, this.sheet.rows.length - 1);
 		this.sheet.selCol = clamp(location.col, 0, this.sheet.rows[0].length - 1);
 		this.formulaCursor = clamp(location.cursor, 0, Math.max(0, Array.from(this.formula).length - 1));
 	}
+	gotoMark(name, linewise = false, jump = true) {
+		const ref = this.sheet.mark(name);
+		if (!ref.bounds) throw new Error('Marked cells were deleted');
+		const crossSheet = ref.sheetName !== this.sheet.activeSheet.name;
+		if (this.anchor && crossSheet) throw new Error('A visual selection cannot cross sheets');
+		if (crossSheet) {
+			if (jump) { this.jumps = this.jumps.slice(0, this.jumpIndex); this.jumps.push(this.location()); this.jumpIndex = this.jumps.length; }
+			this.sheet.switchSheet(ref.sheetName); this.hooks.sheetChanged?.();
+			this.states.sheet = { marks: {} }; this.formulaStates.clear(); this.lastVisual = null;
+		}
+		this.context = 'sheet';
+		const row = ref.bounds.r0, col = linewise ? Math.max(0, this.sheet.rows[row].findIndex(value => String(value).trim() !== '')) : ref.bounds.c0;
+		this.move({ row, col }, jump && !crossSheet);
+	}
 	commit(rangeChange) {
-		this.hooks.change?.();
+		try { this.sheet.commitMarkedEdit?.(); }
+		catch (error) { this.message(error.message); this.changeKeys = []; return false; }
+		if (this.hooks.change?.() === false) { this.changeKeys = []; return false; }
 		this.state.marks['.'] = this.point;
 		this.changes.push(this.location()); this.changeIndex = this.changes.length;
 		if (!this.playing && (rangeChange || this.changeKeys.length)) this.lastChange = rangeChange || [...this.changeKeys];
@@ -163,6 +194,7 @@ export default class VimKeyboard {
 		this.move({ row: 0, col: 0 });
 	}
 	adjustSheetPositions(axis, at, removed, inserted) {
+		this.sheet.editMarkedStructure?.(axis, at, removed, inserted);
 		const adjust = point => {
 			if (point[axis] < at) return point;
 			if (point[axis] < at + removed) return null;
@@ -173,8 +205,9 @@ export default class VimKeyboard {
 			const [row, col] = key.split(':').map(Number), next = adjust({ row, col });
 			return next ? [[`${next.row}:${next.col}`, state]] : [];
 		}));
-		this.jumps = this.jumps.map(adjust).filter(Boolean); this.jumpIndex = Math.min(this.jumpIndex, this.jumps.length);
-		this.changes = this.changes.map(adjust).filter(Boolean); this.changeIndex = Math.min(this.changeIndex, this.changes.length);
+		const adjustLocation = location => location.sheetName && location.sheetName !== this.sheet.activeSheet?.name ? location : adjust(location);
+		this.jumps = this.jumps.map(adjustLocation).filter(Boolean); this.jumpIndex = Math.min(this.jumpIndex, this.jumps.length);
+		this.changes = this.changes.map(adjustLocation).filter(Boolean); this.changeIndex = Math.min(this.changeIndex, this.changes.length);
 		this.lastVisual = null;
 	}
 	editColumns(at, removed, inserted) {
@@ -281,7 +314,18 @@ export default class VimKeyboard {
 		}
 		if (action === 'o' && isVisual(this.mode)) { const point = this.point; this.move(this.anchor); this.anchor = point; return true; }
 		if (action === 'gv' && this.lastVisual) { this.restore(this.lastVisual.location); this.mode = this.lastVisual.mode; this.anchor = this.lastVisual.anchor; this.visualValueObject = this.lastVisual.valueObject; this.move(this.lastVisual.end); return true; }
-		if (/^m[a-zA-Z'`]$/.test(action)) { this.state.marks[action[1]] = this.point; return true; }
+		if (/^m[a-zA-Z'`]$/.test(action)) {
+			if (this.context === 'sheet' && /^[a-z]$/i.test(action[1]) && this.sheet.setMark) {
+				const a = this.anchor ?? this.point, b = this.point;
+				const bounds = { r0: Math.min(a.row, b.row), c0: this.mode === 'V' ? 0 : Math.min(a.col, b.col), r1: Math.max(a.row, b.row), c1: this.mode === 'V' ? this.rows[0].length - 1 : Math.max(a.col, b.col) };
+				this.sheet.setMark(action[1], bounds, this.anchor ? 'range' : 'cell');
+			} else this.state.marks[action[1]] = this.point;
+			return true;
+		}
+		if (this.context === 'sheet' && this.sheet.resolveMark && /^g?['`][A-Za-z]$/.test(action)) {
+			this.gotoMark(action.at(-1), action.includes("'"), !action.startsWith('g'));
+			return true;
+		}
 		if (['<C-o>', '<C-i>', '<Tab>', 'g;', 'g,'].includes(action)) {
 			const change = action.startsWith('g'), list = change ? this.changes : this.jumps, name = change ? 'changeIndex' : 'jumpIndex';
 			if (!list.length) return true;
@@ -303,6 +347,7 @@ export default class VimKeyboard {
 				const end = { row: point.row, col: action === 'X' ? Math.max(0, point.col - 1) : Math.min(last, point.col + count - 1) };
 				this.operate(action === 's' ? 'c' : 'd', { start, end, empty: !this.rows[point.row].length || (action === 'X' && point.col === 0) }); return true;
 			}
+			if (this.protectDatasetHeader()) return true;
 			if (this.context === 'sheet') { this.editOwner(); this.context = 'formula'; this.formulaCursor = 0; }
 			const row = this.point.row, line = this.rows[row], base = offset(this.rows, { row, col: 0 });
 			if (action === 'I') this.formulaCursor = base + Math.max(0, line.findIndex(c => /\S/u.test(c)));
@@ -340,6 +385,7 @@ export default class VimKeyboard {
 		if (/^q[a-z]$/.test(action)) { this.recording = action[1]; this.macros.set(this.recording, []); return true; }
 		if (/^@[a-z@]$/.test(action)) { const name = action[1] === '@' ? this.lastMacro : action[1]; this.lastMacro = name; this.replay(Array(count).fill(this.macros.get(name) || []).flat()); return true; }
 		if (/^r.$/us.test(action) && this.context === 'formula') {
+			if (this.protectDatasetHeader()) return true;
 			if (count > this.rows[this.point.row].length - this.point.col) return true;
 			const text = Array.from(this.formula); text.splice(this.formulaCursor, count, ...Array(count).fill(Array.from(action)[1])); this.setFormula(text.join('')); this.commit(); return true;
 		}
@@ -348,6 +394,12 @@ export default class VimKeyboard {
 			this.hooks.scroll?.(action, count, explicit); return true;
 		}
 		return false;
+	}
+	protectDatasetHeader(start = { row: this.sheet.selRow, col: this.sheet.selCol }, end = start) {
+		if (!this.sheet.marks?.some(mark => mark.kind === 'dataset' && mark.sheetName === this.sheet.activeSheet.name
+			&& mark.bounds.r0 >= start.row && mark.bounds.r0 <= end.row && mark.bounds.c0 <= end.col && mark.bounds.c1 >= start.col)) return false;
+		this.message('Dataset headers are protected; use :datasetcolumnrename');
+		return true;
 	}
 
 	fill(direction, count, step, shape) {
@@ -416,15 +468,15 @@ export default class VimKeyboard {
 		return false;
 	}
 	insertKey(key) {
-		const assist = formulaAssist(this.formula, this.formulaCursor);
+		const assist = formulaAssist(this.formula, this.formulaCursor, this.sheet);
 		if (assist.suggestions.length && ['<Up>', '<Down>'].includes(key)) {
 			this.completionIndex = (this.completionIndex + (key === '<Down>' ? 1 : -1) + assist.suggestions.length) % assist.suggestions.length;
 			this.reference = null; return;
 		}
 		if (key === '<Tab>' && assist.suggestions.length) {
 			const text = Array.from(this.formula), name = assist.suggestions[this.completionIndex % assist.suggestions.length];
-			text.splice(this.formulaCursor - assist.prefix.length, assist.prefix.length, ...`${name}()`);
-			this.formulaCursor += name.length - assist.prefix.length + 1;
+			text.splice(this.formulaCursor - assist.prefix.length, assist.prefix.length, ...(assist.kind === 'mark' ? name : `${name}()`));
+			this.formulaCursor += name.length - assist.prefix.length + (assist.kind === 'mark' ? 0 : 1);
 			this.setFormula(text.join('')); this.reference = null; this.completionIndex = 0; return;
 		}
 		this.completionIndex = 0;
@@ -479,22 +531,24 @@ export default class VimKeyboard {
 		this.state.marks['['] = start; this.state.marks[']'] = end;
 		if (this.context === 'sheet') {
 			const left = linewise ? 0 : Math.min(start.col, end.col), right = linewise ? this.rows[0].length - 1 : Math.max(start.col, end.col);
+			if (operator !== 'y' && this.protectDatasetHeader({ row: start.row, col: left }, { row: end.row, col: right })) return;
 			if (range.valueObject && !this.canUseValueObject({ row: start.row, col: left }, { row: end.row, col: right })) {
 				this.message('Value text object is unavailable on chart cells'); return;
 			}
 			if (operator !== 'y' && this.protectSpill({ row: start.row, col: left }, { row: end.row, col: right })) return;
+			if (operator === 'd' && linewise && !empty) this.adjustSheetPositions('row', start.row, end.row - start.row + 1, 0);
 			values ||= range.valueObject;
 			const cells = this.rows.slice(start.row, end.row + 1).map((row, r) => row.slice(left, right + 1).map((value, c) => values ? String(this.sheet.getCopyValue?.(start.row + r, left + c) ?? value) : value));
 			this.register = { cells, linewise, text: cells.map(row => row.join('\t')).join('\n') };
 			if (operator !== 'y' && !empty) {
 				if (linewise && operator === 'd') {
-					this.adjustSheetPositions('row', start.row, end.row - start.row + 1, 0);
 					this.sheet.rows.splice(start.row, end.row - start.row + 1); this.sheet.styles.splice(start.row, end.row - start.row + 1);
 					if (!this.sheet.rows.length) { this.sheet.rows.push(Array(right + 1).fill('')); this.sheet.styles.push(Array.from({ length: right + 1 }, () => ({ ...this.sheet.defaultStyling }))); }
 				} else for (let r = start.row; r <= end.row; r++) for (let c = left; c <= right; c++) this.sheet.rows[r][c] = '';
 			}
 			this.move({ row: start.row, col: left });
 		} else {
+			if (operator !== 'y' && this.protectDatasetHeader()) return;
 			const text = Array.from(this.formula), rows = this.rows;
 			let a = offset(rows, start), b = offset(rows, end) + (empty ? 0 : 1);
 			if (linewise) {
@@ -538,13 +592,18 @@ export default class VimKeyboard {
 				this.sheet.styles.splice(row, 0, ...copies.map(r => r.map(() => ({ ...this.sheet.defaultStyling }))));
 			} else {
 				const end = { row: row + cells.length * count - 1, col: this.sheet.selCol + Math.max(...cells.map(line => line.length)) - 1 };
+				if (this.protectDatasetHeader(this.point, end)) return;
 				if (this.protectSpill(this.point, end)) return;
 				for (let n = 0; n < count; n++) for (let r = 0; r < cells.length && row + r + n * cells.length < this.rows.length; r++) {
-					for (let c = 0; c < cells[r].length && this.sheet.selCol + c < this.rows[0].length; c++) this.sheet.rows[row + r + n * cells.length][this.sheet.selCol + c] = cells[r][c];
+					for (let c = 0; c < cells[r].length && this.sheet.selCol + c < this.rows[0].length; c++) {
+						this.sheet.noteMarkWrite?.(row + r + n * cells.length, this.sheet.selCol + c);
+						this.sheet.rows[row + r + n * cells.length][this.sheet.selCol + c] = cells[r][c];
+					}
 				}
 			}
 			this.move({ row, col: this.sheet.selCol });
 		} else {
+			if (this.protectDatasetHeader()) return;
 			const rows = this.rows, point = this.point;
 			if (this.register.linewise) {
 				const at = point.row + (before ? 0 : 1), lines = this.register.text.replace(/\n$/, '').split('\n');

@@ -243,3 +243,27 @@ test('built-in shortcut hints expose only the next key through operators and tex
 	keyboard.feed('<Esc>vg');
 	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'J' && hint.description === 'Fill down'));
 });
+
+test('marks and dataset columns complete without calls, share reference colors, and stay named under F4', () => {
+	const { sheet, keyboard } = setup('');
+	sheet.rows[0][0] = 'item'; sheet.rows[0][1] = 'amount'; sheet.rows[1][1] = '17';
+	sheet.setMark('sales', { r0: 0, c0: 0, r1: 2, c1: 1 }, 'dataset');
+	sheet.setMark('tax_rate', { r0: 0, c0: 3, r1: 0, c1: 3 });
+	const assist = text => formulaAssist(text, Array.from(text).length, sheet);
+	assert.deepEqual(assist('=SUM(`sa').suggestions, ['`sales']);
+	assert.deepEqual(assist('=SUM(`sales.AM').suggestions, ['`sales.amount']);
+	assert.deepEqual(assist('="`sales.am').suggestions, []);
+	assert.equal(assist('=SUM(`sales.AM').signature.name, 'SUM');
+	keyboard.feed('i=SUM(`sa<Tab>.am<Tab>)');
+	assert.equal(keyboard.formula, '=SUM(`sales.amount)');
+	keyboard.feed('<Left><F4>'); assert.equal(keyboard.formula, '=SUM(`sales.amount)');
+	const text = '=SUM(`sales.amount)+SUM(B1:B2)+`tax_rate+IF(TRUE,"`sales.item",0)';
+	const refs = formulaReferences(text, 5, 3, sheet);
+	assert.deepEqual(refs.map(ref => ref.source), ['`sales.amount', 'B1:B2', '`tax_rate']);
+	assert.equal(refs[0].color, refs[1].color);
+	assert.deepEqual(refs[0].region, { r0: 1, c0: 1, r1: 2, c1: 1 });
+	assert.ok(new SyntaxHighlighting().highlight(text, refs).includes('>`sales.amount</span>'));
+	sheet.createSheet('Report');
+	const foreign = formulaReferences('=SUM(`sales.amount)', 5, 3, sheet)[0];
+	assert.equal(foreign.region, null); assert.deepEqual(foreign.coordinates, refs[0].coordinates);
+});
