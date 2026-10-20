@@ -14,9 +14,10 @@ Type directly with the spreadsheet focused; there is no bottom input field. The 
 ### Formula insert assistance
 
 - **Ctrl-h/j/k/l** starts a reference next to the edited cell, using DataFlow-relative notation (e.g. `[-1]{}`). Consecutive shortcuts adjust the same reference. Typing or moving the text caret ends that reference session.
+- These reference shortcuts apply in **INSERT**, not sheet/formula NORMAL. If only some directions fail, check custom `i` mappings in `init.lua` and OS/window-manager/browser shortcuts. DataFlow prevents browser defaults for key events it receives, but cannot override shortcuts intercepted before they reach the app. For an alternative, map `vim.keymap.set("i", "<C-Left>", "<C-h>")` and `vim.keymap.set("i", "<C-Right>", "<C-l>")`, then reload your config.
 - **Shift-h/j/k/l** extends the active reference into a rectangular range with that reference as a fixed anchor. Start with Ctrl-direction first; Ctrl-direction can then also move the range endpoint. Ranges normalize to top-left/bottom-right and clamp at sheet edges. Outside an active reference session, shifted letters remain text (including in function names such as HSTACK and FILTER).
 - Absolute references, relative/calculated references and ranges get matching colors in the formula text and grid. Repeated references to the same region share colors; quoted strings are ignored. Highlights disappear on returning to the sheet.
-- **Tab** completes a function prefix with parentheses. **Up/Down** selects suggestions; Enter always commits rather than accepting a completion. Signature help highlights the active argument of the innermost supported function.
+- **Tab** completes a function prefix with parentheses, including `CHART()` builder methods after a dot (e.g. `.se` → `.series()`). **Up/Down** selects suggestions; Enter always commits rather than accepting a completion. Signature help highlights the active argument of the innermost supported function or chart method.
 - **F4** toggles the reference under or immediately before the caret between ordinary cell coordinates and `[]{}` relative notation. It works in formula normal and insert. Use Fn-F4 if the OS reserves F4, or remap `<F4>` in Lua.
 - Array formulas spill into empty cells. The selected spill has a dashed boundary and source label. `i/a/I/A` or Enter on a spill child edits the source, not an independent output. Error explanations appear in the footer and cell tooltip. See the [formula reference](../README.md#nested-formulas-and-dynamic-arrays).
 
@@ -76,11 +77,16 @@ Use `[count]d/c/y[count]{motion}`. Counts multiply (`2d3w` covers six words); do
 - `v`, `V`, `Ctrl-v` enter character/row/block visual modes. Sheet `v` and Ctrl-v both select rectangles; `V` covers full rows. `o` swaps the active corner, `gv` restores the last selection, and `d/c/y` acts on it. Shift-click also extends a sheet rectangle.
 - After an operator, `v/V/Ctrl-v` forces characterwise/linewise/blockwise motion type.
 - `iw/aw`, `iW/aW`, `ip/ap`, `is/as` select inner/around word, WORD, paragraph, sentence. In the sheet these mean cell, occupied run, populated block, and occupied run respectively.
+- **Sheet-only `ic` (cell formula)** selects the current cell, including when blank: `yic` yanks its complete raw formula/text, `dic` clears it without shifting cells, and `cic` clears it and enters INSERT. `vic` selects it in visual mode.
+- **Sheet-only `iv` (cell value)** uses the evaluated/displayed value instead: `yiv` on `=2+3*4` copies `14`, while `yic` copies `=2+3*4`. `div` and `civ` clear/change the underlying cell but put its evaluated value in the register. `viv` selects values for a subsequent operator. The value object is unavailable on chart cells; counted or extended value selections containing any chart are rejected without changing cells or the register. Use `ic` to copy a chart's builder.
+- Both objects accept counts for consecutive cells to the right, including blanks, clamped at the row edge (`y3ic`, `y3iv`); change edits the first cell. Neither object is available in formula NORMAL.
 - Formula-only delimiter objects: `i/a` followed by `(`, `)`, `b`, `[`, `]`, `{`, `}`, `B`, `<`, `>`, `'`, `"`, or a backtick. `it/at` select paired tag content/tags. Counts choose enclosing pairs or successive words/paragraphs.
 
 ### Editing, registers and navigation history
 
 `x/X` deletes forward/backward within the current row/line; `s` changes cells/characters; `S` changes rows/lines; `C/D` changes/deletes through row/line end. `o/O` opens a row below/above and edits its first cell; in formula normal it opens a text line. `r{char}` replaces formula characters.
+
+`yic` and `yiv` yank the selected cell's raw formula/text or evaluated value into the unnamed register and system clipboard, without moving or editing it. `yf{char}` remains operator + find in both normal contexts.
 
 `p/P` puts the unnamed register. Character/block sheet ranges overwrite existing cells from the selected cell, clipping at sheet edges; linewise registers insert complete rows below/above. Text registers insert into formula text. Copied formulae are literal; put does not rewrite relative references or copy styling. `:yankcell` and `:yankvalue` copy cell formulae or evaluated values, including a selection. Formula editing and row/column edits participate in `u` / Ctrl-r undo/redo (50 snapshots). `.` repeats an edit, and `qa … q`, `@a`, `@@` record/replay session macros; recursive replay is blocked.
 
@@ -145,7 +151,7 @@ Reload is atomic: syntax/runtime/API errors keep the previous mappings active an
 | `gh/gl` row edges | `0/$`, or `^/g_` for populated edges |
 | `I` edits first cell | `0i`; `I` edits the selected formula's first nonblank |
 | `gA3<CR>` cell jump | `:goto A3<CR>` (also supports AA, AB, … labels) |
-| `yf/ys` | `:yankcell` / `:yankvalue`; `yf{char}` is a real operator + find |
+| `yf/ys` | `yic` / `yiv`, or `:yankcell` / `:yankvalue`; `yf{char}` is a real operator + find |
 | `oh/ol`, `dc` | `:insertleft` / `:insertright`, `:deletecol` |
 | `oj/ok` | `o/O`, inserting a row and entering insert |
 | `Pj/Pk/Ph/Pl` gap paste | `:putbelow` / `:putabove` / `:putleft` / `:putright`; `P` is put-before |

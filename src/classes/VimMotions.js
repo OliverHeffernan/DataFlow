@@ -47,6 +47,9 @@ function bracketPairs(units, open, close) {
 
 export function textObject(rows, point, name, count = 1, sheet = false) {
 	const around = name[0] === 'a', kind = name[1];
+	if (sheet && (name === 'ic' || name === 'iv')) {
+		return { start: { ...point }, end: { row: point.row, col: Math.min(rows[point.row].length - 1, point.col + count - 1) }, valueObject: name === 'iv' };
+	}
 	if (sheet && !'wWps'.includes(kind)) return null;
 	const units = rows.flatMap((row, i) => i ? ['\n', ...row] : row);
 	const current = offset(rows, point);

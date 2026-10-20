@@ -68,14 +68,14 @@ function number(value, label) {
 
 export function evaluateChart(source, row, col, sheet) {
 	const chart = {
-		kind: "chart", type: "line", width: 320, height: 200,
+		kind: "chart", type: null, width: 320, height: 200,
 		position: { x: 0, y: 0 }, title: "", xLabel: "", yLabel: "", series: [],
 	};
 	let xRange;
 	const seriesRanges = [];
 	for (const { method, args } of calls(source)) {
 		const arity = {
-			line: [0], bar: [0], scatter: [0], x: [1], series: [1, 2],
+			line: [0], bar: [0], scatter: [0], pie: [0], x: [1], series: [1, 2],
 			title: [1], xLabel: [1], yLabel: [1], size: [2], width: [1], height: [1], position: [2],
 		};
 		if (!Object.hasOwn(arity, method)) throw new Error(`Unknown method .${method}()`);
@@ -83,7 +83,7 @@ export function evaluateChart(source, row, col, sheet) {
 			throw new Error(`Wrong arguments for .${method}()`);
 		}
 		switch (method) {
-			case "line": case "bar": case "scatter": chart.type = method; break;
+			case "line": case "bar": case "scatter": case "pie": chart.type = method; break;
 			case "title": case "xLabel": case "yLabel": chart[method] = text(args[0]); break;
 			case "width": case "height": chart[method] = dimension(args[0]); break;
 			case "size": [chart.width, chart.height] = args.map(arg => dimension(arg)); break;
@@ -99,6 +99,7 @@ export function evaluateChart(source, row, col, sheet) {
 				break;
 		}
 	}
+	if (!chart.type) return "";
 	if (!chart.series.length) throw new Error("Add at least one .series(range)");
 
 	function range(arg) {
@@ -142,6 +143,12 @@ export function evaluateChart(source, row, col, sheet) {
 			if (String(value).trim() === "") throw new Error("Scatter x-values must contain finite numbers");
 			return number(value, "Scatter x-values");
 		});
+	}
+	if (chart.type === "pie") {
+		if (chart.series.length !== 1) throw new Error("Pie charts require exactly one .series(range)");
+		if (chart.series[0].values.some(value => value !== null && value < 0)) {
+			throw new Error("Pie values must be nonnegative");
+		}
 	}
 	return chart;
 }

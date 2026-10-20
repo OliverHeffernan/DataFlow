@@ -38,6 +38,7 @@ export default class VimKeyboard {
 		this.changeKeys = [];
 		this.reference = null; this.literalKey = null;
 		this.completionIndex = 0;
+		this.visualValueObject = false;
 	}
 	get rows() { return this.context === 'sheet' ? this.sheet.rows : this.formula.split('\n').map(line => Array.from(line)); }
 	get formula() { return this.sheet.rows[this.sheet.selRow][this.sheet.selCol]; }
@@ -113,7 +114,7 @@ export default class VimKeyboard {
 			this.commit();
 		} else if (!isVisual(this.mode) && !cancelling) this.leaveFormula();
 		if (this.anchor) this.saveVisual();
-		this.anchor = null; this.mode = 'n'; this.changeKeys = [];
+		this.anchor = null; this.visualValueObject = false; this.mode = 'n'; this.changeKeys = [];
 	}
 
 	move(point, jump = false, keepColumn = false) {
@@ -151,6 +152,7 @@ export default class VimKeyboard {
 	message(text) { this.hooks.message?.(text); }
 	resetNavigation() {
 		this.context = 'sheet'; this.mode = 'n'; this.pending = ''; this.command = null; this.anchor = null; this.reference = null;
+		this.visualValueObject = false;
 		this.mappingKeys = []; this.formulaCursor = 0; this.states.sheet = { marks: {} }; this.formulaStates.clear();
 		this.jumps = []; this.jumpIndex = 0; this.changes = []; this.changeIndex = 0; this.lastVisual = null;
 		this.move({ row: 0, col: 0 });
@@ -208,8 +210,11 @@ export default class VimKeyboard {
 		if ((operator || isVisual(this.mode)) && /^[ia].$/us.test(action)) {
 			const range = textObject(this.rows, this.point, action, count, this.context === 'sheet');
 			if (range) {
+				if (range.valueObject && !this.canUseValueObject(range.start, range.end)) {
+					this.message('Value text object is unavailable on chart cells'); this.done(); return;
+				}
 				if (operator) this.operate(operator, range);
-				else { this.anchor = range.start; this.mode = range.linewise ? 'V' : 'v'; this.move(range.end); }
+				else { this.anchor = range.start; this.visualValueObject = !!range.valueObject; this.mode = range.linewise ? 'V' : 'v'; this.move(range.end); }
 			}
 			this.done(); return;
 		}
@@ -228,7 +233,7 @@ export default class VimKeyboard {
 			motion = { point: { row: motion.point.row - 1, col: Math.max(0, this.rows[motion.point.row - 1].length - 1) }, inclusive: true };
 		}
 		if (motion) {
-			if (motion.range && !operator) { this.anchor = motion.range.start; this.mode = 'v'; this.move(motion.range.end); }
+			if (motion.range && !operator) { this.anchor = motion.range.start; this.visualValueObject = false; this.mode = 'v'; this.move(motion.range.end); }
 			else if (operator) {
 				const range = motion.range || this.motionRange(motion, force);
 				this.operate(operator, range);
@@ -256,17 +261,17 @@ export default class VimKeyboard {
 
 	action(action, count, explicit = false) {
 		if (isVisual(this.mode) && ['d', 'c', 'y', 'x'].includes(action)) {
-			const range = { start: this.anchor, end: this.point, linewise: this.mode === 'V', block: this.mode === 'b' };
+			const range = { start: this.anchor, end: this.point, linewise: this.mode === 'V', block: this.mode === 'b', valueObject: this.visualValueObject };
 			this.saveVisual(); this.operate(action === 'x' ? 'd' : action[0], range); return true;
 		}
 		if (['v', 'V', '<C-v>'].includes(action)) {
 			const mode = action === '<C-v>' ? 'b' : action;
 			if (this.mode === mode) { this.saveVisual(); this.anchor = null; this.mode = 'n'; }
-			else { this.anchor ||= this.point; this.mode = mode; }
+			else { if (!this.anchor) this.visualValueObject = false; this.anchor ||= this.point; this.mode = mode; }
 			return true;
 		}
 		if (action === 'o' && isVisual(this.mode)) { const point = this.point; this.move(this.anchor); this.anchor = point; return true; }
-		if (action === 'gv' && this.lastVisual) { this.restore(this.lastVisual.location); this.mode = this.lastVisual.mode; this.anchor = this.lastVisual.anchor; this.move(this.lastVisual.end); return true; }
+		if (action === 'gv' && this.lastVisual) { this.restore(this.lastVisual.location); this.mode = this.lastVisual.mode; this.anchor = this.lastVisual.anchor; this.visualValueObject = this.lastVisual.valueObject; this.move(this.lastVisual.end); return true; }
 		if (/^m[a-zA-Z'`]$/.test(action)) { this.state.marks[action[1]] = this.point; return true; }
 		if (['<C-o>', '<C-i>', '<Tab>', 'g;', 'g,'].includes(action)) {
 			const change = action.startsWith('g'), list = change ? this.changes : this.jumps, name = change ? 'changeIndex' : 'jumpIndex';
@@ -334,9 +339,18 @@ export default class VimKeyboard {
 		finally { this.playing = false; }
 	}
 	saveVisual() {
-		this.lastVisual = { mode: this.mode, anchor: { ...this.anchor }, end: this.point, location: this.location() };
+		this.lastVisual = { mode: this.mode, anchor: { ...this.anchor }, end: this.point, location: this.location(), valueObject: this.visualValueObject };
 		this.state.marks['<'] = compare(this.anchor, this.point) < 0 ? this.anchor : this.point;
 		this.state.marks['>'] = compare(this.anchor, this.point) < 0 ? this.point : this.anchor;
+	}
+	canUseValueObject(start = this.point, end = start) {
+		if (this.context !== 'sheet') return false;
+		for (let row = Math.min(start.row, end.row); row <= Math.max(start.row, end.row); row++) {
+			for (let col = Math.min(start.col, end.col); col <= Math.max(start.col, end.col); col++) {
+				if (this.sheet.getElementValue?.(row, col)?.kind === 'chart') return false;
+			}
+		}
+		return true;
 	}
 	setFormula(text) { this.sheet.rows[this.sheet.selRow][this.sheet.selCol] = text; }
 	editOwner() {
@@ -418,7 +432,11 @@ export default class VimKeyboard {
 		this.state.marks['['] = start; this.state.marks[']'] = end;
 		if (this.context === 'sheet') {
 			const left = linewise ? 0 : Math.min(start.col, end.col), right = linewise ? this.rows[0].length - 1 : Math.max(start.col, end.col);
+			if (range.valueObject && !this.canUseValueObject({ row: start.row, col: left }, { row: end.row, col: right })) {
+				this.message('Value text object is unavailable on chart cells'); return;
+			}
 			if (operator !== 'y' && this.protectSpill({ row: start.row, col: left }, { row: end.row, col: right })) return;
+			values ||= range.valueObject;
 			const cells = this.rows.slice(start.row, end.row + 1).map((row, r) => row.slice(left, right + 1).map((value, c) => values ? String(this.sheet.getCopyValue?.(start.row + r, left + c) ?? value) : value));
 			this.register = { cells, linewise, text: cells.map(row => row.join('\t')).join('\n') };
 			if (operator !== 'y' && !empty) {
@@ -454,7 +472,7 @@ export default class VimKeyboard {
 			this.formulaCursor = Math.min(a, Math.max(0, Array.from(this.formula).length - (operator === 'c' ? 0 : 1)));
 		}
 		this.hooks.copy?.(this.register);
-		this.anchor = null; this.mode = 'n';
+		this.anchor = null; this.visualValueObject = false; this.mode = 'n';
 		if (operator === 'c') { this.context = 'formula'; this.mode = 'i'; if (sheetContext) this.formulaCursor = 0; }
 		else if (operator !== 'y') this.commit();
 	}

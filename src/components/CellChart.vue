@@ -10,32 +10,41 @@
 			<desc>{{ description }}</desc>
 			<rect class="background" x="0.5" y="0.5" :width="layout.width - 1" :height="layout.height - 1" rx="5" />
 			<text v-if="chart.title" class="heading" x="14" y="22">{{ shorten(chart.title, (layout.width - 28) / 7) }}</text>
-			<g v-for="(series, i) in chart.series" :key="i" :transform="`translate(${layout.left + (i % layout.legendCols) * layout.legendWidth}, ${layout.legendTop + Math.floor(i / layout.legendCols) * 17})`">
+			<g v-for="(entry, i) in layout.legend" :key="i" :transform="`translate(${layout.left + (i % layout.legendCols) * layout.legendWidth}, ${layout.legendTop + Math.floor(i / layout.legendCols) * 17})`">
+				<title>{{ entry.name }}</title>
 				<rect x="0" y="-7" width="8" height="8" rx="2" :fill="color(i)" />
-				<text x="13" y="0">{{ shorten(series.name, (layout.legendWidth - 20) / 6) }}</text>
+				<text x="13" y="0">{{ shorten(entry.name, (layout.legendWidth - 20) / 6) }}</text>
 			</g>
-			<g v-for="tick in layout.yTicks" :key="tick.value">
-				<line class="grid" :x1="layout.left" :x2="layout.right" :y1="tick.y" :y2="tick.y" />
-				<text :x="layout.left - 8" :y="tick.y + 4" text-anchor="end">{{ format(tick.value) }}</text>
-			</g>
-			<line class="axis" :x1="layout.left" :x2="layout.right" :y1="layout.zero" :y2="layout.zero" />
-			<g v-for="(series, i) in layout.series" :key="i" :fill="color(i)">
-				<path v-if="chart.type === 'line'" class="series-line" :d="series.path" :stroke="color(i)" fill="none" />
-				<template v-for="(point, j) in series.points" :key="j">
-					<rect v-if="point && chart.type === 'bar'" class="bar"
-						:x="point.x - layout.groupWidth / 2 + i * layout.barWidth" :y="Math.min(point.y, layout.zero)"
-						:width="layout.barWidth * 0.9" :height="Math.abs(point.y - layout.zero)"
-					><title>{{ series.name }} · {{ point.label }}: {{ point.value }}</title></rect>
-					<circle v-else-if="point" class="point" :cx="point.x" :cy="point.y" :r="chart.type === 'scatter' ? 3.5 : 2.5">
-						<title>{{ series.name }} · {{ point.label }}: {{ point.value }}</title>
-					</circle>
+			<g v-if="chart.type === 'pie'">
+				<template v-for="slice in layout.slices" :key="slice.index">
+					<circle v-if="slice.full" class="pie-slice" :cx="layout.cx" :cy="layout.cy" :r="layout.radius" :fill="color(slice.index)"><title>{{ slice.label }}</title></circle>
+					<path v-else class="pie-slice" :d="slice.path" :fill="color(slice.index)"><title>{{ slice.label }}</title></path>
 				</template>
 			</g>
-			<text v-for="tick in layout.xTicks" :key="tick.index" :x="tick.x" :y="layout.bottom + 18" text-anchor="middle">
-				{{ shorten(tick.label, layout.tickWidth / 6) }}
-			</text>
-			<text v-if="chart.xLabel" :x="(layout.left + layout.right) / 2" :y="layout.height - 10" text-anchor="middle">{{ shorten(chart.xLabel, (layout.right - layout.left) / 6) }}</text>
-			<text v-if="chart.yLabel" :transform="`translate(14 ${(layout.top + layout.bottom) / 2}) rotate(-90)`" text-anchor="middle">{{ shorten(chart.yLabel, (layout.bottom - layout.top) / 6) }}</text>
+			<template v-else>
+				<g v-for="tick in layout.yTicks" :key="tick.value">
+					<line class="grid" :x1="layout.left" :x2="layout.right" :y1="tick.y" :y2="tick.y" />
+					<text :x="layout.left - 8" :y="tick.y + 4" text-anchor="end">{{ format(tick.value) }}</text>
+				</g>
+				<line class="axis" :x1="layout.left" :x2="layout.right" :y1="layout.zero" :y2="layout.zero" />
+				<g v-for="(series, i) in layout.series" :key="i" :fill="color(i)">
+					<path v-if="chart.type === 'line'" class="series-line" :d="series.path" :stroke="color(i)" fill="none" />
+					<template v-for="(point, j) in series.points" :key="j">
+						<rect v-if="point && chart.type === 'bar'" class="bar"
+							:x="point.x - layout.groupWidth / 2 + i * layout.barWidth" :y="Math.min(point.y, layout.zero)"
+							:width="layout.barWidth * 0.9" :height="Math.abs(point.y - layout.zero)"
+						><title>{{ series.name }} · {{ point.label }}: {{ point.value }}</title></rect>
+						<circle v-else-if="point" class="point" :cx="point.x" :cy="point.y" :r="chart.type === 'scatter' ? 3.5 : 2.5">
+							<title>{{ series.name }} · {{ point.label }}: {{ point.value }}</title>
+						</circle>
+					</template>
+				</g>
+				<text v-for="tick in layout.xTicks" :key="tick.index" :x="tick.x" :y="layout.bottom + 18" text-anchor="middle">
+					{{ shorten(tick.label, layout.tickWidth / 6) }}
+				</text>
+				<text v-if="chart.xLabel" :x="(layout.left + layout.right) / 2" :y="layout.height - 10" text-anchor="middle">{{ shorten(chart.xLabel, (layout.right - layout.left) / 6) }}</text>
+				<text v-if="chart.yLabel" :transform="`translate(14 ${(layout.top + layout.bottom) / 2}) rotate(-90)`" text-anchor="middle">{{ shorten(chart.yLabel, (layout.bottom - layout.top) / 6) }}</text>
+			</template>
 			<text v-if="layout.empty" :x="(layout.left + layout.right) / 2" :y="(layout.top + layout.bottom) / 2" text-anchor="middle">No data</text>
 		</svg>
 	</span>
@@ -64,11 +73,34 @@ const description = computed(() => props.chart.series.map(series =>
 const layout = computed(() => {
 	const chart = props.chart;
 	const width = Math.max(240, chart.width);
-	const legendCols = Math.max(1, Math.floor((width - 68) / 110));
+	const pie = chart.type === "pie";
+	const legendCols = Math.max(1, Math.floor((width - 68) / (pie ? 150 : 110)));
 	const legendWidth = (width - 68) / legendCols;
 	const legendTop = chart.title ? 42 : 23;
-	const top = legendTop + Math.ceil(chart.series.length / legendCols) * 17 + 6;
+	const top = legendTop + Math.ceil((pie ? chart.x.length : chart.series.length) / legendCols) * 17 + 6;
 	const height = Math.max(chart.height, top + 110);
+	if (pie) {
+		const left = 34, right = width - 34, bottom = height - 14;
+		const cx = (left + right) / 2, cy = (top + bottom) / 2;
+		const radius = Math.min(right - left, bottom - top) / 2 - 4;
+		const values = chart.series[0].values;
+		// Scale before summing: both tiny values and totals exceeding Number.MAX_VALUE remain drawable.
+		const magnitude = Math.max(...values.map(value => value ?? 0));
+		const weights = values.map(value => magnitude ? (value ?? 0) / magnitude : 0);
+		const total = weights.reduce((sum, value) => sum + value, 0);
+		const legend = values.map((value, i) => ({ name: `${chart.x[i]}: ${value ?? "blank"} (${format(total ? weights[i] / total * 100 : 0)}%)` }));
+		let angle = -Math.PI / 2;
+		const slices = [];
+		for (const [index, weight] of weights.entries()) {
+			if (!weight) continue;
+			const fraction = weight / total, end = angle + fraction * Math.PI * 2;
+			const point = a => `${cx + radius * Math.cos(a)},${cy + radius * Math.sin(a)}`;
+			slices.push({ index, full: fraction === 1, label: `${chart.series[0].name} · ${legend[index].name}`,
+				path: `M${cx},${cy} L${point(angle)} A${radius},${radius} 0 ${fraction > 0.5 ? 1 : 0},1 ${point(end)} Z` });
+			angle = end;
+		}
+		return { width, height, left, right, top, bottom, legendCols, legendWidth, legendTop, legend, cx, cy, radius, slices, empty: !total };
+	}
 	const left = chart.yLabel ? 64 : 48;
 	const right = width - 22;
 	const bottom = height - (chart.xLabel ? 48 : 30);
@@ -113,7 +145,7 @@ const layout = computed(() => {
 		return { name: series.name, points, path };
 	});
 	const groupWidth = (right - left) / count * 0.72;
-	return { width, height, left, right, top, bottom, legendCols, legendWidth, legendTop,
+	return { width, height, left, right, top, bottom, legendCols, legendWidth, legendTop, legend: chart.series,
 		xTicks, yTicks, series, zero: y(0), groupWidth, barWidth: groupWidth / series.length,
 		tickWidth: (right - left) / Math.max(1, tickCount - 1), empty: values.length === 0 };
 });
@@ -129,4 +161,5 @@ text { fill: #a5bacb; }
 .grid { stroke: #253847; stroke-width: 0.75; }
 .axis { stroke: #688294; stroke-width: 1; }
 .series-line { stroke-width: 2; stroke-linejoin: round; }
+.pie-slice { stroke: #0d1925; stroke-width: 1; }
 </style>

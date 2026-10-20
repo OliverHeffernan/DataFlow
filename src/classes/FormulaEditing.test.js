@@ -60,6 +60,25 @@ test('completion and signatures respect nested calls, relative calculations and 
 	assert.equal(keyboard.context, 'sheet');
 });
 
+test('CHART builder completion and signatures follow chains without leaking into ordinary formulas or strings', () => {
+	const assist = text => formulaAssist(text, Array.from(text).length);
+	assert.deepEqual(assist('=CHART().').suggestions, ['.line', '.bar', '.scatter', '.pie', '.x', '.series']);
+	assert.deepEqual(assist('=CHART().series(A0:A3, "😀, .size(").si').suggestions, ['.size']);
+	assert.deepEqual(assist('=CHART().series([-1]{max(0,1)}:[-1]{3}, ').signature,
+		{ name: '.series', args: ['valueRange', '["name"]'], argument: 1 });
+	assert.equal(assist('=CHART().size(320, ').signature.argument, 1);
+	assert.equal(assist('=CHART().series([-1]{max(0,').signature.name, 'max');
+	assert.deepEqual(assist('=SUM(A0:A3).si').suggestions, []);
+	assert.deepEqual(assist('=CHART().title(".si').suggestions, []);
+	assert.deepEqual(assist('=si').suggestions, ['sin']);
+	const { keyboard } = setup('=CHART()');
+	keyboard.feed('A. se<Tab>');
+	assert.equal(keyboard.formula, '=CHART().series()');
+	assert.equal(keyboard.formulaCursor, 16);
+	keyboard.feed('A0:A3,"😀"<End>.p<Tab><End>.si<Tab>320,240<CR>');
+	assert.equal(keyboard.formula, '=CHART().series(A0:A3,"😀").pie().size(320,240)');
+});
+
 test('F4 toggles scalar and range references reversibly and preserves Unicode caret positions', () => {
 	const { keyboard } = setup('="😀"+B2:C4');
 	keyboard.feed('A<F4>');
@@ -87,6 +106,39 @@ test('spill children reject partial deletes and puts, but selecting their source
 	keyboard.move({ row: 1, col: 4 }); keyboard.feed('vkd');
 	assert.equal(sheet.rows[0][4], '');
 	assert.equal(sheet.getElementValue(1, 4), '');
+});
+
+test('cell formula and value objects copy distinct text, and value delete/change preserve the evaluated register', () => {
+	const { sheet, keyboard } = setup('=2+3*4', 0, 0);
+	sheet.rows[0][1] = '=0'; sheet.rows[0][2] = '=FALSE';
+	sheet.rows[0][4] = '=VSTACK(8,13)';
+	sheet.recalculate(); keyboard.escape();
+	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'yiv'));
+	keyboard.feed('yicjp'); assert.equal(sheet.rows[1][0], '=2+3*4');
+	keyboard.feed('kyiv2jp'); assert.equal(sheet.rows[2][0], '14');
+	keyboard.feed('gg0y5iv');
+	assert.equal(keyboard.register.text, '14\t0\tfalse\t\t8');
+	keyboard.move({ row: 1, col: 4 }); keyboard.feed('yiv');
+	assert.equal(keyboard.register.text, '13');
+	keyboard.move({ row: 0, col: 0 }); keyboard.feed('div');
+	assert.equal(sheet.rows[0][0], ''); assert.equal(keyboard.register.text, '14');
+	keyboard.feed('cic=9*3<CR>civ');
+	assert.equal(keyboard.register.text, '27'); assert.equal(keyboard.formula, '');
+	assert.deepEqual([keyboard.context, keyboard.mode], ['formula', 'i']);
+	keyboard.feed('=5+1<CR><CR>yicdiccicyivdivciv');
+	assert.equal(keyboard.formula, '=5+1'); assert.equal(keyboard.register.text, '27');
+	assert.equal(keyboard.mode, 'n');
+	assert.ok(!keyboardHints(keyboard).some(hint => ['yic', 'yiv'].includes(hint.key)));
+});
+
+test('visual value selections retain their meaning through corner swaps and gv without affecting later formula selections', () => {
+	const { sheet, keyboard } = setup('=2+3*4', 0, 0);
+	sheet.rows[0][1] = '=3*7'; sheet.recalculate(); keyboard.escape();
+	keyboard.feed('vivloy'); assert.equal(keyboard.register.text, '14\t21');
+	keyboard.feed('gvy'); assert.equal(keyboard.register.text, '14\t21');
+	keyboard.feed('vly'); assert.equal(keyboard.register.text, '=2+3*4\t=3*7');
+	keyboard.feed('viv<Esc>vly'); assert.equal(keyboard.register.text, '=2+3*4\t=3*7');
+	keyboard.feed('vivlicy'); assert.equal(keyboard.register.text, '=3*7');
 });
 
 test('shortcut hints follow modes and Lua descriptions, prefixes and disabled defaults', () => {

@@ -13,6 +13,40 @@ function keyboard(rows, hooks = {}) {
 }
 const formula = text => { const v = keyboard([[text]]); v.feed('<CR>'); return v; };
 
+test('the inner-cell object composes with yank, delete and change only in the sheet', () => {
+	const copied = [];
+	const v = keyboard([['other', '=SUM(A1:A2)', 'tail'], ['3', '', ''], ['7', '', '']], { copy: register => copied.push(register.text) });
+	v.feed('lyic');
+	assert.deepEqual(v.register.cells, [['=SUM(A1:A2)']]);
+	assert.deepEqual(copied, ['=SUM(A1:A2)']);
+	assert.deepEqual([v.context, v.mode, v.point], ['sheet', 'n', { row: 0, col: 1 }]);
+	v.feed('dic'); assert.deepEqual(v.sheet.rows[0], ['other', '', 'tail']);
+	assert.equal(v.sheet.rows.length, 3);
+	v.feed('u'); assert.equal(v.formula, '=SUM(A1:A2)');
+	v.feed('cic=42<CR>'); assert.deepEqual(v.sheet.rows[0], ['other', '=42', 'tail']);
+	assert.deepEqual([v.context, v.mode, v.point], ['sheet', 'n', { row: 0, col: 1 }]);
+	v.feed('u'); assert.equal(v.formula, '=SUM(A1:A2)');
+	v.feed('jpl');
+	assert.equal(v.sheet.rows[1][1], '=SUM(A1:A2)');
+	v.feed('yic'); assert.equal(v.register.text, '');
+	v.feed('cicblank<CR>'); assert.equal(v.formula, 'blank');
+	v.feed('gg0yfa'); assert.equal(v.register.text, 'other\t=SUM(A1:A2)\ttail');
+	const f = formula('abc target');
+	f.register = { text: 'keep' };
+	f.feed('yicdiccic'); assert.equal(f.register.text, 'keep');
+	assert.equal(f.formula, 'abc target');
+	assert.equal(f.mode, 'n');
+	f.feed('yft'); assert.equal(f.register.text, 'abc t');
+});
+
+test('inner-cell counts include blanks and clamp at the row edge; visual ic selects just the current cell', () => {
+	const v = keyboard([['a', '', '=1+2', 'tail'], ['next', 'row', '', '']]);
+	v.feed('l2yic'); assert.deepEqual(v.register.cells, [['', '=1+2']]);
+	v.feed('2l99dic'); assert.deepEqual(v.sheet.rows, [['a', '', '=1+2', ''], ['next', 'row', '', '']]);
+	v.feed('u0v2licy'); assert.deepEqual(v.register.cells, [['=1+2']]);
+	assert.deepEqual(v.point, { row: 0, col: 2 });
+});
+
 test('counts wait for a motion; 0 is a motion but also a digit inside a count', () => {
 	const v = keyboard(Array.from({ length: 25 }, () => Array(8).fill('')));
 	v.feed('1'); assert.equal(v.point.row, 0);

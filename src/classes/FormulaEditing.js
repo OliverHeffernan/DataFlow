@@ -13,6 +13,10 @@ export const functionHelp = {
 	COUNTIF: ['conditionRange', 'criteria'], AVGIF: ['conditionRange', 'criteria', '[valueRange]'],
 	round: ['value', '[decimals]'], sqrt: ['value'], abs: ['value'], min: ['values', '…'], max: ['values', '…'],
 	sin: ['angle'], cos: ['angle'], tan: ['angle'], CHART: [],
+	'.line': [], '.bar': [], '.scatter': [], '.pie': [],
+	'.x': ['labelRange'], '.series': ['valueRange', '["name"]'],
+	'.title': ['"text"'], '.xLabel': ['"text"'], '.yLabel': ['"text"'],
+	'.size': ['width', 'height'], '.width': ['pixels'], '.height': ['pixels'], '.position': ['x', 'y'],
 };
 
 export function quotedEnd(text, at) {
@@ -75,6 +79,7 @@ export function toggleReference(keyboard) {
 export function formulaAssist(text, cursor) {
 	if (!text.startsWith('=')) return { suggestions: [], signature: null };
 	const before = Array.from(text).slice(0, cursor).join(''), stack = [];
+	let chartEnd = -1;
 	for (let i = 1; i < before.length; i++) {
 		const char = before[i];
 		if (char === '"' || char === "'") {
@@ -82,15 +87,22 @@ export function formulaAssist(text, cursor) {
 			if (before[end - 1] !== char || end === i + 1) return { suggestions: [], signature: null };
 			i = end - 1;
 		} else if ('([{'.includes(char)) {
-			const name = char === '(' ? before.slice(0, i).match(/([A-Za-z]+)\s*$/)?.[1] : null;
-			stack.push({ close: { '(': ')', '[': ']', '{': '}' }[char], name, argument: 0 });
-		} else if (')]}'.includes(char)) stack.pop();
+			let name = char === '(' ? before.slice(0, i).match(/([A-Za-z]+)\s*$/)?.[1] : null;
+			const method = char === '(' && !stack.length && chartEnd >= 0 && /^\s*\.\s*[A-Za-z]+\s*$/.test(before.slice(chartEnd, i));
+			if (method) name = `.${name}`;
+			stack.push({ name, argument: 0, chart: method || (name === 'CHART' && !stack.length) });
+		} else if (')]}'.includes(char)) {
+			const call = stack.pop();
+			if (!stack.length) chartEnd = call?.chart ? i + 1 : -1;
+		}
 		else if (char === ',' && stack.length) stack.at(-1).argument++;
 	}
 	const call = [...stack].reverse().find(entry => functionHelp[entry.name]);
-	const prefix = before.match(/(?:^|[^\w])([A-Za-z]+)$/)?.[1] ?? '';
+	const method = !stack.length && chartEnd >= 0 && /^\s*\.\s*[A-Za-z]*$/.test(before.slice(chartEnd));
+	const prefix = method ? before.match(/\.\s*[A-Za-z]*$/)[0] : before.match(/(?:^|[^\w.])([A-Za-z]+)$/)?.[1] ?? '';
+	const matchPrefix = method ? prefix.replace(/\s/g, '') : prefix;
 	const after = Array.from(text).slice(cursor).join('');
 	const suggestions = prefix && !/^(?:\w|\s*\()/.test(after)
-		? Object.keys(functionHelp).filter(name => name.toLowerCase().startsWith(prefix.toLowerCase())).slice(0, 6) : [];
+		? Object.keys(functionHelp).filter(name => name.toLowerCase().startsWith(matchPrefix.toLowerCase())).slice(0, 6) : [];
 	return { prefix, suggestions, signature: call ? { name: call.name, args: functionHelp[call.name], argument: call.argument } : null };
 }

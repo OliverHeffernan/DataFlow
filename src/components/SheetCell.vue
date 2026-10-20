@@ -80,6 +80,7 @@
 		if (keyboard.mode === 'i') keyboard.escape();
 		keyboard.pending = ''; keyboard.command = null; keyboard.mappingKeys = [];
 		keyboard.context = 'sheet'; keyboard.formulaCursor = 0;
+		if (!event.shiftKey || !keyboard.anchor) keyboard.visualValueObject = false;
 		if (event.shiftKey) { keyboard.anchor ||= keyboard.point; keyboard.mode = 'v'; }
 		else { keyboard.anchor = null; keyboard.mode = 'n'; }
 		keyboard.move({ row: props.rowNo, col: props.colNo });

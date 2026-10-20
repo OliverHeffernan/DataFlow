@@ -9,7 +9,7 @@
 			<span class="signature-name">{{ ui.assist.signature.name }}</span>(<template v-for="(arg, index) in ui.assist.signature.args" :key="index"><span v-if="index">, </span><strong v-if="index === Math.min(ui.assist.signature.argument, ui.assist.signature.args.length - 1)">{{ arg }}</strong><span v-else>{{ arg }}</span></template>)
 		</div>
 		<div class="formula-completions" v-if="ui.assist.inserting && ui.assist.suggestions.length" aria-label="Function suggestions">
-			<div class="completion-caption">FUNCTIONS <span>↑ ↓ choose · Tab insert</span></div>
+			<div class="completion-caption">{{ ui.assist.prefix.startsWith('.') ? 'CHART METHODS' : 'FUNCTIONS' }} <span>↑ ↓ choose · Tab insert</span></div>
 			<button v-for="(name, index) in ui.assist.suggestions" :key="name" :class="{ selected: index === ui.assist.selected % ui.assist.suggestions.length }" @mousedown.prevent @click="complete(index)">
 				<b>{{ name }}</b><span>({{ functionHelp[name].join(', ') }})</span>
 			</button>

@@ -1,6 +1,6 @@
 const normal = [
 	[['h', 'j', 'k', 'l'], 'Move'], [['i', 'a'], 'Edit'], [['<CR>'], 'Formula'],
-	[['v'], 'Select'], [['d', 'c', 'y'], 'Operator…'], [['g'], 'Go…'], [['u'], 'Undo'], [['<C-r>'], 'Redo'], [[':'], 'Command'],
+	[['v'], 'Select'], [['d', 'c', 'y'], 'Operator…'], [['yic'], 'Yank formula'], [['yiv'], 'Yank value'], [['g'], 'Go…'], [['u'], 'Undo'], [['<C-r>'], 'Redo'], [[':'], 'Command'],
 ];
 const formula = [
 	[['h', 'l', 'w', 'b'], 'Text motion'], [['j', 'k'], 'Leave + move cell'], [['i', 'a'], 'Insert'],
@@ -42,10 +42,16 @@ export function keyboardHints(keyboard) {
 	else if (['v', 'V', 'b'].includes(keyboard.mode)) defaults = [[['h', 'j', 'k', 'l'], 'Extend selection'], [['d'], 'Delete'], [['c'], 'Change'], [['y'], 'Yank'], [['o'], 'Swap corner'], [['<Esc>'], 'Cancel']];
 	else {
 		const pending = keyboard.pending.replace(/^\d+/, '');
-		if (/^[dcy]/.test(pending)) defaults = [[[pending[0]], 'Whole row / line'], ...motions];
+		if (/^[dcy]/.test(pending)) {
+			defaults = [[[pending[0]], 'Whole row / line'], ...motions];
+			if (keyboard.context === 'sheet') {
+				defaults = [[['ic'], 'Cell formula'], ...defaults];
+				if (keyboard.canUseValueObject()) defaults = [[['iv'], 'Cell value'], ...defaults];
+			}
+		}
 		else if (prefixes[pending]) defaults = prefixes[pending];
 		else if (/^[fFtTm'`q@r]$/.test(pending)) defaults = [[['character'], 'Type target'], [['<Esc>'], 'Cancel']];
-		else defaults = keyboard.context === 'formula' ? formula : normal;
+		else defaults = keyboard.context === 'formula' ? formula : normal.filter(([keys]) => keys[0] !== 'yiv' || keyboard.canUseValueObject());
 	}
 	const overridden = new Set(maps.filter(map => map.lhs.length === 1).map(map => map.lhs[0]));
 	return [...custom, ...defaults.map(([keys, description]) => ({ key: label(keys.filter(key => !overridden.has(key))), description })).filter(hint => hint.key)];
