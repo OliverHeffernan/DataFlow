@@ -133,12 +133,12 @@ fn preserve_metadata(file: &File, metadata: &fs::Metadata) -> io::Result<()> {
 }
 
 #[cfg(unix)]
-fn sync_directory(directory: &Path) -> io::Result<()> {
+pub(crate) fn sync_directory(directory: &Path) -> io::Result<()> {
     File::open(directory)?.sync_all()
 }
 
 #[cfg(not(unix))]
-fn sync_directory(_directory: &Path) -> io::Result<()> {
+pub(crate) fn sync_directory(_directory: &Path) -> io::Result<()> {
     Ok(())
 }
 

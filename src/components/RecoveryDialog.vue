@@ -94,7 +94,7 @@ li span { display: block; color: #a8bed2; font-size: 12px; }
 .recovery-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 button { font: inherit; padding: 7px 12px; background: #20384d; color: #dbe6f3; border: 1px solid #52718c; cursor: pointer; }
 button:disabled { opacity: .4; cursor: default; }
-button:focus-visible, ol:focus-visible { outline: 2px solid #75e2bc; outline-offset: 3px; }
+button:focus, ol:focus { outline: 2px solid #75e2bc; outline-offset: 3px; }
 .recovery-help { color: #a8bed2; font-size: 12px; }
 .recovery-error, li .recovery-error { color: #ffb5a2; overflow-wrap: anywhere; }
 </style>

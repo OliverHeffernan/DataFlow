@@ -23,8 +23,8 @@ export default class FileManager {
 
 	async writeWorkbook(saveAs) {
 		const recovery = sheetManager.recovery;
-		const captured = recovery?.capture() ?? { content: JSON.stringify(sheetManager.serializeWorkbook()) };
 		try {
+			const captured = recovery?.capture() ?? { content: JSON.stringify(sheetManager.serializeWorkbook()) };
 			if (!this.io.native) {
 				const name = recovery?.state.name === 'Untitled' ? 'sheet.dflo' : recovery?.state.name || 'sheet.dflo';
 				this.downloadFile(captured.content, name);

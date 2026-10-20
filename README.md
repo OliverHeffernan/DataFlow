@@ -258,6 +258,8 @@ Clear the current sheet's cells/styles without changing its name, the workbook p
 
 Recovery writes **separate local copies, never the original workbook**, for saved and untitled work. After an edit, a checkpoint is scheduled after 1 second of inactivity, or after at most 5 seconds of continuous input (busy event loops/storage can delay completion). Text in INSERT is included before Escape. Two generations are retained; unreadable checkpoints are reported and the newest valid workbook is offered. Recovery does not store derived formula values, spills, chart images, or undo history: these are rebuilt from stored content. Unresolved copies are not silently expired.
 
+Snapshots preserve persistent marks/datasets and workbook/sheet metadata. Pending dataset growth is projected with the same preflight as committing the edit, without changing live bounds or history. Invalid headers or blocked growth defer checkpoints/saves with an error and retain the last readable generation; incomplete formula text remains recoverable.
+
 | Command | Action |
 | --- | --- |
 | `:recover` | List recovery copies; `j/k` or arrows select, Enter restores, `d` asks to discard, Escape dismisses |

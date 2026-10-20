@@ -2,6 +2,7 @@ import { reactive, watch } from 'vue';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { createRecoveryId, createRecoveryStore } from './RecoveryStore.js';
+import HistoryManager from './HistoryManager.js';
 
 const signature = workbook => {
 	const { activeSheet, ...content } = workbook;
@@ -51,12 +52,34 @@ export default class RecoveryManager {
 	capture() {
 		// serializeWorkbook intentionally contains live arrays. Never pass them
 		// through an await, to IndexedDB, or to native IPC without capturing them.
-		const content = JSON.stringify(this.sheet.serializeWorkbook());
-		const workbook = JSON.parse(content);
+		const workbook = JSON.parse(JSON.stringify(this.sheet.serializeWorkbook()));
+		// Project pending INSERT with the same pure preflight used at commit.
+		// This preserves dataset growth/header protection without publishing
+		// marks, recalculating pending input, or adding an undo entry.
+		const previous = new HistoryManager().historyFor(this.sheet).undo.at(-1)?.state;
+		const baseline = previous?.sheets.find(sheet => sheet.name === this.sheet.activeSheet.name)?.rows;
+		const rows = workbook.sheets[workbook.activeSheet].rows;
+		if (!this.sheet.markStructureChanged && baseline?.length === rows.length && baseline[0].length === rows[0].length) {
+			const noted = new Set(this.sheet.markWriteCells);
+			const writes = [];
+			rows.forEach((row, r) => row.forEach((value, c) => {
+				if (value !== baseline[r][c] || noted.has(`${r}:${c}`)) writes.push({ row: r, col: c, value });
+			}));
+			workbook.marks = JSON.parse(JSON.stringify(this.sheet.prepareMarkWrites(writes, baseline)));
+		}
+		this.sheet.validateWorkbook(workbook);
+		const content = JSON.stringify(workbook);
 		return { document: this.document, workbook, content, signature: signature(workbook) };
 	}
 
-	refresh(captured = this.capture()) {
+	refresh(captured) {
+		try { captured ??= this.capture(); }
+		catch (error) {
+			// Invalid pending edits remain dirty and can still be discarded.
+			this.state.error = message(error);
+			this.state.dirty = this.state.pending = true;
+			return null;
+		}
 		this.state.dirty = captured.signature !== this.baseline;
 		this.state.pending = this.state.dirty && captured.content !== this.lastContent;
 		return captured;
@@ -81,6 +104,7 @@ export default class RecoveryManager {
 		return this.enqueue(async () => {
 			if (document !== this.document) return;
 			const captured = this.refresh();
+			if (!captured) throw new Error(this.state.error);
 			if (!this.state.dirty && !this.browserCopy) {
 				try { if (this.hasCheckpoint) await this.retire(); }
 				catch (error) { this.state.error = message(error); throw error; }
@@ -117,6 +141,7 @@ export default class RecoveryManager {
 		this.browserCopy = exported;
 		this.state.name = basename(path || this.state.name);
 		this.state.sourcePath = null;
+		this.state.error = '';
 		this.refresh();
 		// Serialize cleanup with pending writes. If edits happened during save,
 		// their checkpoint must survive, even if it was already written.
@@ -138,7 +163,12 @@ export default class RecoveryManager {
 	}
 
 	async showList() {
-		try { await this.refreshList(); this.state.dialog = { kind: 'list' }; }
+		try {
+			await this.refreshList();
+			// Native quit may have cancelled discard and opened its leave prompt
+			// while this list was loading. Never replace that pending decision.
+			if (!this.state.locked) this.state.dialog = { kind: 'list' };
+		}
 		catch (error) { this.state.error = message(error); }
 	}
 	ask(dialog) {
@@ -195,7 +225,7 @@ export default class RecoveryManager {
 			// Only retire the old copy after the detached replacement is durable.
 			if (!entry.active) await this.store.resolve(entry.id);
 		} catch (error) { this.state.error = message(error); }
-		finally { this.state.locked = false; }
+		finally { this.state.locked = false; this.focus?.(); }
 	}
 
 	async discard(index) {

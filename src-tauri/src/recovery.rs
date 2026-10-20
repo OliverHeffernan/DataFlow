@@ -8,7 +8,7 @@
 //!   record, isolating concurrently running DataFlow processes.
 //! - `<id>.resolved`: a tombstone written before cleanup; later writes fail.
 
-use crate::atomic::write_atomic;
+use crate::atomic::{sync_directory, write_atomic};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions, TryLockError};
@@ -72,6 +72,7 @@ impl RecoveryStore {
             .root
             .as_deref()
             .map_err(|error| format!("Recovery storage is unavailable: {error}"))?;
+        let missing: Vec<_> = root.ancestors().take_while(|path| !path.exists()).collect();
         fs::create_dir_all(root)
             .map_err(|error| format!("Could not create {}: {error}", root.display()))?;
         #[cfg(unix)]
@@ -79,6 +80,14 @@ impl RecoveryStore {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(root, fs::Permissions::from_mode(0o700))
                 .map_err(|error| format!("Could not protect {}: {error}", root.display()))?;
+        }
+        // A durable first checkpoint also needs its newly created parent
+        // directories to survive; syncing only the record's directory is not enough.
+        for directory in missing.into_iter().rev() {
+            if let Some(parent) = directory.parent() {
+                sync_directory(parent)
+                    .map_err(|error| format!("Could not sync {}: {error}", parent.display()))?;
+            }
         }
         Ok(root)
     }

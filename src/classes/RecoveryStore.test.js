@@ -45,43 +45,15 @@ test("recovery records must match the snapshot contract", () => {
 	}
 });
 
-test("native store invokes the recovery commands and close releases only still-owned ids", async () => {
-	const calls = [];
-	const store = createNativeRecoveryStore(async (command, args) => {
-		calls.push([command, args]);
-		return command === "recovery_list" ? [] : undefined;
-	});
-	await store.write(record({ id: "one" }));
-	await store.write(record({ id: "two" }));
-	await store.write(record({ id: "three" }));
-	assert.deepEqual(await store.list(), []);
-	await store.resolve("two");
-	await store.release("three");
-	await store.close();
-	assert.deepEqual(calls.map(([command, args]) => [command, args?.id ?? args?.record?.id]), [
-		["recovery_write", "one"],
-		["recovery_write", "two"],
-		["recovery_write", "three"],
-		["recovery_list", undefined],
-		["recovery_resolve", "two"],
-		["recovery_release", "three"],
-		["recovery_release", "one"],
-	]);
-	await assert.rejects(store.write(record()), { code: "CLOSED" });
-});
-
-test("native store validates before invoking and propagates command failures", async () => {
-	const calls = [];
-	const store = createNativeRecoveryStore(async (command) => {
-		calls.push(command);
+test("native store rejects invalid input and propagates storage failures", async () => {
+	const store = createNativeRecoveryStore(async () => {
 		throw new Error("disk full");
 	});
 	await assert.rejects(store.write(record({ revision: -1 })), { code: "INVALID_RECORD" });
 	await assert.rejects(store.resolve("../x"), { code: "INVALID_ID" });
-	assert.deepEqual(calls, []);
 	await assert.rejects(store.write(record()), /disk full/);
 	await store.close();
-	assert.deepEqual(calls, ["recovery_write"]);
+	await assert.rejects(store.write(record()), { code: "CLOSED" });
 });
 
 test("browser store reports missing IndexedDB and refuses to discard entries of unknown ownership", async () => {

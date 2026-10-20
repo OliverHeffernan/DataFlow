@@ -63,7 +63,7 @@ export default class VimKeyboard {
 
 	feed(keys, mapped = true) { for (const key of tokenize(keys)) this.key(key, mapped); }
 	key(key, mapped = true) {
-		if (this.sheet.recovery?.state.locked) return;
+		if (this.sheet.recovery?.state.locked || this.sheet.recovery?.state.dialog) return;
 		if (key === '<Space>') key = ' ';
 		if (key === '<C-[>') key = '<Esc>';
 		if (key === '<C-m>') key = '<CR>';

@@ -429,9 +429,15 @@ export default class SheetManager {
 	get styles() { return this.activeSheet.styles; }
 	set styles(styles) { this.activeSheet.styles = styles; }
 	get selRow() { return this.activeSheet.selRow; }
-	set selRow(row) { this.activeSheet.selRow = row; }
+	set selRow(row) {
+		if (this.activeSheet.selRow === row) return;
+		this.activeSheet.selRow = row; this.notifyWorkbookChanged('view');
+	}
 	get selCol() { return this.activeSheet.selCol; }
-	set selCol(col) { this.activeSheet.selCol = col; }
+	set selCol(col) {
+		if (this.activeSheet.selCol === col) return;
+		this.activeSheet.selCol = col; this.notifyWorkbookChanged('view');
+	}
 	get marks() { return this.workbook.marks ?? []; }
 
 	mark(name) {
@@ -739,6 +745,8 @@ export default class SheetManager {
 		this.workbook.sheets = sheets;
 		this.workbook.activeSheetIndex = active;
 		this.path = path;
+		this.markStructureChanged = false;
+		this.markWriteCells = null;
 		this.switchSheet(active + 1);
 		historyManager.reset(this);
 		this.notifyWorkbookChanged('baseline');
