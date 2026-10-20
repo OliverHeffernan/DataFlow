@@ -145,6 +145,13 @@ test('history and file round trips preserve workbook and nested sheet metadata w
 	history.undo(sheet); assert.equal(sheet.rows[0][0], '17');
 	assert.throws(() => sheet.loadWorkbook({ ...saved, version: 99 }), /version/);
 	assert.deepEqual(sheet.serializeWorkbook(), saved);
+	sheet.createSheet('Copy', true);
+	assert.deepEqual(sheet.activeSheet.layout, { widths: [180] });
+	sheet.activeSheet.layout.widths[0] = 240; sheet.rows[0][0] = '29'; history.do(sheet);
+	assert.equal(sheet.sheets[0].layout.widths[0], 180); assert.equal(sheet.sheets[0].rows[0][0], '17');
+	history.undo(sheet); assert.equal(sheet.activeSheet.layout.widths[0], 180);
+	history.undo(sheet); assert.equal(sheet.sheets.length, 1);
+	history.redo(sheet, 2); assert.equal(sheet.sheets[1].layout.widths[0], 240);
 });
 
 test('deletion protects data and references; forced deletion permanently invalidates references', () => {

@@ -456,9 +456,10 @@ export default class SheetManager {
 
 	createSheet(name = this.unusedSheetName(), duplicate = false) {
 		name = this.validateSheetName(name);
-		const rows = duplicate ? this.rows.map(row => [...row]) : Array.from({ length: 50 }, () => Array(50).fill(''));
-		const styles = duplicate ? this.styles.map(row => row.map(style => ({ ...style }))) : rows.map(row => row.map(() => ({ ...this.defaultStyling })));
-		this.workbook.sheets = [...this.sheets, { name, rows, styles, selRow: 0, selCol: 0 }];
+		const copy = duplicate ? JSON.parse(JSON.stringify(this.activeSheet)) : {};
+		const rows = copy.rows ?? Array.from({ length: 50 }, () => Array(50).fill(''));
+		const styles = copy.styles ?? rows.map(row => row.map(() => ({ ...this.defaultStyling })));
+		this.workbook.sheets = [...this.sheets, { ...copy, name, rows, styles, selRow: 0, selCol: 0 }];
 		this.switchSheet(this.sheets.length);
 		historyManager.do(this);
 	}
