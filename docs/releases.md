@@ -16,7 +16,7 @@ Older manually installed copies in `/Applications` are not replaced by this inst
 
 ## Update from the app
 
-Choose **Dataflow → Check for Updates…** in the native macOS menu bar. The app reports when it is up to date or when the check fails. If an update is available, it shows the current and new versions and asks before installing. **Cancel, save your spreadsheet, and check again** if you have unsaved work: installing restarts the app and discards unsaved changes. The disabled menu item shows download progress while the update is running. Only one update operation can run at a time.
+Choose **Dataflow → Check for Updates…** in the native macOS menu bar. The app reports when it is up to date or when the check fails. If an update is available, it shows the current and new versions and asks before downloading. After download/signature verification, a modified workbook gets **Save / Keep recovery / Discard changes / Cancel** before installation and restart. Keep recovery must finish successfully; failed/cancelled saves or recovery writes keep the editor open without installing. Input stays locked during installation and unlocks if installation fails. The disabled menu item shows progress; only one update operation can run at a time.
 
 Updates are downloaded over HTTPS and verified with Tauri's updater signing key before installation. This cryptographic signature is separate from Apple's code signing. Previously compiled builds without the updater must be replaced once using the installer. Development builds have no public key configured and explain that updates require a published build.
 

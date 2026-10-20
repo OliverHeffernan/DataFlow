@@ -99,6 +99,18 @@ export default class CheckCommand {
 		if (!this.windows.windows.some(pane => pane.id === id)) return;
 		if (id !== this.currentWindow.id) {
 			this.keyboard.finishFormat();
+			if (this.currentWindow.content === 'sheet' && this.keyboard.mode === 'i') {
+				// Settle raw cells and dataset bounds on their owning sheet before
+				// another pane can capture/commit shared workbook history. Keep the
+				// INSERT recording intact so returning and typing still repeats it.
+				const keys = [...this.keyboard.changeKeys];
+				if (this.keyboard.commit() === false) {
+					this.keyboard.mode = 'n';
+					this.preserveWindows(() => this.keyboard.move(this.keyboard.point));
+					await this.render(); this.focus(); return;
+				}
+				this.keyboard.changeKeys = keys;
+			}
 			this.saveWindow(); this.visual.exitVisual();
 			document.getElementById('gridOverlays')?.replaceChildren();
 			this.sheet.getSelectedCell()?.classList.remove('focussed');
@@ -206,6 +218,7 @@ export default class CheckCommand {
 		return true;
 	}
 	guardDrafts() {
+		if (this.script?.value) throw new Error('Close or cancel the Lua script dialog before saving, replacing or leaving the workbook');
 		if (this.windows.windows.some(pane => pane.rules?.dirty)) throw new Error('Unapplied rule draft in a window; apply or :cf discard before replacing or saving workbook data');
 	}
 	async renderRules() {
@@ -377,6 +390,7 @@ export default class CheckCommand {
 	// Native controls and dialogs own their input. The spreadsheet receives keys regardless of which cell is focused.
 	acceptsInput(event) {
 		if (this.script.value) return false;
+		if (this.sheet.recovery?.state.locked || this.sheet.recovery?.state.dialog) return false;
 		if (this.keyboard.formatSession && event.target?.closest?.('[data-format-panel]')) return !event.defaultPrevented;
 		return !event.defaultPrevented && !event.target?.closest?.('input, textarea, select, [contenteditable="true"], [role="dialog"], [data-keyboard-ignore]');
 	}
@@ -634,8 +648,10 @@ export default class CheckCommand {
 
 	async handleEnterFromCom(command) {
 		try {
-			this.keyboard.finishFormat();
+			if (this.sheet.recovery?.state.locked) return;
 			command = command.trim();
+			if (/^:(autosave|recover|recoverdiscard)(\s|$)/.test(command)) return await this.sheet.recovery?.command(command);
+			this.keyboard.finishFormat();
 			if (/^:luarun(?:\s|!|$)/.test(command.trim())) {
 				if (command.trim() !== ':luarun') throw new Error('Usage: :luarun (choose a local Lua file, preview, then Run)');
 				this.openScript(); return;
@@ -673,7 +689,7 @@ export default class CheckCommand {
 			if (sheetCommand) return await this.sheetCommand(sheetCommand[1], sheetCommand[3]?.trim(), sheetCommand[2]);
 			if ([':o', ':clear', ':w', ':wa'].includes(command)) this.guardDrafts();
 			if (this.currentWindow.content !== 'sheet' && ![':config', ':configload', ':configcreate', ':source', ':configreload', ':w', ':wa', ':o', ':clear', ':help'].includes(command)) throw new Error('Open a sheet window for cell commands; :cf manages rules');
-			const files = new FileManager(() => this.newSheet(), () => this.guardDrafts());
+			const files = new FileManager(async () => { await this.newSheet(false); new LaunchManager().hide(); }, () => this.guardDrafts());
 			if ([':config', ':configload', ':configcreate', ':source', ':configreload'].includes(command)) await this.configCommand(command);
 			else if (command === ':w') return await files.saveFile();
 			else if (command === ':wa') return await files.saveFile(true);

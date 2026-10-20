@@ -411,6 +411,7 @@ export default class SheetManager {
 		this.prevCol = 0;
 		this.copyBuffer = [[]];
 		this.path = null;
+		this.workbookListeners = new Set();
 		this.defaultStyling = {
 			fg: "white",
 			bg: "transparent",
@@ -432,7 +433,7 @@ export default class SheetManager {
 			this.rows.push(row);
 			this.styles.push(styleRow);
 		}
-		historyManager.do(this);
+		historyManager.reset(this);
 		SheetManager.instance = this;
 	}
 
@@ -443,9 +444,15 @@ export default class SheetManager {
 	get styles() { return this.activeSheet.styles; }
 	set styles(styles) { this.activeSheet.styles = styles; }
 	get selRow() { return this.activeSheet.selRow; }
-	set selRow(row) { this.activeSheet.selRow = row; }
+	set selRow(row) {
+		if (this.activeSheet.selRow === row) return;
+		this.activeSheet.selRow = row; this.notifyWorkbookChanged('view');
+	}
 	get selCol() { return this.activeSheet.selCol; }
-	set selCol(col) { this.activeSheet.selCol = col; }
+	set selCol(col) {
+		if (this.activeSheet.selCol === col) return;
+		this.activeSheet.selCol = col; this.notifyWorkbookChanged('view');
+	}
 	get marks() { return this.workbook.marks ?? []; }
 
 	mark(name) {
@@ -599,6 +606,32 @@ export default class SheetManager {
 		} finally { this.markStructureChanged = false; this.markWriteCells = null; }
 	}
 
+	onWorkbookChange(listener) {
+		this.workbookListeners.add(listener);
+		return () => this.workbookListeners.delete(listener);
+	}
+
+	// Content notifications settle after a synchronous edit, independently of
+	// history grouping and derived calculation/rendering. A validated file load
+	// establishes its baseline immediately, before any subsequent user edits.
+	notifyWorkbookChanged(kind = 'content') {
+		if (kind === 'baseline') {
+			this.pendingWorkbookChange = null;
+			for (const listener of this.workbookListeners) listener(kind);
+			return;
+		}
+		if (this.pendingWorkbookChange) {
+			if (kind === 'content') this.pendingWorkbookChange = kind;
+			return;
+		}
+		this.pendingWorkbookChange = kind;
+		queueMicrotask(() => {
+			const change = this.pendingWorkbookChange;
+			this.pendingWorkbookChange = null;
+			if (change) for (const listener of this.workbookListeners) listener(change);
+		});
+	}
+
 	validateSheetName(name, except = null) {
 		if (typeof name !== 'string' || !name.trim() || /[\x00-\x1f\x7f]/.test(name)) throw new Error('A sheet name must be non-empty and on one line');
 		name = name.trim();
@@ -623,6 +656,7 @@ export default class SheetManager {
 		this.numOfRows.value = this.rows.length;
 		this.numOfCols.value = this.rows[0].length;
 		this.recalculate();
+		this.notifyWorkbookChanged('view');
 	}
 
 	createSheet(name = this.unusedSheetName(), duplicate = false) {
@@ -645,6 +679,7 @@ export default class SheetManager {
 
 	renameSheet(name) {
 		name = this.validateSheetName(name, this.activeSheet);
+		if (name === this.activeSheet.name) return;
 		this.rewriteSheetReferences(this.activeSheet.name, name);
 		this.workbook.marks = this.marks.map(mark => mark.sheetName === this.activeSheet.name ? { ...mark, sheetName: name } : mark);
 		this.activeSheet.name = name;
@@ -655,6 +690,7 @@ export default class SheetManager {
 
 	moveSheet(position) {
 		const index = this.sheetIndex(position), sheets = [...this.sheets], active = this.activeSheet;
+		if (index === this.workbook.activeSheetIndex) return;
 		sheets.splice(this.workbook.activeSheetIndex, 1);
 		sheets.splice(index, 0, active);
 		this.workbook.sheets = sheets;
@@ -719,7 +755,7 @@ export default class SheetManager {
 		this.loadAllCells(undefined, undefined, calculation);
 	}
 
-	loadWorkbook(data, path = null) {
+	validateWorkbook(data) {
 		// Validate the whole file before replacing any existing work. Both legacy layouts remain readable.
 		if (data?.version !== undefined && ![1, 2, 3].includes(data.version)) throw new Error(`Unsupported workbook version: ${data.version}`);
 		const source = Array.isArray(data) ? [{ rows: data }] : data?.sheets ?? [data];
@@ -740,14 +776,22 @@ export default class SheetManager {
 		const marks = JSON.parse(JSON.stringify(data?.marks === undefined ? [] : data.marks));
 		validateMarks(marks, sheets);
 		const { version, activeSheet, sheets: ignored, ...metadata } = data?.sheets ? data : {};
+		return { sheets, active, marks, metadata: JSON.parse(JSON.stringify(metadata)) };
+	}
+
+	loadWorkbook(data, path = null) {
+		const { sheets, active, marks, metadata } = this.validateWorkbook(data);
 		for (const key of Object.keys(this.workbook)) delete this.workbook[key];
-		Object.assign(this.workbook, JSON.parse(JSON.stringify(metadata)));
+		Object.assign(this.workbook, metadata);
 		this.workbook.marks = marks;
 		this.workbook.sheets = sheets;
 		this.workbook.activeSheetIndex = active;
 		this.path = path;
+		this.markStructureChanged = false;
+		this.markWriteCells = null;
 		this.switchSheet(active + 1);
 		historyManager.reset(this);
+		this.notifyWorkbookChanged('baseline');
 	}
 
 	clearScreen() {

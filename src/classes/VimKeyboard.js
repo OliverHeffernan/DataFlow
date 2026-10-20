@@ -78,7 +78,7 @@ export default class VimKeyboard {
 		this.render();
 	}
 	finishFormat() {
-		if (!this.formatSession) return;
+		if (!this.formatSession || this.sheet.recovery?.state.locked || this.sheet.recovery?.state.dialog) return;
 		const changed = this.formatSession.finish();
 		this.formatSession = null; this.mappingKeys = []; this.pending = ''; this.mode = 'n';
 		if (changed) this.hooks.formatChange?.();
@@ -117,6 +117,7 @@ export default class VimKeyboard {
 
 	feed(keys, mapped = true) { for (const key of tokenize(keys)) (this.hooks.active?.() ?? this).key(key, mapped); }
 	key(key, mapped = true) {
+		if (this.sheet.recovery?.state.locked || this.sheet.recovery?.state.dialog) return;
 		if (key === '<Space>') key = ' ';
 		if (key === '<C-[>') key = '<Esc>';
 		if (key === '<C-m>') key = '<CR>';
@@ -429,6 +430,7 @@ export default class VimKeyboard {
 				this.adjustSheetPositions('row', at, 0, count);
 				this.sheet.rows.splice(at, 0, ...Array.from({ length: count }, () => Array(cols).fill('')));
 				this.sheet.styles.splice(at, 0, ...Array.from({ length: count }, () => Array.from({ length: cols }, () => ({ ...this.sheet.defaultStyling }))));
+				this.sheet.notifyWorkbookChanged?.();
 				this.sheet.selRow = at; this.sheet.selCol = 0; this.context = 'formula'; this.formulaCursor = 0;
 			} else {
 				const rows = this.rows, at = this.point.row + (action === 'o' ? 1 : 0);
@@ -526,7 +528,11 @@ export default class VimKeyboard {
 		}
 		return true;
 	}
-	setFormula(text) { this.sheet.rows[this.sheet.selRow][this.sheet.selCol] = text; }
+	setFormula(text) {
+		if (this.formula === text) return;
+		this.sheet.rows[this.sheet.selRow][this.sheet.selCol] = text;
+		this.sheet.notifyWorkbookChanged?.();
+	}
 	editOwner() {
 		const owner = this.sheet.spillCells?.get(`${this.sheet.selRow}:${this.sheet.selCol}`);
 		if (owner) this.move(owner);
@@ -620,6 +626,7 @@ export default class VimKeyboard {
 					this.sheet.rows.splice(start.row, end.row - start.row + 1); this.sheet.styles.splice(start.row, end.row - start.row + 1);
 					if (!this.sheet.rows.length) { this.sheet.rows.push(Array(right + 1).fill('')); this.sheet.styles.push(Array.from({ length: right + 1 }, () => ({ ...this.sheet.defaultStyling }))); }
 				} else for (let r = start.row; r <= end.row; r++) for (let c = left; c <= right; c++) this.sheet.rows[r][c] = '';
+				this.sheet.notifyWorkbookChanged?.();
 			}
 			this.move({ row: start.row, col: left });
 		} else {

@@ -1,10 +1,14 @@
 <template>
 	<div id="statusBar" @click="checkCommand.focus()">
 		<div class="sheet-strip">
+			<span v-if="recovery" class="workbook-state" :title="recovery.state.sourcePath || 'Recovery never overwrites the original file'">{{ recovery.state.name }}{{ recovery.state.dirty ? ' *' : '' }}</span>
 			<ol class="sheet-list" aria-label="Workbook sheets">
 				<li v-for="(sheet, index) in sheetManager.sheets" :key="sheet.name" :aria-current="index === sheetManager.workbook.activeSheetIndex ? 'true' : undefined"><span class="sheet-number">{{ index + 1 }}</span>{{ sheet.name }}</li>
 			</ol>
 			<span class="sheet-help"><kbd>:sheet</kbd> switch · <kbd>:sheetnew</kbd> create</span>
+		</div>
+		<div v-if="recovery" class="recovery-status" :class="{ 'cell-error': recovery.state.error }" role="status">
+			{{ recovery.state.error || (!recovery.state.enabled ? 'Automatic recovery off · :autosave on' : recovery.state.pending ? 'Recovery pending…' : recovery.state.lastCheckpoint ? 'Recovery up to date · ' + new Date(recovery.state.lastCheckpoint).toLocaleTimeString() : 'Recovery on · :recover lists copies') }}
 		</div>
 		<div class="status-context" v-if="ui.error || ui.spill" :class="{ 'cell-error': ui.error }" role="status">{{ ui.error || ui.spill }}</div>
 		<div class="command-status">
@@ -29,6 +33,7 @@
 	import ScriptDialog from './ScriptDialog.vue';
 	import SheetManager from '../classes/SheetManager.js';
 	const sheetManager = new SheetManager();
+	const recovery = sheetManager.recovery;
 
 	import CheckCommand from '../classes/CheckCommand.js';
 	import FileManager from '../classes/FileManager.js';
@@ -56,7 +61,8 @@
 
 		reader.onload = async function(e) {
 			try {
-				await new FileManager(() => checkCommand.newSheet(), () => checkCommand.guardDrafts()).loadFile(e.target.result);
+				const loaded = await new FileManager(async () => { await checkCommand.newSheet(false); new LaunchManager().hide(); }, () => checkCommand.guardDrafts()).loadFile(e.target.result);
+				if (loaded && recovery) recovery.state.name = file.name;
 			} catch (error) { checkCommand.setPhMessage(`Open: ${error.message}`); }
 		}
 
@@ -65,6 +71,7 @@
 
 		closeWebFilePick();
 	}
+	import LaunchManager from '../classes/LaunchManager.js';
 </script>
 <style>
 #statusBar {
@@ -84,6 +91,9 @@
 .sheet-list li[aria-current="true"] { color: #75e2bc; background: #192c3a; border-bottom-color: #75e2bc; }
 .sheet-number { color: #9aaec3; font-size: 10px; }
 .sheet-help { color: #9aaec3; flex-shrink: 0; }
+.workbook-state { color: #dbe6f3; max-width: 30vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recovery-status { padding: 3px 12px; color: #9aaec3; overflow-wrap: anywhere; border-bottom: 1px solid #213247; }
+.recovery-status.cell-error { color: #ffb5a2; }
 
 .command-status { display: flex; align-items: center; min-height: 28px; padding: 0 12px; gap: 16px; }
 #commandLine {

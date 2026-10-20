@@ -35,6 +35,12 @@ Sheet-switch commands reset transient navigation marks, jumps, searches, and vis
 
 `:w` saves **all sheets**, their names, styles, and the active sheet; `:wa` saves the workbook as another file. Browser saves download the same workbook format as desktop saves. `:o` still reads old single-sheet `{rows, styles}` `.dflo` files and rows-only JSON arrays (including `.heff` files); each becomes Sheet1 with default styling where absent. Saving upgrades to the workbook format; older app versions do not understand new workbook files. Invalid files do not replace the current workbook.
 
+### Recovery without overwriting files
+
+Recovery checkpoints typing even before Escape, independently of undo grouping. `:recover` opens a keyboard-only-capable list: `j/k` or arrows select, Enter restores a detached unsaved copy, `d` opens discard confirmation (Cancel focused), and Escape dismisses. `:recover 2` restores an entry directly; `:recoverdiscard 2` asks to discard it. `:autosave` reports status; `:autosave off/on` changes the session setting; `:autosave now` writes immediately. The footer marks modified work with `*` and separately reports checkpoint status or errors.
+
+Opening/recovering another workbook and supported native exits ask what to do with dirty work. Tab/Shift-Tab cycles the choices, Enter activates the focused choice, and Escape cancels. Native save failures report failure and never trigger downloads. Browser export remains explicit and retains recovery, since download completion cannot be verified. See [recovery behavior and platform limits](../README.md#automatic-recovery), including macOS Dock Quit and browser storage limitations.
+
 ### Split windows share data, not navigation
 
 | Command / keys | Action |
@@ -50,6 +56,8 @@ Sheet-switch commands reset transient navigation marks, jumps, searches, and vis
 Splits nest in either direction. Drag a separator to resize it, or Tab to it and use Left/Right for a vertical separator, Up/Down for a horizontal separator. Escape returns keyboard focus to the workspace. In INSERT, Ctrl-w retains Vim's delete-word meaning; Escape to NORMAL before navigating windows.
 
 Each window keeps its own cursor, scroll, keyboard navigation and rule draft. Several windows can show the same sheet; edits, styling, charts, spills and cross-sheet calculations update every view. The formula bar and command footer belong to the focused window. Window navigation also works in formula NORMAL, visual selections and rule text NORMAL. Registers, macros and Lua mappings remain shared, including when a macro changes windows.
+
+Changing panes during sheet INSERT commits pending cells and dataset bounds together before moving focus, even between views of the same sheet. Returning retains INSERT, its caret and repeat recording. Unchanged content adds no undo step; rejected edits roll back, stay in the current pane and return to NORMAL. CF text drafts remain unapplied when switching panes.
 
 FORMAT previews use the invoking sheet and range, appearing in every view of that sheet without affecting other sheets. Switching windows or publishing workbook data finishes confirmed FORMAT adjustments on the original target first, with one undo step. An unbound Ctrl-w outside FORMAT text input finishes the session and starts window navigation; explicit Lua FORMAT bindings and text inputs retain their keys. Conditional-rule windows cannot enter cell FORMAT.
 
@@ -398,6 +406,8 @@ Reload is atomic: syntax/runtime/API errors keep the previous mappings, group la
 ## Deliberately run workbook scripts
 
 In sheet context, type **`:luarun`**, choose a local `.lua` file, inspect its source, then press **Run script**. Escape/Cancel closes the dialog and terminates an in-flight worker without publishing its draft. The dialog owns keyboard/mouse input. Config loading never runs workbook scripts: `init.lua` has no `df` API, and scripts have no `vim` API. A keymap may open `:luarun`, but recording/playback of macros cannot launch it; scripts are not recorded as repeat edits. Workbook files never contain executable scripts. Choosing a script reads only that explicitly selected file; the script itself receives no file capability.
+
+Close or cancel the Lua script dialog before saving, replacing the workbook, quitting, or installing an update. Recovery checkpoints contain only published workbook data, never an in-flight script draft.
 
 The invoking sheet and selection are captured **before** choosing a file, not from focus when the worker finishes. The data snapshot is captured when Run is pressed. Edits to workbook content/metadata during execution reject the result; changing the visible sheet/cursor does not redirect writes. A successful changed run makes one chronological workbook undo step. No-op, failed, stale, timed-out and cancelled runs preserve content, metadata, undo and redo. Saving remains an explicit `:w` operation.
 

@@ -1,27 +1,43 @@
 <template>
+	<div :inert="recovery.state.dialog || recovery.state.locked ? true : undefined">
 	<FirstLaunchScreen v-if="launchManager.displayed" />
 	<FormulaBar v-if="check.windows.active.content === 'sheet'" />
 	<div v-else id="topBar" class="rules-topbar">Conditional formatting · {{ check.windows.active.sheet.name }}<span>Ctrl-w h/j/k/l · Switch window</span></div>
 	<CommandLine />
 	<RightClickMenu />
 	<main id="windows" aria-label="Workspace windows"><WindowNode :node="check.windows.state.root" /></main>
-
+	</div>
+	<RecoveryDialog :manager="recovery" />
 </template>
 
 <script setup>
 	import "./styling/syntaxHighlighting.css";
-	import { ref } from 'vue';
+	import { ref, onMounted, onUnmounted } from 'vue';
+	import SheetManager from './classes/SheetManager.js';
 	import WindowNode from './components/WindowNode.vue';
-	import CheckCommand from './classes/CheckCommand.js';
 	import FormulaBar from './components/FormulaBar.vue';
 	import CommandLine from './components/CommandLine.vue';
 	import FirstLaunchScreen from './components/FirstLaunchScreen.vue';
 	import RightClickMenu from './components/RightClickMenu.vue';
+	import RecoveryDialog from './components/RecoveryDialog.vue';
+	import RecoveryManager from './classes/RecoveryManager.js';
+	import CheckCommand from './classes/CheckCommand.js';
+	import FileManager from './classes/FileManager.js';
 
 	import LaunchManager from './classes/LaunchManager.js';
 
 	const launchManager = ref(new LaunchManager());
 	const check = new CheckCommand();
+	const recovery = new RecoveryManager(new SheetManager());
+	check.sheet.recovery = recovery;
+	recovery.beforeLeave = () => check.guardDrafts();
+	recovery.hasDrafts = () => check.windows.windows.some(pane => pane.rules?.dirty);
+	recovery.save = () => new FileManager().saveFile();
+	recovery.focus = () => check.focus();
+	recovery.report = text => check.setPhMessage(text);
+	recovery.onOpen = async () => { new LaunchManager().hide(); await check.newSheet(false); };
+	onMounted(() => { recovery.start().catch(error => { recovery.state.error = error.message || String(error); }); });
+	onUnmounted(() => { recovery.close().catch(() => {}); });
 
 	let firstTime;
 	const testing = true;

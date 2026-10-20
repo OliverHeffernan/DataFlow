@@ -7,6 +7,7 @@
 		<h2> Harness the speed of light </h2>
 		<h2> Type anywhere in the sheet. Commands and available shortcuts appear below.</h2>
 		<h2>Commands</h2>
+		<h3><span class="keystroke">:recover</span> restores local copies; <span class="keystroke">:autosave</span> checks recovery status. Originals are never autosaved.</h3>
 		<h3><span class="keystroke">hjkl</span> navigate cells; <span class="keystroke">Enter</span> navigates formula text.</h3>
 		<h3><span class="keystroke">i / a</span> edit; <span class="keystroke">Enter</span> commits to NORMAL.</h3>
 		<h3><span class="keystroke">Ctrl + hjkl</span> inserts a relative reference; then <span class="keystroke">Shift + hjkl</span> extends a range.</h3>
@@ -45,9 +46,10 @@ function focusComLine() {
 #splashScreen {
 	position: fixed;
 	top: 0;
-	bottom: 0;
+	bottom: var(--status-bar-height, 64px);
 	right: 0;
 	left: 0;
+	overflow-y: auto;
 	background-color: #0B1118;
 	z-index: 50;
 	color: white;
