@@ -1,5 +1,6 @@
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { computed } from 'vue';
 import SheetManager from './SheetManager.js';
 import HistoryManager from './HistoryManager.js';
 import VimKeyboard from './VimKeyboard.js';
@@ -30,9 +31,49 @@ test('rules use per-target relative references, fixed cells and fresh cross-shee
 
 test('predicates distinguish decimal values that have the same displayed result', () => {
 	sheet.rows[0] = ['=0.1+0.2', '=0.3+1e-25', '', 'text'];
+	for (const col of [0, 1]) Object.assign(sheet.styles[0][col], { formatKind: 'number', formatDigits: 1 });
 	sheet.setConditionalRules([rule(1, 'A0:D0', 'AND(isNumeric([]{}), []{}=0.3)')]);
 	assert.deepEqual(result().values[0].slice(0, 2), [0.3, 0.3]);
+	assert.deepEqual(result().presentation[0].slice(0, 2).map(cell => cell.text), ['0.3', '0.3']);
 	assert.deepEqual([...result().colors], [['0:0', { bg: 'navy' }]]);
+});
+
+test('per-sheet formatting and FORMAT previews preserve exact predicate values, spills and other sheets', () => {
+	sheet.loadWorkbook({ sheets: [
+		{ name: 'Raw', rows: [['0.125', '=VSTACK(0.125,0.135)', '2026-10-20'], ['text', '', '=1/0']] },
+		{ name: 'Report', rows: [['=Raw!A0', '=Raw!B1', ''], ['', '', '']] },
+	] });
+	const [raw, report] = sheet.sheets, history = new HistoryManager();
+	Object.assign(raw.styles[0][0], { formatKind: 'number', formatPercent: true, formatDigits: 1 });
+	Object.assign(raw.styles[1][1], { formatKind: 'number', formatPercent: true, formatDigits: 2 });
+	Object.assign(raw.styles[0][2], { formatKind: 'date', formatPreset: 'long' });
+	Object.assign(report.styles[0][0], { formatKind: 'currency', formatCurrency: 'USD', formatDigits: 2 });
+	Object.assign(report.styles[0][1], { formatKind: 'number', formatDigits: 2 });
+	sheet.setConditionalRules([rule(1, 'A0:C1', 'AND(isNumeric([]{}), []{}>0.13)')]);
+	history.reset(sheet);
+	const before = JSON.stringify(sheet.rows), snapshots = () => sheet.sheetResults.value;
+	const rawResult = computed(() => sheet.sheetResults.value.get(raw));
+	const shownSpill = computed(() => rawResult.value.presentation[1][1].text);
+	assert.deepEqual(snapshots().get(raw).presentation[0].map(cell => cell.text), ['12.5%', '0.125', '20 Oct 2026']);
+	assert.deepEqual(snapshots().get(report).presentation[0].map(cell => cell.text), ['USD 0.13', '0.14', '']);
+	assert.equal(snapshots().get(raw).presentation[1][2].text, '#DIV/0!');
+	assert.deepEqual(snapshots().get(raw).colors.get('1:1'), { bg: 'navy' });
+	assert.equal(shownSpill.value, '13.50%');
+	const keyboard = new VimKeyboard(sheet, { formatChange: () => history.do(sheet), window: () => sheet.switchSheet('Report') });
+	keyboard.move({ row: 1, col: 1 }); keyboard.feed('gFd1<CR>');
+	assert.equal(shownSpill.value, '13.5%');
+	assert.equal(raw.styles[1][1].formatDigits, 2);
+	assert.deepEqual(snapshots().get(raw).colors.get('1:1'), { bg: 'navy' });
+	assert.equal(snapshots().get(report).presentation[0][1].text, '0.14');
+	assert.equal(history.historyFor(sheet).undo.length, 1);
+	keyboard.feed('<C-w>l');
+	assert.equal(sheet.activeSheet.name, 'Report'); assert.equal(keyboard.formatSession, null);
+	assert.equal(raw.styles[1][1].formatDigits, 1); assert.equal(report.styles[0][1].formatDigits, 2);
+	assert.equal(history.historyFor(sheet).undo.length, 2);
+	assert.equal(JSON.stringify(raw.rows), before);
+	history.undo(sheet);
+	assert.equal(sheet.sheetResults.value.get(sheet.sheets[0]).presentation[1][1].text, '13.50%');
+	assert.equal(sheet.cellPresentation.value[0][0].text, 'USD 0.13');
 });
 
 test('later matching rules override only their colour channels and never change stored styling', () => {
@@ -99,6 +140,8 @@ test('draft Vim edits and undo are isolated until apply; stale rule drafts canno
 	const pane = { sheet: sheet.activeSheet }, session = new ConditionalSession(sheet, pane, {});
 	session.begin(null, { r0: 0, c0: 0, r1: 1, c1: 1 });
 	const initial = session.state.draft, cells = JSON.stringify(sheet.rows);
+	session.editor.feed('gF<FormatOpen>');
+	assert.equal(session.editor.formatSession, undefined); assert.equal(session.state.draft, initial);
 	session.editor.feed('A.fg("gold")<Esc>');
 	assert.notEqual(session.state.draft, initial); assert.equal(sheet.activeSheet.conditionalRules, undefined);
 	session.editor.feed('u'); assert.equal(session.state.draft, initial);

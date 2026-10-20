@@ -2,12 +2,14 @@
 	<div id="topBar">
 		<input id="cellPicker" @input="selectCell" @keyup.esc="handleEscape" @keyup.enter="focusFormulaBar" type="text" placeholder="e.g. A0" />
 		<NewFormBar />
+		<FormatPanel />
 		<!--<input id="formulaBar" type="text" placeholder="edit cell formulae" @keyup.enter="handleEnter" @keyup.esc="handleEscape" />-->
 	</div>
 </template>
 <script setup>
 import { onMounted, onUnmounted } from 'vue';
 import NewFormBar from "./NewFormBar.vue";
+import FormatPanel from './FormatPanel.vue';
 import SheetManager from '../classes/SheetManager.js';
 const sheetManager = new SheetManager();
 

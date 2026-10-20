@@ -7,13 +7,13 @@
 			:data-cell="colNo + ':' + rowNo"
 			:style="cellStyle"
 			:aria-label="value?.kind === 'chart' ? (value.title || `${value.type} chart`) : undefined"
-			:title="result?.errors.get(`${rowNo}:${colNo}`) || undefined"
+			:title="result?.errors.get(`${rowNo}:${colNo}`) || presentation?.warning || undefined"
 			@dblclick="handleDblClick"
 			@click="handleClick"
 			@contextmenu.prevent="handleRightClick"
 		>
 			<CellChart v-if="value?.kind === 'chart'" :chart="value" />
-			<template v-else>{{ value }}</template>
+			<template v-else>{{ presentation?.text ?? value }}</template>
 		</button>
 		<div
 			:id="active ? 'visual'+colNo+':'+rowNo : undefined"
@@ -49,6 +49,7 @@
 
 	const result = computed(() => sheetManager.sheetResults.value.get(props.pane.sheet));
 	const value = computed(() => result.value?.values[props.rowNo]?.[props.colNo] ?? "");
+	const presentation = computed(() => result.value?.presentation[props.rowNo]?.[props.colNo]);
 	const cellStyle = computed(() => {
 		sheetManager.styleVersion.value;
 		const style = props.pane.sheet.styles[props.rowNo]?.[props.colNo] ?? sheetManager.defaultStyling;
@@ -59,6 +60,7 @@
 	async function handleClick(event) {
 		await checkCommand.activateWindow(props.pane.id);
 		const keyboard = checkCommand.keyboard;
+		keyboard.finishFormat();
 		if (keyboard.mode === 'i') keyboard.escape();
 		keyboard.pending = ''; keyboard.command = null; keyboard.mappingKeys = [];
 		keyboard.context = 'sheet'; keyboard.formulaCursor = 0;

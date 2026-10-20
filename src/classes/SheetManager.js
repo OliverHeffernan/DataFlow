@@ -1,7 +1,8 @@
-import { ref, shallowRef, shallowReactive } from "vue";
+import { ref, shallowRef, shallowReactive, toDisplayString } from "vue";
 //import { reactive } from "vue";
 import { FormulaError, cellLabel, cellToValue, evaluateFormula, toCellValue, rewriteSheetReferences, rewriteMarkReferences } from "./FormulaFunctions.js";
 import { markName, datasetColumns, validateMarks, structuralMarks } from './WorkbookMarks.js';
+import { presentCell } from './CellFormatting.js';
 import SyntaxHighlighting from "./SyntaxHighlighting.js";
 import { evaluateChart } from "./ChartFormula.js";
 import { adjustConditionalRules, evaluateConditionalRules, validateConditionalRules } from './ConditionalFormatting.js';
@@ -340,7 +341,7 @@ class CalcPass {
 
 	snapshot() {
 		const values = this.rows.map(row => (row ?? []).map(raw => raw ?? ""));
-		const typed = this.rows.map(row => (row ?? []).map(cellToValue));
+		const typed = values.map(row => row.map(cellToValue));
 		const spills = new Map();
 		const errors = new Map();
 		const failures = new Map();
@@ -351,6 +352,7 @@ class CalcPass {
 				value = this.result(row, col);
 			} catch (error) {
 				values[row][col] = errorText(error);
+				typed[row][col] = null;
 				errors.set(key, explain(error));
 				failures.set(key, error);
 				continue;
@@ -363,6 +365,7 @@ class CalcPass {
 			const state = this.spillState(row, col);
 			if (!state.ok) {
 				values[row][col] = "#SPILL!";
+				typed[row][col] = null;
 				errors.set(key, state.reason);
 				failures.set(key, new FormulaError('#SPILL!', state.reason));
 				continue;
@@ -389,6 +392,8 @@ export default class SheetManager {
 		this.cellValues = shallowRef([]);
 		this.sheetResults = shallowRef(new Map());
 		this.styleVersion = ref(0);
+		this.cellPresentation = shallowRef([]);
+		this.formatPreview = null;
 		// derived by recalculate(): "row:col" -> { row, col, rows, cols } of the array formula spilling there
 		this.spillCells = new Map();
 		// derived by recalculate(): "row:col" -> readable explanation of the error shown in that cell
@@ -663,7 +668,7 @@ export default class SheetManager {
 		const referenced = this.sheets.some(sheet => sheet !== removed && [...sheet.rows.flat(), ...(sheet.conditionalRules ?? []).map(rule => rule.source)]
 			.some(text => rewriteSheetReferences(text, removed.name, null) !== text));
 		const hasData = removed.rows.some(row => row.some(value => value !== '' && value != null));
-		const hasStyles = removed.styles.some(row => row.some(style => style.fg !== this.defaultStyling.fg || style.bg !== this.defaultStyling.bg));
+		const hasStyles = removed.styles.some(row => row.some(style => Object.entries(style).some(([key, value]) => value !== this.defaultStyling[key])));
 		const owned = this.marks.filter(mark => mark.sheetName === removed.name);
 		if (!force && (hasData || hasStyles || referenced || owned.length || removed.conditionalRules?.length)) throw new Error('Sheet has data, styles, or references; use :sheetdelete! to delete it');
 		for (const mark of owned) this.rewriteMark(mark.name, null);
@@ -794,6 +799,7 @@ export default class SheetManager {
 	}
 
 	resetAllStyles() {
+		// Existing highlight resets affect colours, not number formats or layout metadata.
 		this.styles = this.styles.map(row => row.map(style => ({ ...style, fg: this.defaultStyling.fg, bg: this.defaultStyling.bg })));
 		this.loadStyles();
 		historyManager.do(this, 141);
@@ -884,13 +890,29 @@ export default class SheetManager {
 		// Predicates only read settled typed values; they cannot write cells or affect spill discovery.
 		for (const record of this.sheets) Object.assign(results.get(record), evaluateConditionalRules(record, results, this.sheets, (name, column) => this.resolveMark(name, column)));
 		this.sheetResults.value = results;
-		const { values, spills, errors } = results.get(this.activeSheet);
+		const { values, typed, spills, errors } = results.get(this.activeSheet);
 		this.spillCells.clear();
 		spills.forEach((value, key) => this.spillCells.set(key, value));
 		this.cellErrors.clear();
 		errors.forEach((value, key) => this.cellErrors.set(key, value));
 		this.cellValues.value = values;
+		this.calculated = { sheet: this.activeSheet, typed };
+		this.refreshPresentation();
 		return values;
+	}
+
+	refreshPresentation() {
+		const results = new Map();
+		for (const [record, result] of this.sheetResults.value) {
+			const preview = this.formatPreview?.sheet === record ? this.formatPreview.styles : null;
+			const presentation = result.values.map((row, r) => row.map((legacy, c) => {
+				const value = result.typed[r][c], text = toDisplayString(legacy);
+				return { value, ...(result.errors.has(keyOf(r, c)) ? { text, warning: '' } : presentCell(value, preview?.get(keyOf(r, c)) ?? record.styles[r]?.[c], text)) };
+			}));
+			results.set(record, { ...result, presentation });
+		}
+		this.sheetResults.value = results;
+		this.cellPresentation.value = results.get(this.activeSheet)?.presentation ?? [];
 	}
 
 	// DOM-free, raw-content-atomic edit on the active sheet. Writes require raw string values

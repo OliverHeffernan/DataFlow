@@ -51,6 +51,8 @@ Splits nest in either direction. Drag a separator to resize it, or Tab to it and
 
 Each window keeps its own cursor, scroll, keyboard navigation and rule draft. Several windows can show the same sheet; edits, styling, charts, spills and cross-sheet calculations update every view. The formula bar and command footer belong to the focused window. Window navigation also works in formula NORMAL, visual selections and rule text NORMAL. Registers, macros and Lua mappings remain shared, including when a macro changes windows.
 
+FORMAT previews use the invoking sheet and range, appearing in every view of that sheet without affecting other sheets. Switching windows or publishing workbook data finishes confirmed FORMAT adjustments on the original target first, with one undo step. An unbound Ctrl-w outside FORMAT text input finishes the session and starts window navigation; explicit Lua FORMAT bindings and text inputs retain their keys. Conditional-rule windows cannot enter cell FORMAT.
+
 Window splits, focus, cursors, scroll and unapplied drafts are session state: they are not saved in `.dflo` or restored by workbook undo. Undo rebinds windows to restored sheets by name and clamps cursors to the restored dimensions; a removed sheet falls back to the first sheet. Opening another workbook keeps the split layout and rebinds its views, but refuses to discard unapplied rule drafts.
 
 For host integrations, `CheckCommand.captureWindowContext()` returns a detached `{windowId, sheetName, cursor: {row, col}, selection: {r0, c0, r1, c1}}` from a sheet window; rule windows reject capture. Capture once before an asynchronous picker/worker. Wrap subsequent **synchronous live publication** in `preserveWindows(publish)` to retain the currently focused window, not the invocation's old focus. The callback owns validation, calculation and history. Detached worker calculations must not use this UI wrapper. Both helpers leave window state outside workbook metadata.
@@ -296,6 +298,48 @@ vim.keymap.set("n", "<Leader>sn", ":series down 9<CR>", { desc = "Next nine numb
 
 Formula scrolling applies to the formula bar, sheet scrolling to the grid. Physical content boundaries limit scrolling.
 
+## Cell formats preview in their own mode
+
+The rounded badge at the formula field's right edge describes the current cell or sheet visual selection. Different effective formats show **Mixed**. Click it or press **`gF`** in sheet NORMAL/VISUAL or formula NORMAL to enter **FORMAT**. Formula text selections and INSERT are not cell-format targets. The panel stays compact, leaves the sheet visible, and outlines its fixed target range; `V` targets complete allocated rows, and `gv` can restore the original selection afterward.
+
+The following are defaults, not fixed UI labels. All panel keycaps and FORMAT footer hints resolve the current Lua keymap:
+
+| Default | Action token (RHS) | Behavior |
+| --- | --- | --- |
+| `gF` | `<FormatOpen>` | Open the panel (`n`, `f`, `x` modes) |
+| `j` / Down, `k` / Up | `<FormatNext>`, `<FormatPrevious>` | Move through fields or an open picker |
+| Enter | `<FormatSelect>` | Open/edit a field or confirm its picker/input |
+| `f` | `<FormatType>` | Pick General, Number, Currency, Date or Time |
+| `%` | `<FormatPercent>` | Toggle Number ↔ Percent (same type, unchanged stored value) |
+| `d` | `<FormatDigits>` | Enter decimal places (0–64), or pick a Date display style |
+| `+`, `-` | `<FormatIncrease>`, `<FormatDecrease>` | Adjust decimal places by one |
+| `,` | `<FormatGroup>` | Toggle thousands separators |
+| `c` | `<FormatCurrency>` | Enter a three-letter currency label, default NZD (no conversion) |
+| `t`, `s` | `<FormatTime>`, `<FormatSeconds>` | Include time in Date; show seconds in clock displays |
+| `z` | `<FormatZone>` | Enter UTC or an Intl-supported IANA timezone |
+| `u` | `<FormatRevert>` | Restore all opening formats without leaving FORMAT |
+| Backspace / Delete | `<FormatBackspace>` | Erase input text |
+| Escape | `<FormatDone>` | Return to sheet NORMAL; keep confirmed adjustments, discard unfinished input/picker |
+
+Adjustments preview every targeted cell immediately without recalculating formulas. A field edit preserves each cell's other settings; a mixed boolean becomes On, and mixed decimal counts require an explicit count before `+`/`-`. Choosing a type resets its settings to defaults; choosing General removes only format metadata. One completed session is one chronological workbook undo step; reverted/unchanged sessions add none. Clicking outside finishes before the next action. Formats persist in `.dflo` files, including empty coordinates and independently formatted spill children. Colour resets preserve formats and layout metadata. Keyboard adjustments record/replay through existing macros; formatting does not replace the last dot-repeat edit.
+
+Number displays use decimal half-up rounding (ties away from zero), a decimal point, optional comma grouping, and a `%` suffix or explicit currency code. Rounded negative zero displays as zero. Very large fixed expansions fall back to bounded scientific notation with a warning. **Stored text, formulas, 64-significant-digit calculation, existing evaluated-value copies and chart inputs do not change.** General retains the existing display, including native-number formula presentation; formatting may reveal more precise formula digits than General. Put/fill keep destination styles rather than copying formats.
+
+Dates/times remain **strict ISO text**, never Excel serial numbers or implicitly converted input: `YYYY-MM-DD`, `HH:mm[:ss[.SSS]]`, or `YYYY-MM-DDTHH:mm[:ss[.SSS]]Z` / an explicit `±HH:mm` offset. Validate actual Gregorian dates in years 0001–9999; ambiguous day/month text, invalid dates, offset-free timestamps, leap seconds and 24:00 are not interpreted. Date styles are ISO, `20/10/2026`, and `20 Oct 2026`; clocks are 24-hour, with optional seconds (fractions are not displayed). Timestamp presentation defaults to UTC, independent of machine timezone/locale; an explicit zone observes its timezone database/DST and displays its offset when time is included. Civil dates and clocks never shift zones, invent midnight or acquire a date. Incompatible values and unsupported saved settings keep the General display with a tooltip/footer/panel explanation, not a new calculation error.
+
+Remap any action in **`format`** mode. RHS tokens are stable even if the default key is disabled; native key RHS aliases also work nonrecursively. As elsewhere, `<Nop>` hides a disabled shortcut and `vim.keymap.del` reveals its default. Labels prefer a usable custom action mapping and omit ambiguous/unbound keys. Inside a text field, only confirm, Done and erase mappings are active; other characters are literal (use control chords for these input actions if you need their letters). Escape is remappable in FORMAT, unlike the normal/formula modes:
+
+```lua
+vim.keymap.set({ "n", "f", "x" }, "<Leader>F", "<FormatOpen>")
+vim.keymap.set("format", "p", "<FormatPercent>")
+vim.keymap.set("format", "%", "<Nop>")
+vim.keymap.set("format", "e", "<FormatDigits>")
+vim.keymap.set("format", "<C-q>", "<FormatDone>")
+vim.keymap.set("format", "<Esc>", "<Nop>")
+```
+
+Implementation contract: flat primitive `styles[r][c]` keys are `formatKind`, `formatDigits`, `formatPercent`, `formatGroup`, `formatCurrency`, `formatPreset`, `formatIncludeTime`, `formatSeconds`, `formatTimeZone`. Missing fields mean defaults; no file-schema migration is needed. `presentCell(preciseValue, flatStyle, legacyDisplayText)` returns `{text, warning}` without mutating inputs; formula passes expose a separate `typed` grid, including spills. `cellPresentation` and `formatPreview` are derived/session-only, not file/history data. Conditional colours and layout fields must remain independent of these format keys.
+
 ## Lua keybinding configuration
 
 ### Desktop
@@ -343,7 +387,7 @@ vim.keymap.set({ "n", "f" }, "<Leader>sn", ":sheetnew<CR>", { desc = "New sheet"
 
 With a Space leader, the helper shows `Space Actions …`, then `s Sheets …` after Space, then `n New sheet` after Space s. Labels follow the same modes and leader/localleader expansion as mappings; define the leader first. Labels are display-only: they do not bind keys, change prefix timeouts or fallback, or create branches without enabled child mappings. Unlabelled branches still show `…`. If a prefix also runs a command, that command's description takes precedence. Repeating a group declaration replaces its label; remove the declaration and reload to clear it.
 
-Key notation: `<Esc>`, `<CR>` / `<Enter>`, `<S-CR>`, `<BS>`, `<Del>`, `<Tab>`, `<Space>`, `<lt>`, `<Nop>`, `<F4>`, arrows, Home/End, PageUp/PageDown, `<C-x>`, `<C-S-x>` and Shift-arrows. Use the shown capitalization; Ctrl-letter names use lowercase. Leader/localleader expand when a mapping is defined. Escape always cancels and cannot be remapped. Mapping `desc` values appear in the shortcut bar, and `<Nop>` mappings hide their disabled default shortcuts.
+Key notation: `<Esc>`, `<CR>` / `<Enter>`, `<S-CR>`, `<BS>`, `<Del>`, `<Tab>`, `<Space>`, `<lt>`, `<Nop>`, `<F4>`, arrows, Home/End, PageUp/PageDown, `<C-x>`, `<C-S-x>` and Shift-arrows. Use the shown capitalization; Ctrl-letter names use lowercase. Leader/localleader expand when a mapping is defined. Escape always cancels and cannot be remapped except in FORMAT. Mapping `desc` values appear in the shortcut bar, and `<Nop>` mappings hide their disabled default shortcuts.
 
 **Invalid shortcuts:** In sheet/formula NORMAL, visual and operator-pending modes, a key that cannot continue a buffered mapping discards the entire attempt, including any pending count/operator, and displays `Invalid shortcut` in the command field. No shorter mapping runs and no buffered keys become standalone commands. For example, `<Space>s>` does nothing when only `<Space>sn` is mapped. Insert mode and the `:`/search command line retain literal-text fallback on mismatch so ordinary typing still works.
 
@@ -367,6 +411,6 @@ Reload is atomic: syntax/runtime/API errors keep the previous mappings, group la
 
 Coverage follows the families in [Neovim motion.txt](https://neovim.io/doc/user/motion.html), with the spreadsheet translations above. It does **not** claim byte-for-byte Neovim parity. Searches use JavaScript Unicode regular expressions, not Vim regex syntax or search offsets. Text motions count Unicode code points, not grapheme clusters or tab-expanded screen columns. Formula section/method/comment/tag/bracket navigation is lexical, without language parsing, nroff macros, configurable matchpairs, or matchit. Sheet marks are persistent workbook references; formula text/special navigation marks are session-local. Uppercase marks do not open other files and numbered ShaDa marks are unavailable.
 
-Definition/declaration and tag motions (`gd/gD`, Ctrl-], `g]`, `g<C-]>`, Ctrl-t), file/include navigation (`gf`, `gF`, `[i/]i`), folds (`zj/zk`), diff (`[c/]c`), diagnostics (`[d/]d`), quickfix/location lists and general Neovim buffer switching have no backing subsystem. DataFlow's sheet and split-window commands above are supported, not the full Neovim window API. Unsupported motions are not silently redirected to unrelated cells. Neovim Select mode, named/numbered registers, arbitrary operators (`gq`, `=`, shell filters, folds), Ex ranges/scripts and full insert/replace-mode command parity are outside this implementation.
+Definition/declaration and tag motions (`gd/gD`, Ctrl-], `g]`, `g<C-]>`, Ctrl-t), file/include navigation (`gf`, `[i/]i`), folds (`zj/zk`), diff (`[c/]c`), diagnostics (`[d/]d`), quickfix/location lists and general Neovim buffer switching have no backing subsystem. `gF` opens DataFlow's format panel, not file navigation. DataFlow's sheet and split-window commands above are supported, not the full Neovim window API. Unsupported motions are not silently redirected to unrelated cells. Neovim Select mode, named/numbered registers, arbitrary operators (`gq`, `=`, shell filters, folds), Ex ranges/scripts and full insert/replace-mode command parity are outside this implementation.
 
 Run `npm test` for the keyboard/Lua contract tests, `npm run build` for the frontend, and `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib` for native config-file creation/reload tests.
