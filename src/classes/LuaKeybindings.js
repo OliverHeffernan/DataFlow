@@ -5,6 +5,9 @@ vim.keymap.set({ "n", "f", "x" }, "<Leader>h", "0")
 vim.keymap.set({ "n", "f", "x" }, "<Leader>l", "$")
 vim.keymap.set("i", "jk", "<Esc>")
 -- Sheet commands work in mappings too. Omit <CR> to type a name before running.
+-- Label custom mapping branches without binding a command to the prefix.
+-- vim.keymap.group({ "n", "f" }, "<Leader>", "Actions")
+-- vim.keymap.group({ "n", "f" }, "<Leader>s", "Sheets")
 -- vim.keymap.set({ "n", "f" }, "<Leader>sn", ":sheetnew<CR>", { desc = "New sheet" })
 -- vim.keymap.set({ "n", "f" }, "<Leader>sr", ":sheetrename ", { desc = "Rename sheet" })
 -- vim.keymap.set({ "n", "f" }, "]s", ":sheetnext<CR>", { desc = "Next sheet" })

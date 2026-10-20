@@ -58,7 +58,7 @@ export default class VimKeyboard {
 		if (key === '<C-m>') key = '<CR>';
 		if (mapped && key !== '<Esc>') {
 			this.mappingKeys.push(key);
-			const candidates = this.mappings.filter(map => map.mode === this.mappingMode && this.mappingKeys.every((k, i) => map.lhs[i] === k));
+			const candidates = this.mappings.filter(map => !map.group && map.mode === this.mappingMode && this.mappingKeys.every((k, i) => map.lhs[i] === k));
 			const exact = candidates.find(map => map.lhs.length === this.mappingKeys.length);
 			if (exact && candidates.length === 1) {
 				this.mappingKeys = [];
@@ -67,7 +67,7 @@ export default class VimKeyboard {
 			}
 			if (candidates.length) { this.hooks.pending?.(); this.render(); return; }
 			const keys = this.mappingKeys; this.mappingKeys = [];
-			const prefix = this.mappings.filter(map => map.mode === this.mappingMode && map.lhs.every((k, i) => keys[i] === k)).sort((a, b) => b.lhs.length - a.lhs.length)[0];
+			const prefix = this.mappings.filter(map => !map.group && map.mode === this.mappingMode && map.lhs.every((k, i) => keys[i] === k)).sort((a, b) => b.lhs.length - a.lhs.length)[0];
 			if (prefix) { keys.splice(0, prefix.lhs.length); for (const rhs of prefix.rhs) this.key(rhs, false); }
 			else this.key(keys.shift(), false);
 			for (const rest of keys) this.key(rest, true);
@@ -99,7 +99,7 @@ export default class VimKeyboard {
 
 	flushMappings() {
 		const keys = this.mappingKeys; this.mappingKeys = [];
-		const prefix = this.mappings.filter(map => map.mode === this.mappingMode && map.lhs.every((key, i) => keys[i] === key)).sort((a, b) => b.lhs.length - a.lhs.length)[0];
+		const prefix = this.mappings.filter(map => !map.group && map.mode === this.mappingMode && map.lhs.every((key, i) => keys[i] === key)).sort((a, b) => b.lhs.length - a.lhs.length)[0];
 		if (prefix) { keys.splice(0, prefix.lhs.length); for (const key of prefix.rhs) this.key(key, false); }
 		for (const key of keys) this.key(key, false);
 	}

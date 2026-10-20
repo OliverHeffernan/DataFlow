@@ -35,13 +35,15 @@ const label = keys => {
 
 export function keyboardHints(keyboard) {
 	const prefix = keyboard.mappingKeys;
-	const maps = keyboard.mappings.filter(map => map.mode === keyboard.mappingMode && prefix.every((key, i) => map.lhs[i] === key));
+	const matching = keyboard.mappings.filter(map => map.mode === keyboard.mappingMode && prefix.every((key, i) => map.lhs[i] === key));
+	const maps = matching.filter(map => !map.group);
 	const enabled = maps.filter(map => map.rhs.join('') !== '<Nop>' && map.lhs.length > prefix.length);
 	const custom = [...new Set(enabled.map(map => map.lhs[prefix.length]))].map(key => {
 		const children = enabled.filter(map => map.lhs[prefix.length] === key);
 		const leaf = children.find(map => map.lhs.length === prefix.length + 1);
 		const more = children.some(map => map.lhs.length > prefix.length + 1);
-		const description = leaf ? leaf.desc || `→ ${label(leaf.rhs)}` : '';
+		const group = matching.find(map => map.group && map.lhs.length === prefix.length + 1 && map.lhs[prefix.length] === key);
+		const description = leaf ? leaf.desc || `→ ${label(leaf.rhs)}` : group?.desc || '';
 		return { key: label([key]), description: description + (more ? `${description ? ' ' : ''}…` : '') };
 	});
 	if (prefix.length) return custom;

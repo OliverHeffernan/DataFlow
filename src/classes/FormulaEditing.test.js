@@ -178,6 +178,37 @@ vim.keymap.set('f', '<F6>x', 'gj', {desc='Next line'})`);
 	assert.ok(!keyboardHints(keyboard).some(hint => hint.description === 'Extend range'));
 });
 
+test('Lua group labels name only existing branches in the active mode', () => {
+	const { keyboard } = setup('');
+	keyboard.mappings = compileConfig(`vim.g.mapleader = ' '
+vim.g.maplocalleader = ','
+vim.keymap.group({'n', 'f'}, '<Leader>', 'Actions')
+vim.keymap.group({'n', 'f'}, '<Leader>s', 'Old label')
+vim.keymap.set({'n', 'f'}, '<Leader>sn', ':sheetnew<CR>', {desc='New sheet'})
+vim.keymap.set({'n', 'f'}, '<Leader>so', ':o<CR>', {desc='Open sheet'})
+vim.keymap.group({'n', 'f'}, '<Leader>s', 'Sheets')
+vim.keymap.group('n', '<Leader>s', 'Sheet commands')
+vim.keymap.set('f', '<Leader>w', ':w<CR>', {desc='Save'})
+vim.keymap.group('f', '<Leader>x', 'Disabled')
+vim.keymap.set('f', '<Leader>xx', '<Nop>')
+vim.keymap.group('f', '<F6>', 'Unused')
+vim.keymap.group('f', '<LocalLeader>', 'Local')
+vim.keymap.set('f', '<LocalLeader>j', 'gj', {desc='Next line'})
+vim.keymap.group('f', '<F7>', 'Branch label')
+vim.keymap.set('f', '<F7>', 'gk', {desc='Previous line'})
+vim.keymap.set('f', '<F7>x', 'gj', {desc='Next line'})`);
+	assert.deepEqual(keyboardHints(keyboard).filter(hint => hint.key === 'Space'), [{ key: 'Space', description: 'Actions …' }]);
+	assert.ok(!keyboardHints(keyboard).some(hint => hint.key === 'F6'));
+	assert.ok(keyboardHints(keyboard).some(hint => hint.key === ',' && hint.description === 'Local …'));
+	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'F7' && hint.description === 'Previous line …'));
+	keyboard.feed(' ');
+	assert.deepEqual(keyboardHints(keyboard), [{ key: 's', description: 'Sheets …' }, { key: 'w', description: 'Save' }]);
+	keyboard.feed('s');
+	assert.deepEqual(keyboardHints(keyboard), [{ key: 'n', description: 'New sheet' }, { key: 'o', description: 'Open sheet' }]);
+	keyboard.feed('<Esc><Esc> ');
+	assert.deepEqual(keyboardHints(keyboard), [{ key: 's', description: 'Sheet commands …' }]);
+});
+
 test('built-in shortcut hints expose only the next key through operators and text objects', () => {
 	const { keyboard } = setup('=2+3', 0, 0);
 	keyboard.escape();

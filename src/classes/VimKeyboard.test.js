@@ -206,7 +206,10 @@ vim.keymap.set('i', 'jk', '<Esc>')`);
 
 test('mapping prefixes flush on timeout or mismatch and RHS is nonrecursive', () => {
 	const v = formula('');
-	v.mappings = compileConfig(`vim.keymap.set('i', 'jk', '<Esc>')
+	v.mappings = compileConfig(`vim.keymap.group('i', 'j', 'Leave insert')
+vim.keymap.group('i', 'x', 'Unused label')
+vim.keymap.group('f', 'h', 'Move')
+vim.keymap.set('i', 'jk', '<Esc>')
 vim.keymap.set('f', 'h', 'l')
 vim.keymap.set('f', 'l', 'h')`);
 	v.feed('ij'); assert.equal(v.formula, '');
@@ -224,6 +227,7 @@ test('operator-pending mappings apply after the operator and its count', () => {
 test('invalid Lua, unsupported APIs and runaway scripts do not install partial maps', () => {
 	assert.ok(compileConfig(configTemplate).length > 0);
 	for (const source of ['vim.keymap.set(', 'os.execute("whoami")', 'while true do end', 'vim.keymap.set("n", "x", function() end)', 'vim.keymap.set("n", "x", "j", {expr=true})']) assert.throws(() => compileConfig(source));
+	for (const source of ['vim.keymap.group("n", "", "Sheets")', 'vim.keymap.group("bad", "s", "Sheets")', 'vim.keymap.group("n", "s", {})', 'vim.keymap.group("n", "s", "")']) assert.throws(() => compileConfig(source));
 });
 
 test('vertical motions remember the preferred column and sticky end of line', () => {

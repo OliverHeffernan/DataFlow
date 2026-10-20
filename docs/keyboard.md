@@ -186,9 +186,19 @@ vim.keymap.set("n", "Q", "<Nop>") -- disable a default key
 
 Modes: `n` = sheet normal, **`f` = formula normal (DataFlow extension)**, `i` = insert, `x` / `v` = visual, `o` = operator-pending, `c` = command/search entry. Use a mode list to affect both normal contexts. Mapping RHS strings are nonrecursive; callbacks, expressions, recursive maps, buffer options, `vim.cmd`, plugins and the rest of Neovim's Lua API are not supported. Accepted options are `desc`, `silent`, `remap=false`, `noremap=true`.
 
+Use **`vim.keymap.group(modes, prefix, label)`** (a DataFlow extension) to label a custom mapping branch:
+
+```lua
+vim.keymap.group({ "n", "f" }, "<Leader>", "Actions")
+vim.keymap.group({ "n", "f" }, "<Leader>s", "Sheets")
+vim.keymap.set({ "n", "f" }, "<Leader>sn", ":sheetnew<CR>", { desc = "New sheet" })
+```
+
+With a Space leader, the helper shows `Space Actions …`, then `s Sheets …` after Space, then `n New sheet` after Space s. Labels follow the same modes and leader/localleader expansion as mappings; define the leader first. Labels are display-only: they do not bind keys, change prefix timeouts or fallback, or create branches without enabled child mappings. Unlabelled branches still show `…`. If a prefix also runs a command, that command's description takes precedence. Repeating a group declaration replaces its label; remove the declaration and reload to clear it.
+
 Key notation: `<Esc>`, `<CR>` / `<Enter>`, `<S-CR>`, `<BS>`, `<Del>`, `<Tab>`, `<Space>`, `<lt>`, `<Nop>`, `<F4>`, arrows, Home/End, PageUp/PageDown, `<C-x>`, `<C-S-x>` and Shift-arrows. Use the shown capitalization; Ctrl-letter names use lowercase. Leader/localleader expand when a mapping is defined. Prefixes wait 500 ms for more keys; an unmatched prefix falls back to a complete shorter mapping or the original keys. Escape always cancels and cannot be remapped. Mapping `desc` values appear in the shortcut bar, and `<Nop>` mappings hide their disabled default shortcuts.
 
-Reload is atomic: syntax/runtime/API errors keep the previous mappings active and report an error in the command field. Configurations cannot access OS, filesystem, package loading, JavaScript, debug, coroutines, dynamic Lua loading, or protected calls. Limits: 128 KiB source, 1,000 mappings, 128-character LHS, 4,096-character RHS, an instruction budget and a 2-second worker timeout. Use this as a keymap configuration API, not a general-purpose Lua automation environment.
+Reload is atomic: syntax/runtime/API errors keep the previous mappings and group labels active and report an error in the command field. Configurations cannot access OS, filesystem, package loading, JavaScript, debug, coroutines, dynamic Lua loading, or protected calls. Limits: 128 KiB source, 1,000 mappings and group labels combined, 128-character LHS, 4,096-character RHS, an instruction budget and a 2-second worker timeout. Use this as a keymap configuration API, not a general-purpose Lua automation environment.
 
 ## Migration and explicit exclusions
 

@@ -17,7 +17,7 @@ export function compileConfig(source) {
 		}
 		const prelude = `
 vim = { g = { mapleader = "\\\\", maplocalleader = "\\\\" }, keymap = {} }
-function vim.keymap.set(modes, lhs, rhs, opts)
+local function setKeymap(modes, lhs, rhs, opts, group)
   assert(type(lhs) == "string" and #lhs > 0, "lhs must be a non-empty string")
   assert(type(rhs) == "string", "rhs must be a key sequence, not a callback")
   opts = opts or {}
@@ -33,8 +33,15 @@ function vim.keymap.set(modes, lhs, rhs, opts)
       s = s:gsub("<[Ll]eader>", function() return vim.g.mapleader end)
       return s:gsub("<[Ll]ocal[Ll]eader>", function() return vim.g.maplocalleader end)
     end
-    _map(mode, expand(lhs), expand(rhs), opts.desc)
+    _map(mode, expand(lhs), expand(rhs), opts.desc, group)
   end
+end
+function vim.keymap.set(modes, lhs, rhs, opts)
+  setKeymap(modes, lhs, rhs, opts, false)
+end
+function vim.keymap.group(modes, lhs, label)
+  assert(type(label) == "string" and #label > 0, "group label must be a non-empty string")
+  setKeymap(modes, lhs, "", { desc = label }, true)
 end
 function vim.keymap.del(modes, lhs)
   if type(modes) == "string" then modes = { modes } end
@@ -47,13 +54,14 @@ end
 		lua.lua_pushjsfunction(L, state => {
 			const mode = to_jsstring(lauxlib.luaL_checkstring(state, 1));
 			const lhs = to_jsstring(lauxlib.luaL_checkstring(state, 2));
-			const key = `${mode === 'v' ? 'x' : mode}:${JSON.stringify(tokenize(lhs))}`;
+			const group = lua.lua_toboolean(state, 5);
+			const key = `${group ? 'group:' : ''}${mode === 'v' ? 'x' : mode}:${JSON.stringify(tokenize(lhs))}`;
 			if (lua.lua_isnil(state, 3)) mappings.delete(key);
 			else {
 				const rhs = to_jsstring(lauxlib.luaL_checkstring(state, 3));
 				if (lhs.length > 128 || rhs.length > 4096 || mappings.size >= 1000) return lauxlib.luaL_error(state, to_luastring('keymap limit exceeded'));
 				const desc = lua.lua_isnoneornil(state, 4) ? '' : to_jsstring(lauxlib.luaL_checkstring(state, 4));
-				mappings.set(key, { mode: mode === 'v' ? 'x' : mode, lhs: tokenize(lhs), rhs: tokenize(rhs), desc });
+				mappings.set(key, { mode: mode === 'v' ? 'x' : mode, lhs: tokenize(lhs), rhs: tokenize(rhs), desc, ...(group ? { group: true } : {}) });
 			}
 			return 0;
 		});
