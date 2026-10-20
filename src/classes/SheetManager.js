@@ -53,6 +53,7 @@ class CalcPass {
 		this.datasets = sheet.marks.filter(mark => mark.kind === 'dataset' && mark.sheetName === record.name);
 		this.id = sheet.sheets.indexOf(record);
 		session.passes.set(record, this);
+		this.session = session;
 		this.blocked = blocked;
 		this.results = new Map();
 		this.spills = new Map();
@@ -663,7 +664,24 @@ export default class SheetManager {
 		return { ...data, version: 3, activeSheet: activeSheetIndex, sheets: this.sheets.map(({ selRow, selCol, ...sheet }) => sheet) };
 	}
 
-	restoreWorkbook(data) {
+	// Detached trusted envelope: no singleton constructor, renderer, history, or live cache refs.
+	static createDraft(data) {
+		const draft = Object.create(SheetManager.prototype);
+		const { version, activeSheet, ...workbook } = JSON.parse(JSON.stringify(data));
+		draft.workbook = { ...workbook, activeSheetIndex: activeSheet };
+		draft.pass = null;
+		draft.cellValues = { value: [] };
+		draft.spillCells = new Map();
+		draft.cellErrors = new Map();
+		return draft;
+	}
+
+	restoreWorkbook(data, calculation = null) {
+		// Only the caller's exact, final evaluated envelope may bypass recalculation. Data caches
+		// stay local (Complex/Unit retain their prototypes); undo and normal loads still recalculate.
+		if (calculation && (calculation.workbook !== data || calculation.sheets.length !== data.sheets.length
+			|| calculation.sheets.some((cache, i) => cache.values.length !== data.sheets[i].rows.length
+				|| cache.values.some(row => row.length !== data.sheets[i].rows[0].length)))) throw new Error('Calculation does not match workbook');
 		// History restores data, not navigation. Keep the visible sheet/cursors where possible.
 		const active = this.activeSheet.name;
 		const cursors = new Map(this.sheets.map(sheet => [sheet.name, { row: sheet.selRow, col: sheet.selCol }]));
@@ -675,7 +693,7 @@ export default class SheetManager {
 		}), activeSheetIndex: Math.max(0, sheets.findIndex(sheet => sheet.name === active)) });
 		this.numOfRows.value = this.rows.length;
 		this.numOfCols.value = this.rows[0].length;
-		this.loadAllCells();
+		this.loadAllCells(undefined, undefined, calculation?.sheets[this.workbook.activeSheetIndex]);
 	}
 
 	loadWorkbook(data, path = null) {
@@ -833,14 +851,14 @@ export default class SheetManager {
 
 	// Run fn inside one evaluation pass (reusing the active pass for nested calls such as charts).
 	runPass(fn) {
-		if (this.pass) return fn(this.pass);
+		if (this.pass) return fn(this.pass, this.pass.session);
 		const blocked = new Set();
 		try {
 			for (let attempt = 0; ; attempt++) {
 				const session = { passes: new Map(), stack: new Map(), probes: [] };
 				const pass = new CalcPass(this, blocked, session);
 				this.pass = pass;
-				const result = fn(pass);
+				const result = fn(pass, session);
 				const broken = [];
 				for (const other of session.passes.values()) broken.push(...other.verify());
 				const count = [...session.passes.values()].reduce((n, other) => n + other.formulaCells.length, 0);
@@ -850,6 +868,34 @@ export default class SheetManager {
 		} finally {
 			this.pass = null;
 		}
+	}
+
+	// Data only, from the final verified attempt. Foreign-sheet passes share the same session.
+	// Optional exact reads precede the UI's lossy decimal conversion; no pass/ctx escapes.
+	calculateWorkbook(read = null) {
+		return this.runPass((active, session) => {
+			const passes = this.sheets.map(record => session.passes.get(record) ?? new CalcPass(this, active.blocked, session, record));
+			const sheets = passes.map(pass => pass.snapshot());
+			let cells;
+			if (read) {
+				const pass = passes[read.sheet];
+				cells = [];
+				for (let row = read.r0; row <= read.r1; row++) {
+					const line = [];
+					for (let col = read.c0; col <= read.c1; col++) {
+						try {
+							const value = pass.formulaRead(row, col, false);
+							line.push({ value, blank: pass.raw(row, col) === '' && value === '' && !sheets[read.sheet].spills.has(keyOf(row, col)) });
+						} catch (error) {
+							const displayed = sheets[read.sheet].values[row][col];
+							line.push(displayed?.kind === 'chart' ? { value: displayed } : { error: explain(error) });
+						}
+					}
+					cells.push(line);
+				}
+			}
+			return { sheets, cells };
+		});
 	}
 
 	// Value of a cell: stored text, a formula result (the full 2D array at an array formula), or the
@@ -881,7 +927,10 @@ export default class SheetManager {
 
 	// Recompute every cell value, spill output and error explanation from sheet.rows (DOM-free).
 	recalculate() {
-		const { values, spills, errors } = this.runPass(pass => pass.snapshot());
+		return this.installCalculation(this.runPass(pass => pass.snapshot()));
+	}
+
+	installCalculation({ values, spills, errors }) {
 		this.spillCells.clear();
 		spills.forEach((value, key) => this.spillCells.set(key, value));
 		this.cellErrors.clear();
@@ -1254,8 +1303,9 @@ export default class SheetManager {
 		commandLine.dataset.message = str;
 	}
 
-	loadAllCells(r, c) {
-		this.recalculate();
+	loadAllCells(r, c, calculation = null) {
+		if (calculation) this.installCalculation(calculation);
+		else this.recalculate();
 
 		// checks if new cells are being created, if they are, then it lets the styles be loaded once it is all mounted, otherwise it loads the styles right away.
 		if (r == null) this.loadStyles();

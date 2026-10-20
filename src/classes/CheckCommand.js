@@ -13,6 +13,8 @@ import { formulaAssist, formulaReferences } from './FormulaEditing.js';
 import { keyboardHints } from './KeyboardHints.js';
 import SyntaxHighlighting from './SyntaxHighlighting.js';
 import { cellLabel, referenceSpans, resolveReference } from './FormulaFunctions.js';
+import { runScriptWorker, scriptLimits } from './LuaScript.js';
+import { captureScriptWorkbook, publishWorkbookScript } from './WorkbookScript.js';
 
 export default class CheckCommand {
 	constructor() {
@@ -22,6 +24,7 @@ export default class CheckCommand {
 		this.history = new HistoryManager();
 		this.visual = new VisualManager();
 		this.ui = shallowRef({ hints: [], assist: { suggestions: [], signature: null }, error: '', spill: '' });
+		this.script = shallowRef(null);
 		this.keyboard = new VimKeyboard(this.sheet, {
 			render: () => this.render(),
 			message: text => this.setPhMessage(text),
@@ -173,7 +176,7 @@ export default class CheckCommand {
 
 	// Native controls and dialogs own their input. The spreadsheet receives keys regardless of which cell is focused.
 	acceptsInput(event) {
-		return !event.defaultPrevented && !event.target?.closest?.('input, textarea, select, [contenteditable="true"], [role="dialog"], [data-keyboard-ignore]');
+		return !this.script.value && !event.defaultPrevented && !event.target?.closest?.('input, textarea, select, [contenteditable="true"], [role="dialog"], [data-keyboard-ignore]');
 	}
 	connectInput() {
 		const root = document.getElementById('app');
@@ -300,6 +303,54 @@ export default class CheckCommand {
 		} catch (error) { this.setPhMessage(`init.lua: ${error.message}`); }
 	}
 
+	openScript() {
+		if (this.script.value) return;
+		if (this.keyboard.playing || this.keyboard.recording) throw new Error(':luarun requires an explicit run outside macro recording/playback');
+		if (this.keyboard.context !== 'sheet') throw new Error('Select sheet cells before :luarun');
+		// The split-window host can supply this contract when its accepted feature is integrated.
+		const a = this.keyboard.anchor ?? this.keyboard.point, b = this.keyboard.point;
+		const context = this.captureWindowContext ? this.captureWindowContext() : {
+			sheetName: this.sheet.activeSheet.name, cursor: { ...b },
+			selection: { r0: Math.min(a.row, b.row), c0: this.keyboard.mode === 'V' ? 0 : Math.min(a.col, b.col),
+				r1: Math.max(a.row, b.row), c1: this.keyboard.mode === 'V' ? this.sheet.rows[0].length - 1 : Math.max(a.col, b.col) },
+		};
+		clearTimeout(this.mappingTimer);
+		this.keyboard.mappingKeys = []; this.keyboard.changeKeys = [];
+		this.script.value = { context, source: '', name: '', running: false, error: '', complete: false, logs: [] };
+	}
+	async importScript(file) {
+		const state = this.script.value;
+		if (!file || !state || state.running) return;
+		try {
+			if (file.size > scriptLimits.sourceBytes) throw new Error('Script exceeds 128 KiB');
+			const source = await file.text();
+			if (new TextEncoder().encode(source).length > scriptLimits.sourceBytes) throw new Error('Script exceeds 128 KiB');
+			if (this.script.value === state) this.script.value = { ...state, source, name: file.name, error: '', complete: false };
+		} catch (error) { if (this.script.value === state) this.script.value = { ...state, error: error.message }; }
+	}
+	cancelScript() {
+		this.scriptAbort?.abort(); this.script.value = null; this.focus();
+	}
+	async runScript() {
+		const state = this.script.value;
+		if (!state?.name || state.running || state.complete) return;
+		const controller = new AbortController(); this.scriptAbort = controller;
+		this.script.value = { ...state, running: true, error: '' };
+		try {
+			const request = captureScriptWorkbook(this.sheet, state.context);
+			const worker = new Worker(new URL('./LuaScriptWorker.js', import.meta.url), { type: 'module' });
+			const result = await runScriptWorker(worker, { ...request, source: state.source }, controller.signal);
+			let changed;
+			const publish = () => { changed = publishWorkbookScript(this.sheet, request, result, controller.signal); };
+			if (this.preserveWindows) this.preserveWindows(publish); else publish();
+			this.script.value = { ...state, running: false, complete: true, logs: result.logs,
+				message: changed ? 'Workbook updated · one undo step' : 'No workbook changes' };
+			await this.render();
+		} catch (error) {
+			if (!controller.signal.aborted) this.script.value = { ...state, running: false, error: error.message };
+		} finally { if (this.scriptAbort === controller) this.scriptAbort = null; }
+	}
+
 	async sheetCommand(action, argument, force) {
 		if (force && action !== 'sheetdelete') throw new Error('Only :sheetdelete accepts !');
 		if (['sheets', 'sheetnext', 'sheetprev'].includes(action) && argument) throw new Error(`:${action} takes no arguments`);
@@ -376,6 +427,10 @@ export default class CheckCommand {
 
 	async handleEnterFromCom(command) {
 		try {
+			if (/^:luarun(?:\s|!|$)/.test(command.trim())) {
+				if (command.trim() !== ':luarun') throw new Error('Usage: :luarun (choose a local Lua file, preview, then Run)');
+				this.openScript(); return;
+			}
 			const marks = command.trim().match(/^:(marks|markrename|markgoto|mark|delmarks|datasetappend|datasetcolumnrename|dataset)(!?)(?:\s+(.*))?$/);
 			if (marks) return await this.markCommand(marks[1], marks[3], marks[2]);
 			if (/^:(?:fill|series)(?:\s|!|$)/.test(command.trim())) {
