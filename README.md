@@ -22,6 +22,17 @@ Executable `.agents/setup` prepares Debian orbs with Tauri's Linux libraries, a 
 
 After setup, use `npm run build` for the frontend or `cargo check --locked --manifest-path src-tauri/Cargo.toml` for the native backend. Native macOS builds still require a Mac.
 
+## Dependency maintenance
+
+Use Node.js 22.12+ (or another version accepted by `package.json`) and Rust 1.90+. Install with `npm ci`; keep both `package-lock.json` and `src-tauri/Cargo.lock` committed. Run `npm test`, `npm run build`, and `cargo test --locked --manifest-path src-tauri/Cargo.toml` after upgrades. Check advisories with `npm audit` and, with [cargo-audit](https://crates.io/crates/cargo-audit) installed, `cargo audit --file src-tauri/Cargo.lock`.
+
+Known upstream findings as of October 2026:
+
+- Fengari, required for Lua keybindings, depends on `sprintf-js`, which has an [unpatched denial-of-service advisory](https://github.com/advisories/GHSA-hp3w-g68c-fv3c). npm reports two moderate findings for this one dependency chain. Only import Lua configurations you trust; the worker timeout does not guarantee protection against memory exhaustion.
+- Tauri's Linux GTK dependencies retain an [unsoundness warning for `glib` 0.18](https://rustsec.org/advisories/RUSTSEC-2024-0429.html) and an [unmaintained warning for `proc-macro-error`](https://rustsec.org/advisories/RUSTSEC-2024-0370.html). They are not compiled into macOS builds. Resolving them requires compatible upstream GTK/Tauri changes, not a breaking transitive-version override.
+
+The updater's unused legacy Windows ZIP support is disabled; macOS `.app.tar.gz` updates, TLS, and system-proxy support remain enabled. Vue's optional in-app devtools plugin was removed to reduce development dependencies; the Vue Devtools browser extension can still be used.
+
 ## Functions
 Functions are entered in the formula bar at the top of the screen. These are used to set the value of a cell mathematically.
 

@@ -3,7 +3,9 @@ use std::sync::{
     Arc,
 };
 use std::time::Duration;
-use tauri::menu::{Menu, MenuItem, Submenu};
+#[cfg(not(target_os = "macos"))]
+use tauri::menu::Submenu;
+use tauri::menu::{Menu, MenuItem};
 use tauri::{App, AppHandle};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_updater::UpdaterExt;

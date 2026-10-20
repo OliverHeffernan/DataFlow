@@ -20,7 +20,7 @@
 </template>
 
 <script setup>
-	import { computed, onMounted, defineProps } from 'vue';
+	import { computed, onMounted } from 'vue';
 	import CellChart from './CellChart.vue';
 	import SheetManager from '../classes/SheetManager.js';
 	const sheetManager = new SheetManager();

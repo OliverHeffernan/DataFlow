@@ -3,29 +3,29 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
+	"engines": {
+		"node": "^20.19.0 || >=22.12.0"
+	},
 	"scripts": {
 		"dev": "vite",
-		"serve": "vue-cli-service serve",
+		"serve": "vite",
 		"build": "vite build",
 		"test": "node --test src/classes/*.test.js scripts/*.test.js",
 		"preview": "vite preview",
 		"tauri": "tauri"
 	},
 	"dependencies": {
-		"@tauri-apps/plugin-deep-link": "^2.2.0",
-		"@tauri-apps/plugin-dialog": "^2.2.0",
-		"@tauri-apps/plugin-fs": "^2.2.0",
-		"@tauri-apps/plugin-shell": "^2.2.0",
+		"@tauri-apps/api": "^2.12.4",
+		"@tauri-apps/plugin-dialog": "^2.8.3",
+		"@tauri-apps/plugin-fs": "^2.7.1",
+		"@tauri-apps/plugin-shell": "^2.5.0",
 		"fengari": "^0.1.5",
-		"mathjs": "^14.0.1",
-		"vue": "^3.5.13",
-		"vue-router": "^4.5.0"
+		"mathjs": "^15.2.0",
+		"vue": "^3.5.44"
 	},
 	"devDependencies": {
-		"@tauri-apps/api": "^2.2.0",
-		"@tauri-apps/cli": "^2.1.0",
-		"@vitejs/plugin-vue": "^5.2.1",
-		"vite": "^6.0.5",
-		"vite-plugin-vue-devtools": "^7.6.8"
+		"@tauri-apps/cli": "^2.12.3",
+		"@vitejs/plugin-vue": "^6.0.10",
+		"vite": "^8.3.4"
 	}
 }

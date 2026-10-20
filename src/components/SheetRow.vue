@@ -13,7 +13,6 @@
 	</tr>
 </template>
 <script setup>
-	import { defineProps } from 'vue';
 	import SheetCell from './SheetCell.vue';
 	import SheetManager from '../classes/SheetManager.js';
 

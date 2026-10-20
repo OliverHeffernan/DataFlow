@@ -9,8 +9,6 @@
 	</div>
 </template>
 <script setup>
-import { invoke } from '@tauri-apps/api';
-
 /*
 function FileDialog() {
 	 invoke('read_thing')

@@ -3,7 +3,7 @@
 
 </template>
 <script setup>
-import { onMounted, defineProps } from 'vue';
+import { onMounted } from 'vue';
 const props = defineProps({
 	colour: {
 		type: String,

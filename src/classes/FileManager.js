@@ -2,11 +2,8 @@ import SheetManager from "../classes/SheetManager.js";
 const sheetManager = new SheetManager();
 
 import { save, open } from "@tauri-apps/plugin-dialog";
-import { readTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
-
-import { Menu, MenuItem } from "@tauri-apps/api/menu";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export default class FileManager {
 	constructor(onOpen) {

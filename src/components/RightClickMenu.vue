@@ -29,13 +29,6 @@
 	</div>
 </template>
 <script setup>
-	import { open } from '@tauri-apps/plugin-shell';
-	import SheetManager from '../classes/SheetManager.js';
-	const sheetManager = new SheetManager();
-
-	import VisualManager from '../classes/VisualManager.js';
-	const visualManager = new VisualManager();
-
 	import CheckCommand from '../classes/CheckCommand.js';
 	const checkCommand = new CheckCommand();
 

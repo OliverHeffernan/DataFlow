@@ -1,15 +1,11 @@
 import { ref, shallowRef } from "vue";
 //import { reactive } from "vue";
-import { create, all } from "mathjs";
 import { FormulaError, cellLabel, cellToValue, evaluateFormula, toCellValue } from "./FormulaFunctions.js";
 import SyntaxHighlighting from "./SyntaxHighlighting.js";
 import { evaluateChart } from "./ChartFormula.js";
 
 import HistoryManager from "./HistoryManager.js";
 const historyManager = new HistoryManager();
-
-const config = {};
-const math = create(all, config);
 
 import VisualManager from "./VisualManager.js";
 const visualManager = new VisualManager();
@@ -821,9 +817,9 @@ export default class SheetManager {
 
 	cellMotion(amount, tempForm = "") {
 		this.cellCurPos += amount;
-		this.cellCurPos = math.max(0, this.cellCurPos);
+		this.cellCurPos = Math.max(0, this.cellCurPos);
 		const cell = this.getFormula(this.selRow, this.selCol);
-		this.cellCurPos = math.min(this.cellCurPos, this.tempForm.length);
+		this.cellCurPos = Math.min(this.cellCurPos, this.tempForm.length);
 
 		document.getElementById("formCursor").style.marginLeft = this.cellCurPos.toString() + "ch";
 		visualManager.setVisual(this.selRow, this.selCol, this.cellCurPos, this.numOfCols.value);
