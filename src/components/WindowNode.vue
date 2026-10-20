@@ -49,7 +49,7 @@ function resizeKey(event) {
 .horizontal > .window-separator { cursor: row-resize; }
 .window-separator:hover, .window-separator:focus-visible { background: #75e2bc; outline: none; }
 .workspace-window { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; background: #091119; border: 1px solid #26394c; }
-.workspace-window.active-window { border-color: #75e2bc; }
+.workspace-window.active-window { border-color: #395269; }
 .window-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; padding: 5px 10px; min-height: 20px; background: #111d2a; color: #9aaec3; font: 12px/20px ui-monospace, monospace; border-bottom: 1px solid #26394c; }
 .window-header > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .active-window > .window-header { color: #dbe6f3; }

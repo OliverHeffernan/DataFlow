@@ -8,11 +8,11 @@
 		<div class="formula-signature" v-if="ui.assist.signature" aria-label="Function signature">
 			<span class="signature-name">{{ ui.assist.signature.name }}</span>(<template v-for="(arg, index) in ui.assist.signature.args" :key="index"><span v-if="index">, </span><strong v-if="index === Math.min(ui.assist.signature.argument, ui.assist.signature.args.length - 1)">{{ arg }}</strong><span v-else>{{ arg }}</span></template>)
 		</div>
-		<div class="formula-completions" v-if="ui.assist.inserting && ui.assist.suggestions.length" aria-label="Formula suggestions">
-			<div class="completion-caption">{{ ui.assist.kind === 'mark' ? 'MARKS / COLUMNS' : ui.assist.prefix.startsWith('.') ? 'BUILDER METHODS' : 'FUNCTIONS' }} <span>↑ ↓ choose · Tab insert</span></div>
-			<button v-for="(name, index) in ui.assist.suggestions" :key="name" :class="{ selected: index === ui.assist.selected % ui.assist.suggestions.length }" @mousedown.prevent @click="complete(index)">
+		<div class="formula-completions" v-if="ui.assist.inserting && ui.assist.suggestions.length" aria-label="Formula suggestions" :role="keyboardOnly ? 'listbox' : undefined">
+			<div class="completion-caption">{{ ui.assist.kind === 'mark' ? 'MARKS / COLUMNS' : ui.assist.prefix.startsWith('.') ? 'BUILDER METHODS' : 'FUNCTIONS' }} <span v-if="!keyboardOnly">↑ ↓ choose · Tab insert</span></div>
+			<component :is="keyboardOnly ? 'div' : 'button'" v-for="(name, index) in ui.assist.suggestions" :key="name" class="formula-completion" :class="{ selected: index === ui.assist.selected % ui.assist.suggestions.length }" :role="keyboardOnly ? 'option' : undefined" :aria-selected="keyboardOnly ? index === ui.assist.selected % ui.assist.suggestions.length : undefined" @mousedown.prevent @click="!keyboardOnly && complete(index)">
 				<b>{{ name }}</b><span v-if="functionHelp[name]">({{ functionHelp[name].join(', ') }})</span>
-			</button>
+			</component>
 		</div>
 	</div>
 </template>
@@ -20,6 +20,7 @@
 <script setup>
 import CheckCommand from '../classes/CheckCommand.js';
 import { functionHelp } from '../classes/FormulaEditing.js';
+defineProps({ keyboardOnly: Boolean });
 const checkCommand = new CheckCommand(), ui = checkCommand.ui;
 function complete(index) { checkCommand.keyboard.completionIndex = index; checkCommand.keyboard.key('<Tab>'); checkCommand.focus(); }
 </script>
@@ -31,9 +32,10 @@ function complete(index) { checkCommand.keyboard.completionIndex = index; checkC
 .formula-signature strong { color: #f4d779; font-weight: 500; background: #28384a; border-radius: 3px; padding: 1px 3px; }
 .formula-completions { position: absolute; top: 100%; left: 0; width: min(440px, calc(100vw - 90px)); color: #dbe6f3; background: #142233; border: 1px solid #334a62; box-shadow: 0 8px 24px #0007; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .completion-caption { display: flex; justify-content: space-between; padding: 7px 10px; font-size: 10px; color: #9aaec3; border-bottom: 1px solid #26394c; }
-.formula-completions button { display: flex; gap: 8px; text-align: left; width: 100%; padding: 7px 10px; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; overflow-wrap: anywhere; }
-.formula-completions button span { color: #9aaec3; }
-.formula-completions button.selected, .formula-completions button:hover { background: #263e56; }
+.formula-completion { display: flex; gap: 8px; text-align: left; box-sizing: border-box; width: 100%; padding: 7px 10px; background: none; border: 0; color: inherit; font: inherit; overflow-wrap: anywhere; }
+.formula-completion span { color: #9aaec3; }
+.formula-completion.selected, button.formula-completion:hover { background: #263e56; }
+button.formula-completion { cursor: pointer; }
 #newFormBar {
 	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 	position: relative;
