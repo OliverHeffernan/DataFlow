@@ -890,6 +890,64 @@ export default class SheetManager {
 		return values;
 	}
 
+	// DOM-free, raw-content-atomic edit on the active sheet. Writes require raw string values
+	// and unique destinations. Optional sources are spill-protected seeds, not a general read set
+	// or expected-value check. Call synchronously after staging; the caller owns history and the
+	// post-edit recalculation. Cursor, styles, registers and dimensions are untouched. Validation
+	// refreshes derived caches even when it rejects an edit; it never rolls back formula results.
+	applyRangeEdit(writes, sources = []) {
+		const cells = [...sources, ...writes];
+		for (const { row, col } of cells) {
+			if (!Number.isInteger(row) || !Number.isInteger(col) || row < 0 || col < 0 || row >= this.rows.length || col >= this.rows[0].length) {
+				throw new Error('Range extends outside the sheet; nothing changed');
+			}
+		}
+		const destinations = new Set();
+		for (const { row, col, value } of writes) {
+			if (typeof value !== 'string') throw new Error('Range writes require raw string values');
+			const key = keyOf(row, col);
+			if (destinations.has(key)) throw new Error(`Duplicate range destination ${cellLabel(row, col)}`);
+			destinations.add(key);
+		}
+		// A preceding macro command may have changed spill ownership before its render runs.
+		this.recalculate();
+		for (const { row, col } of cells) {
+			const owner = this.spillCells.get(keyOf(row, col));
+			if (owner) throw new Error(`Range intersects spill ${cellLabel(owner.row, owner.col)}; nothing changed`);
+		}
+		if (!writes.some(({ row, col, value }) => this.rows[row][col] !== value)) return false;
+		const marks = this.prepareMarkWrites(writes);
+		for (const { row, col, value } of writes) this.rows[row][col] = value;
+		this.workbook.marks = marks;
+		return true;
+	}
+
+	// Copy raw seeds, or generate decimal numeric literals from them. Direction chooses the
+	// source edge, never the order in which the visual selection's corners were established.
+	fillRange({ r0, c0, r1, c1 }, direction, step) {
+		if (r0 < 0 || c0 < 0 || r1 >= this.rows.length || c1 >= this.rows[0].length) throw new Error('Range extends outside the sheet; nothing changed');
+		const vertical = direction === 'down' || direction === 'up';
+		const length = vertical ? r1 - r0 : c1 - c0, lanes = vertical ? c1 - c0 + 1 : r1 - r0 + 1;
+		const dr = direction === 'down' ? 1 : direction === 'up' ? -1 : 0;
+		const dc = direction === 'right' ? 1 : direction === 'left' ? -1 : 0;
+		const increment = step === undefined ? null : cellToValue(step);
+		if (increment !== null && !increment?.isFinite?.()) throw new Error('Series step must be a finite number');
+		const sources = [], writes = [];
+		for (let lane = 0; lane < lanes; lane++) {
+			const row = (direction === 'up' ? r1 : r0) + (vertical ? 0 : lane);
+			const col = (direction === 'left' ? c1 : c0) + (vertical ? lane : 0);
+			const raw = this.rows[row][col], seed = increment === null ? raw : cellToValue(raw);
+			if (increment !== null && !seed?.isFinite?.()) throw new Error(`Series seed ${cellLabel(row, col)} must be a finite literal number`);
+			sources.push({ row, col });
+			for (let i = 1; i <= length; i++) {
+				const value = increment === null ? raw : seed.plus(increment.times(i));
+				if (increment !== null && !value.isFinite()) throw new Error('Series result must be finite; nothing changed');
+				writes.push({ row: row + dr * i, col: col + dc * i, value: increment === null ? value : value.toString() });
+			}
+		}
+		return this.applyRangeEdit(writes, sources);
+	}
+
 	columnLabel(col) {
 		let label = '';
 		for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26)) label = String.fromCharCode(65 + (n - 1) % 26) + label;

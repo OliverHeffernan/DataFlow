@@ -175,13 +175,13 @@ export default class VimKeyboard {
 		const row = ref.bounds.r0, col = linewise ? Math.max(0, this.sheet.rows[row].findIndex(value => String(value).trim() !== '')) : ref.bounds.c0;
 		this.move({ row, col }, jump && !crossSheet);
 	}
-	commit() {
+	commit(rangeChange) {
 		try { this.sheet.commitMarkedEdit?.(); }
 		catch (error) { this.message(error.message); this.changeKeys = []; return false; }
 		if (this.hooks.change?.() === false) { this.changeKeys = []; return false; }
 		this.state.marks['.'] = this.point;
 		this.changes.push(this.location()); this.changeIndex = this.changes.length;
-		if (!this.playing && this.changeKeys.length) this.lastChange = [...this.changeKeys];
+		if (!this.playing && (rangeChange || this.changeKeys.length)) this.lastChange = rangeChange || [...this.changeKeys];
 		this.changeKeys = [];
 	}
 	render() { return this.hooks.render?.(this); }
@@ -254,6 +254,10 @@ export default class VimKeyboard {
 				if (operator) this.operate(operator, range);
 				else { this.anchor = range.start; this.visualValueObject = !!range.valueObject; this.mode = range.linewise ? 'V' : 'v'; this.move(range.end); }
 			}
+			this.done(); return;
+		}
+		if (!operator && /^g[HJKL]$/.test(action)) {
+			this.fill({ H: 'left', J: 'down', K: 'up', L: 'right' }[action[1]], explicit ? Number(match[1]) : undefined);
 			this.done(); return;
 		}
 		if (!operator && this.action(action, count, explicit)) { this.done(); return; }
@@ -367,7 +371,16 @@ export default class VimKeyboard {
 		}
 		if (action === 'p' || action === 'P') { this.put(action === 'P', count); return true; }
 		if (action === 'u' || action === '<C-r>') { this.hooks.undo?.(action === '<C-r>', count); return true; }
-		if (action === '.' && this.lastChange.length && !this.playing) { this.replay(Array(count).fill(this.lastChange).flat()); return true; }
+		if (action === '.' && !this.playing) {
+			if (Array.isArray(this.lastChange)) this.replay(Array(count).fill(this.lastChange).flat());
+			else {
+				const change = this.lastChange;
+				this.playing = true;
+				try { for (let n = 0; n < count; n++) this.fill(change.direction, undefined, change.step, change); }
+				finally { this.playing = false; }
+			}
+			return true;
+		}
 		if (action === 'q' && this.recording) { this.recording = null; return true; }
 		if (/^q[a-z]$/.test(action)) { this.recording = action[1]; this.macros.set(this.recording, []); return true; }
 		if (/^@[a-z@]$/.test(action)) { const name = action[1] === '@' ? this.lastMacro : action[1]; this.lastMacro = name; this.replay(Array(count).fill(this.macros.get(name) || []).flat()); return true; }
@@ -387,6 +400,35 @@ export default class VimKeyboard {
 			&& mark.bounds.r0 >= start.row && mark.bounds.r0 <= end.row && mark.bounds.c0 <= end.col && mark.bounds.c1 >= start.col)) return false;
 		this.message('Dataset headers are protected; use :datasetcolumnrename');
 		return true;
+	}
+
+	fill(direction, count, step, shape) {
+		try {
+			if (this.context !== 'sheet') throw new Error('Fill and series are sheet-only commands');
+			if (count !== undefined && (!Number.isInteger(count) || count < 1 || count > 10000)) throw new Error('Fill count must be an integer from 1 to 10000');
+			if (this.anchor && count !== undefined) throw new Error('Visual bounds already specify the fill extent; omit the count');
+			const vertical = direction === 'down' || direction === 'up', point = this.point;
+			let r0, c0, r1, c1;
+			if (this.anchor && !shape) {
+				r0 = Math.min(this.anchor.row, point.row); r1 = Math.max(this.anchor.row, point.row);
+				c0 = this.mode === 'V' ? 0 : Math.min(this.anchor.col, point.col);
+				c1 = this.mode === 'V' ? this.sheet.rows[0].length - 1 : Math.max(this.anchor.col, point.col);
+			} else {
+				const rows = shape?.rows ?? (vertical ? (count ?? 1) + 1 : 1), cols = shape?.cols ?? (vertical ? 1 : (count ?? 1) + 1);
+				r0 = point.row - (direction === 'up' ? rows - 1 : 0); r1 = r0 + rows - 1;
+				c0 = point.col - (direction === 'left' ? cols - 1 : 0); c1 = c0 + cols - 1;
+			}
+			if (vertical ? r0 === r1 : c0 === c1) { this.message('Selection has no fill destinations'); return false; }
+			if (!this.sheet.fillRange({ r0, c0, r1, c1 }, direction, step)) { this.message('Fill unchanged'); return false; }
+			if (this.anchor && !shape) this.saveVisual();
+			this.anchor = null; this.visualValueObject = false; this.mode = 'n';
+			this.state.marks['['] = { row: r0 + (direction === 'down' ? 1 : 0), col: c0 + (direction === 'right' ? 1 : 0) };
+			this.state.marks[']'] = { row: r1 - (direction === 'up' ? 1 : 0), col: c1 - (direction === 'left' ? 1 : 0) };
+			this.move({ row: direction === 'down' ? r1 : r0, col: direction === 'right' ? c1 : c0 });
+			// Visual motion keys have already been discarded. Remember the shape, not stale seed data.
+			this.commit({ direction, rows: r1 - r0 + 1, cols: c1 - c0 + 1, step });
+			return true;
+		} catch (error) { this.message(error.message); return false; }
 	}
 
 	replay(keys) {
