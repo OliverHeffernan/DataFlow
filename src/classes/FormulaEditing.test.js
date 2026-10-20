@@ -233,4 +233,13 @@ test('built-in shortcut hints expose only the next key through operators and tex
 	keyboard.feed('<Esc><CR>yi');
 	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'w W' && hint.description === 'Word'));
 	assert.ok(!keyboardHints(keyboard).some(hint => ['Cell formula', 'Cell value', 'Whole row / line'].includes(hint.description)));
+	keyboard.feed('<Esc>g');
+	assert.ok(!keyboardHints(keyboard).some(hint => hint.description.startsWith('Fill ')));
+	keyboard.feed('<Esc><Esc>g');
+	assert.deepEqual(keyboardHints(keyboard).filter(hint => hint.description.startsWith('Fill ')), [
+		{ key: 'H', description: 'Fill left' }, { key: 'J', description: 'Fill down' },
+		{ key: 'K', description: 'Fill up' }, { key: 'L', description: 'Fill right' },
+	]);
+	keyboard.feed('<Esc>vg');
+	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'J' && hint.description === 'Fill down'));
 });

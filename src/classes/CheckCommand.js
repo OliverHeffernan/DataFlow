@@ -326,6 +326,14 @@ export default class CheckCommand {
 
 	async handleEnterFromCom(command) {
 		try {
+			if (/^:(?:fill|series)(?:\s|!|$)/.test(command.trim())) {
+				this.keyboard.changeKeys = []; // Failed/no-op Ex input must not leak into the next edit's dot recording.
+				const range = command.trim().match(/^:(fill|series)\s+(down|right|up|left)(?:\s+(\d+))?(?:\s+step\s+(\S+))?$/);
+				if (!range || (range[1] === 'fill' && range[4] !== undefined)) throw new Error('Usage: :fill <direction> [count] or :series <direction> [count] [step <number>]');
+				// Mutate synchronously, before rendering, so macros see each command's completed edit.
+				this.keyboard.fill(range[2], range[3] === undefined ? undefined : Number(range[3]), range[1] === 'series' ? range[4] ?? '1' : undefined);
+				this.render(); return;
+			}
 			const sheetCommand = command.trim().match(/^:(sheets|sheetnew|sheetduplicate|sheetrename|sheetnext|sheetprev|sheetmove|sheetdelete|sheet)(!?)(?:\s+(.*))?$/);
 			if (sheetCommand) return await this.sheetCommand(sheetCommand[1], sheetCommand[3]?.trim(), sheetCommand[2]);
 			const files = new FileManager(() => this.newSheet());
