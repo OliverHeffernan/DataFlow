@@ -20,6 +20,7 @@
 			/>
 		</tbody>
 	</table>
+	<div id="gridOverlays" aria-hidden="true"></div>
 
 </template>
 
@@ -56,12 +57,13 @@
 	-moz-osx-font-smoothing: grayscale;
 	color: #2c3e50;
 	background-color: #091119;
+	outline: none;
 	scrollbar-color: red orange;
 }
 
 body {
 	margin: 0;
-	padding: 0;
+	padding: 0 0 var(--status-bar-height, 64px);
 	background-color: #091119;
 
 }
@@ -81,6 +83,13 @@ table {
 	margin-top: var(--formula-bar-height, 24px);
 	z-index: 10;
 }
+
+.cell { scroll-margin-top: calc(var(--formula-bar-height, 24px) + 28px); scroll-margin-bottom: calc(var(--status-bar-height, 64px) + 24px); }
+#gridOverlays { position: absolute; top: 0; left: 0; width: 0; height: 0; pointer-events: none; z-index: 25; }
+.reference-outline, .spill-outline { position: absolute; box-sizing: border-box; border: 2px solid var(--reference-color); pointer-events: none; }
+.reference-outline { background: color-mix(in srgb, var(--reference-color) 9%, transparent); }
+.spill-outline { border-style: dashed; }
+.formula-string { color: #c9d7bd; }
 
 .labels {
 	color: rgba(255,255,255,0.5);

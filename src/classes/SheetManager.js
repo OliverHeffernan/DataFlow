@@ -1,19 +1,361 @@
 import { ref, shallowRef } from "vue";
 //import { reactive } from "vue";
 import { create, all } from "mathjs";
-import Formulas from "./FormulaFunctions.js";
+import { FormulaError, cellLabel, cellToValue, evaluateFormula, toCellValue } from "./FormulaFunctions.js";
 import SyntaxHighlighting from "./SyntaxHighlighting.js";
 import { evaluateChart } from "./ChartFormula.js";
 
 import HistoryManager from "./HistoryManager.js";
 const historyManager = new HistoryManager();
 
-const formulas = new Formulas();
 const config = {};
 const math = create(all, config);
 
 import VisualManager from "./VisualManager.js";
 const visualManager = new VisualManager();
+
+// Thrown when a formula reads a cell that is already being evaluated.
+class CircularError extends Error {
+	constructor(message = "circular logic detected") {
+		super(message);
+		this.uncatchable = true;
+	}
+}
+
+// Internal: a speculative evaluation (used to discover spill shapes) needed a cell that is still being
+// evaluated further down the stack. The speculation is dropped and recorded as an assumption instead.
+class ProbeAbort extends Error {
+	constructor(base, culprit) {
+		super("speculative evaluation aborted");
+		this.base = base;
+		this.culprit = culprit;
+		this.uncatchable = true;
+	}
+}
+
+const keyOf = (row, col) => `${row}:${col}`;
+const isFormula = raw => typeof raw === "string" && raw[0] === "=";
+const isEmpty = raw => raw === "" || raw == null;
+const errorText = error => error?.message ?? String(error);
+const explain = error => error?.explanation ?? errorText(error);
+const intersects = (row, col, rows, cols, region) => row <= region.r1 && col <= region.c1
+	&& row + rows - 1 >= region.r0 && col + cols - 1 >= region.c0;
+
+/*
+ * One consistent evaluation of the sheet. Nothing is cached between passes, so direct edits to
+ * sheet.rows are always seen. Within a pass every formula is evaluated at most once.
+ *
+ * Spill outputs are derived: an empty cell takes the element of the array formula whose valid spill
+ * footprint covers it. Discovering that may need formulas that are still being evaluated; those are
+ * skipped and recorded as assumptions, which verify() checks afterwards. A broken assumption means the
+ * spill depends on its own output; the owner is blocked (#SPILL!) and the pass is rerun.
+ */
+class CalcPass {
+	constructor(sheet, blocked) {
+		this.sheet = sheet;
+		this.rows = sheet.rows;
+		this.blocked = blocked;
+		this.results = new Map();
+		this.spills = new Map();
+		this.empties = new Map();
+		this.stack = new Map();
+		this.depth = 0;
+		this.probes = [];
+		this.assumptions = [];
+		this.aborts = new Map();
+		this.formulaCells = [];
+		this.rows.forEach((row, r) => row?.forEach((raw, c) => {
+			if (isFormula(raw)) this.formulaCells.push([r, c]);
+		}));
+		this.ctx = {
+			ref: (row, col) => this.formulaRead(row, col, false),
+			range: (r0, c0, r1, c1) => {
+				for (const [row, col] of [[r0, c0], [r1, c1]]) {
+					if (!this.inSheet(row, col)) throw new FormulaError("#REF!", `Range ${cellLabel(r0, c0)}:${cellLabel(r1, c1)} extends outside the sheet`);
+				}
+				const values = [];
+				for (let row = r0; row <= r1; row++) {
+					const line = [];
+					for (let col = c0; col <= c1; col++) line.push(this.formulaRead(row, col, true));
+					values.push(line);
+				}
+				return values;
+			},
+		};
+	}
+
+	raw(row, col) {
+		return this.rows[row]?.[col] ?? "";
+	}
+
+	inSheet(row, col) {
+		return Number.isInteger(row) && Number.isInteger(col) && row >= 0 && col >= 0
+			&& row < this.rows.length && col < (this.rows[row]?.length ?? 0);
+	}
+
+	enter(key) {
+		if (this.stack.has(key)) {
+			const index = this.stack.get(key);
+			const base = this.probes.at(-1);
+			if (base !== undefined && index < base) throw new ProbeAbort(base, key);
+			throw new CircularError();
+		}
+		this.stack.set(key, this.depth++);
+	}
+
+	leave(key) {
+		this.stack.delete(key);
+		this.depth--;
+	}
+
+	probe(fn) {
+		const base = this.depth;
+		this.probes.push(base);
+		try {
+			return { value: fn() };
+		} catch (error) {
+			if (error instanceof ProbeAbort && error.base === base) return { aborted: true };
+			if (error instanceof ProbeAbort) throw error;
+			return { error };
+		} finally {
+			this.probes.pop();
+		}
+	}
+
+	// A needed result is still in progress. Inside a speculation started above it, abort that speculation
+	// (it is retried or assumed by its caller); otherwise the caller records an assumption.
+	inProgress(key) {
+		const base = this.probes.at(-1);
+		if (base !== undefined && this.stack.get(key) < base) throw new ProbeAbort(base, key);
+	}
+
+	assume(row, col, region) {
+		this.assumptions.push({ row, col, ...region });
+	}
+
+	// Raw formula result (scalar or 2D array); throws formula errors.
+	result(row, col) {
+		const key = keyOf(row, col);
+		const cached = this.results.get(key);
+		if (cached) {
+			if ("error" in cached) throw cached.error;
+			return cached.value;
+		}
+		// It needed an in-progress cell before and would reach it again, so abort the speculation early.
+		const culprit = this.aborts.get(key);
+		const base = this.probes.at(-1);
+		if (base !== undefined && this.stack.get(culprit) < base) throw new ProbeAbort(base, culprit);
+		this.enter(key);
+		try {
+			const value = this.compute(row, col);
+			this.results.set(key, { value });
+			return value;
+		} catch (error) {
+			if (error instanceof ProbeAbort) this.aborts.set(key, error.culprit);
+			else this.results.set(key, { error });
+			throw error;
+		} finally {
+			this.leave(key);
+		}
+	}
+
+	compute(row, col) {
+		const raw = this.raw(row, col);
+		if (/^=\s*CHART\b/.test(raw)) {
+			try {
+				return evaluateChart(raw, row, col, this.sheet);
+			} catch (error) {
+				if (error instanceof ProbeAbort) throw error;
+				if (error instanceof CircularError) throw new CircularError(`Chart: ${error.message}`);
+				throw new Error(`Chart: ${error.message}`);
+			}
+		}
+		return evaluateFormula(raw, row, col, this.ctx);
+	}
+
+	// Full cell value: stored text, formula result (whole 2D array at an array source) or spilled element.
+	cellValue(row, col) {
+		if (!this.inSheet(row, col)) return "";
+		const raw = this.raw(row, col);
+		if (isEmpty(raw)) return this.covered(row, col);
+		if (!isFormula(raw)) return raw;
+		const value = this.result(row, col);
+		if (Array.isArray(value)) {
+			const state = this.spillState(row, col);
+			if (!state.ok) throw new FormulaError("#SPILL!", state.reason);
+		}
+		return value;
+	}
+
+	// Value seen by formula references; `element` selects the top-left element of an array source.
+	formulaRead(row, col, element) {
+		if (!this.inSheet(row, col)) throw new FormulaError("#REF!", `${cellLabel(row, col)} is outside the sheet`);
+		const raw = this.raw(row, col);
+		let value;
+		if (isEmpty(raw)) value = this.covered(row, col);
+		else if (!isFormula(raw)) value = cellToValue(raw);
+		else {
+			value = this.result(row, col);
+			if (Array.isArray(value)) {
+				const state = this.spillState(row, col);
+				if (!state.ok) throw new FormulaError("#SPILL!", `${cellLabel(row, col)} cannot spill: ${state.reason}`);
+				if (element) value = value[0][0];
+			}
+		}
+		if (value?.kind === "chart") throw new Error("Chart cells cannot be used in numeric formulas");
+		return value;
+	}
+
+	// Array result of a formula cell if it can be known now; otherwise records an assumption.
+	peek(row, col, region) {
+		const key = keyOf(row, col);
+		if (this.blocked.has(key)) return null;
+		const cached = this.results.get(key);
+		if (cached) return "error" in cached || !Array.isArray(cached.value) ? null : cached.value;
+		// A formula that needed an in-progress cell would need it again: skip it while that cell is in progress.
+		if (this.stack.has(key) || this.stack.has(this.aborts.get(key))) {
+			this.inProgress(this.stack.has(key) ? key : this.aborts.get(key));
+			this.assume(row, col, region);
+			return null;
+		}
+		const outcome = this.probe(() => this.result(row, col));
+		if (outcome.aborted) {
+			this.assume(row, col, region);
+			return null;
+		}
+		return Array.isArray(outcome.value) ? outcome.value : null;
+	}
+
+	// Value of an empty cell: the element of the valid spill covering it, or "".
+	covered(row, col) {
+		const key = keyOf(row, col);
+		if (this.empties.has(key)) return this.empties.get(key);
+		const region = { r0: row, c0: col, r1: row, c1: col };
+		let found = "";
+		for (const [r, c] of this.formulaCells) {
+			if (r > row) break;
+			if (c > col) continue;
+			const value = this.peek(r, c, region);
+			if (!value || !intersects(r, c, value.length, value[0].length, region)) continue;
+			if (this.stack.has(`spill:${keyOf(r, c)}`)) {
+				this.inProgress(`spill:${keyOf(r, c)}`);
+				this.assume(r, c, region);
+				continue;
+			}
+			if (this.spillState(r, c).ok) {
+				found = value[row - r][col - c];
+				break;
+			}
+		}
+		this.empties.set(key, found);
+		return found;
+	}
+
+	baseProblem(row, col, rows, cols) {
+		const range = `${cellLabel(row, col)}:${cellLabel(row + rows - 1, col + cols - 1)}`;
+		for (let r = row; r < row + rows; r++) {
+			if (!this.inSheet(r, col + cols - 1)) return `Spill range ${range} (${rows}×${cols}) extends beyond the edge of the sheet`;
+		}
+		for (let r = row; r < row + rows; r++) {
+			for (let c = col; c < col + cols; c++) {
+				if ((r !== row || c !== col) && !isEmpty(this.raw(r, c))) {
+					return `Spill range ${range} is blocked by non-empty cell ${cellLabel(r, c)}`;
+				}
+			}
+		}
+		return null;
+	}
+
+	spillState(row, col) {
+		const key = keyOf(row, col);
+		if (this.spills.has(key)) return this.spills.get(key);
+		const value = this.result(row, col);
+		const rows = value.length;
+		const cols = value[0].length;
+		const range = `${cellLabel(row, col)}:${cellLabel(row + rows - 1, col + cols - 1)}`;
+		const state = { row, col, rows, cols, ok: false, reason: "" };
+		const marker = `spill:${key}`;
+		this.enter(marker);
+		try {
+			const problem = this.baseProblem(row, col, rows, cols);
+			if (this.blocked.has(key)) state.reason = `Spill range ${range} depends on its own output (spill cycle)`;
+			else if (problem) state.reason = problem;
+			else {
+				const other = this.overlapping(row, col, rows, cols);
+				if (other) state.reason = `Spill range ${range} overlaps the spill range of ${other}`;
+				else state.ok = true;
+			}
+		} finally {
+			this.leave(marker);
+		}
+		this.spills.set(key, state);
+		return state;
+	}
+
+	overlapping(row, col, rows, cols) {
+		const region = { r0: row, c0: col, r1: row + rows - 1, c1: col + cols - 1 };
+		for (const [r, c] of this.formulaCells) {
+			if (r > region.r1) break;
+			if (c > region.c1 || (r === row && c === col)) continue;
+			const value = this.peek(r, c, region);
+			if (!value || !intersects(r, c, value.length, value[0].length, region)) continue;
+			if (this.baseProblem(r, c, value.length, value[0].length) === null) return cellLabel(r, c);
+		}
+		return null;
+	}
+
+	// Owners whose spill would cover a cell that was assumed not to be covered (spill cycles).
+	verify() {
+		const broken = new Set();
+		for (let i = 0; i < this.assumptions.length; i++) {
+			const { row, col, ...region } = this.assumptions[i];
+			const key = keyOf(row, col);
+			if (this.blocked.has(key) || broken.has(key)) continue;
+			let value;
+			try {
+				value = this.result(row, col);
+			} catch {
+				continue;
+			}
+			if (!Array.isArray(value) || !intersects(row, col, value.length, value[0].length, region)) continue;
+			if (this.baseProblem(row, col, value.length, value[0].length) === null) broken.add(key);
+		}
+		return [...broken];
+	}
+
+	snapshot() {
+		const values = this.rows.map(row => (row ?? []).map(raw => raw ?? ""));
+		const spills = new Map();
+		const errors = new Map();
+		for (const [row, col] of this.formulaCells) {
+			const key = keyOf(row, col);
+			let value;
+			try {
+				value = this.result(row, col);
+			} catch (error) {
+				values[row][col] = errorText(error);
+				errors.set(key, explain(error));
+				continue;
+			}
+			if (!Array.isArray(value)) {
+				values[row][col] = toCellValue(value);
+				continue;
+			}
+			const state = this.spillState(row, col);
+			if (!state.ok) {
+				values[row][col] = "#SPILL!";
+				errors.set(key, state.reason);
+				continue;
+			}
+			const owner = { row, col, rows: state.rows, cols: state.cols };
+			value.forEach((line, i) => line.forEach((element, j) => {
+				values[row + i][col + j] = toCellValue(element);
+				spills.set(keyOf(row + i, col + j), { ...owner });
+			}));
+		}
+		return { values, spills, errors };
+	}
+}
 
 export default class SheetManager {
 	constructor() {
@@ -25,7 +367,11 @@ export default class SheetManager {
 		this.rows = [];
 		this.styles = [];
 		this.cellValues = shallowRef([]);
-		this.evaluating = new Set();
+		// derived by recalculate(): "row:col" -> { row, col, rows, cols } of the array formula spilling there
+		this.spillCells = new Map();
+		// derived by recalculate(): "row:col" -> readable explanation of the error shown in that cell
+		this.cellErrors = new Map();
+		this.pass = null;
 		this.defaultBG = "#091119";
 		this.defaultFG = "white";
 
@@ -183,71 +529,60 @@ export default class SheetManager {
 		}
 	}
 
-	// get the value of a specific cell
-	getValue(row, col) {
-		const key = `${row}:${col}`;
-		const nested = this.evaluating.size > 0;
-		if (this.evaluating.has(key)) throw new Error("circular logic detected");
-		this.evaluating.add(key);
+	// Run fn inside one evaluation pass (reusing the active pass for nested calls such as charts).
+	runPass(fn) {
+		if (this.pass) return fn(this.pass);
+		const blocked = new Set();
 		try {
-			return this.evaluateCell(row, col);
-		} catch (error) {
-			if (nested) throw error;
-			return error.message;
+			for (let attempt = 0; ; attempt++) {
+				const pass = new CalcPass(this, blocked);
+				this.pass = pass;
+				const result = fn(pass);
+				const broken = pass.verify();
+				if (!broken.length || attempt > pass.formulaCells.length) return result;
+				broken.forEach(key => blocked.add(key));
+			}
 		} finally {
-			this.evaluating.delete(key);
+			this.pass = null;
 		}
 	}
 
-	evaluateCell(row, col) {
-		let expr = this.getFormula(row, col);
-
-		// if the cell is not a formula, return the expression with no changes
-		if (expr[0] !== "=") {
-			return expr;
-		}
-		if (/^=\s*CHART\b/.test(expr)) {
+	// Value of a cell: stored text, a formula result (the full 2D array at an array formula), or the
+	// spilled element of an empty cell. Top-level calls return errors as their message; nested calls
+	// (during evaluation, e.g. from charts) throw them.
+	getValue(row, col) {
+		row = Number(row);
+		col = Number(col);
+		if (this.pass) return toCellValue(this.pass.cellValue(row, col));
+		return this.runPass(pass => {
 			try {
-				return evaluateChart(expr, row, col, this);
+				return toCellValue(pass.cellValue(row, col));
 			} catch (error) {
-				throw new Error(`Chart: ${error.message}`);
+				return errorText(error);
 			}
-		}
-		// remove the equals sign from the expression
-		expr = expr.substring(1);
+		});
+	}
 
-		// replacing all variables and relative references
-		expr = formulas.replaceVariables(expr, row, col);
+	// Like getValue, but an array formula gives the element displayed in its own cell.
+	getElementValue(row, col) {
+		const value = this.getValue(row, col);
+		return Array.isArray(value) ? value[0][0] : value;
+	}
 
-		// replacing curly brace calcs with a number result
-		expr = formulas.evaluateRefCalcs(expr, this);
-		// replacing square brace calcs with a letter result for col references
-		expr = formulas.evaluateLetterRefCalcs(expr, this);
-		// remove all white space
-		expr = expr.replaceAll(" ", "");
-		// replacing cell ranges with string objects containing the sum and array.
-		// replace cell ranges (e.g. A0:A20) with objects
-		expr = formulas.replaceCellRanges(expr, row, col, this);
-		if (expr === "circular") return "circular logic detected";
-		// replacing SUM with its value
-		expr = formulas.replaceSUM(expr);
-		expr = formulas.replaceAVG(expr);
-		// replacing SUMIF with its value
-		// SUMIF(conditionRange| criteria| valueRange)
-		expr = formulas.replaceSUMIF(expr);
-		expr = formulas.replaceCOUNTIF(expr);
-		expr = formulas.replaceAVGIF(expr);
-		// replacing COUNT with the count
-		expr = formulas.replaceCOUNT(expr);
-		// replacing cell references with their values
-		expr = formulas.replaceReferences(expr, this);
+	// Evaluate the formula of a cell, throwing errors.
+	evaluateCell(row, col) {
+		return this.runPass(pass => toCellValue(isFormula(pass.raw(row, col)) ? pass.result(row, col) : pass.raw(row, col)));
+	}
 
-		// try to evaluate the expreession, if it fails, return the error message.
-		try {
-			return math.evaluate(expr);
-		} catch (e) {
-			return e.message;
-		}
+	// Recompute every cell value, spill output and error explanation from sheet.rows (DOM-free).
+	recalculate() {
+		const { values, spills, errors } = this.runPass(pass => pass.snapshot());
+		this.spillCells.clear();
+		spills.forEach((value, key) => this.spillCells.set(key, value));
+		this.cellErrors.clear();
+		errors.forEach((value, key) => this.cellErrors.set(key, value));
+		this.cellValues.value = values;
+		return values;
 	}
 
 	columnLabel(col) {
@@ -409,7 +744,7 @@ export default class SheetManager {
 	}
 
 	getCopyValue(row, col) {
-		const value = this.getValue(row, col);
+		const value = this.getElementValue(row, col);
 		return value?.kind === "chart" ? this.getFormula(row, col) : value;
 	}
 
@@ -528,35 +863,31 @@ export default class SheetManager {
 		let commandLine = document.getElementById("commandLine");
 	}
 
-	loadFromClipboard() {
-		let commandLine = document.getElementById("commandLine");
-		//let str = navigator.clipboard.readText();
-		let str = commandLine.value;
+	async loadFromClipboard() {
+		let str = await navigator.clipboard.readText();
 
 		if (str === "") {
-			commandLine.placeholder =
-				"Paste the JSON string here, then click 'Load from clipboard'";
+			this.setPlaceholder("Copy a sheet's JSON before loading from the clipboard");
 			return;
 		}
 		let data = JSON.parse(str);
 		this.rows = data;
 		this.loadAllCells(data.length, data[0].length);
-		commandLine.value = "";
 		this.clearPlaceholder();
 	}
 
 	clearPlaceholder() {
 		let commandLine = document.getElementById("commandLine");
-		commandLine.placeholder = "";
+		commandLine.dataset.message = "";
 	}
 
 	setPlaceholder(str) {
 		let commandLine = document.getElementById("commandLine");
-		commandLine.placeholder = str;
+		commandLine.dataset.message = str;
 	}
 
 	loadAllCells(r, c) {
-		this.cellValues.value = this.rows.map((row, i) => row.map((_, j) => this.getValue(i, j)));
+		this.recalculate();
 
 		// checks if new cells are being created, if they are, then it lets the styles be loaded once it is all mounted, otherwise it loads the styles right away.
 		if (r == null) this.loadStyles();

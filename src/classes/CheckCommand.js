@@ -1,4 +1,4 @@
-import { nextTick } from 'vue';
+import { nextTick, shallowRef } from 'vue';
 import { isTauri, invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
 import SheetManager from './SheetManager.js';
@@ -9,6 +9,9 @@ import LaunchManager from './LaunchManager.js';
 import VimKeyboard from './VimKeyboard.js';
 import { compare, offset } from './VimMotions.js';
 import { configTemplate } from './LuaKeybindings.js';
+import { formulaAssist, formulaReferences } from './FormulaEditing.js';
+import { keyboardHints } from './KeyboardHints.js';
+import SyntaxHighlighting from './SyntaxHighlighting.js';
 
 export default class CheckCommand {
 	constructor() {
@@ -17,6 +20,7 @@ export default class CheckCommand {
 		this.sheet = new SheetManager();
 		this.history = new HistoryManager();
 		this.visual = new VisualManager();
+		this.ui = shallowRef({ hints: [], assist: { suggestions: [], signature: null }, error: '', spill: '' });
 		this.keyboard = new VimKeyboard(this.sheet, {
 			render: () => this.render(),
 			message: text => this.setPhMessage(text),
@@ -34,7 +38,9 @@ export default class CheckCommand {
 		this.loadConfig().catch(error => this.setPhMessage(`init.lua: ${error.message}`));
 	}
 	get mode() { return this.keyboard.mode; }
-	setPhMessage(text) { document.getElementById('commandLine').placeholder = text; }
+	setPhMessage(text) { const display = document.getElementById('commandLine'); if (display) display.dataset.message = text; }
+	focus() { document.getElementById('app').focus({ preventScroll: true }); }
+	get footerHeight() { return document.getElementById('statusBar')?.offsetHeight ?? 24; }
 	syncSize() { this.sheet.numOfRows.value = this.sheet.rows.length; this.sheet.numOfCols.value = this.sheet.rows[0].length; }
 	newSheet() { this.keyboard.resetNavigation(); this.history.reset(this.sheet); this.renderedRow = null; this.render(); }
 
@@ -45,10 +51,12 @@ export default class CheckCommand {
 		this.visual.exitVisual();
 		const row = this.sheet.selRow, col = this.sheet.selCol;
 		// Keep scrolling a motion's responsibility; formula edits and Ex typing must not reset the viewport.
-		if (this.renderedRow !== row || this.renderedCol !== col) this.sheet.selectCell(row, col);
+		const moved = this.renderedRow !== row || this.renderedCol !== col;
+		if (moved) this.sheet.selectCell(row, col);
 		this.renderedRow = row; this.renderedCol = col;
 		this.sheet.tempForm = keyboard.formula;
-		this.sheet.updateEditFormula(keyboard.formula);
+		const references = keyboard.context === 'formula' ? formulaReferences(keyboard.formula, row, col, this.sheet) : [];
+		document.getElementById('formText').innerHTML = new SyntaxHighlighting().highlight(keyboard.formula, references);
 		this.sheet.cellCurPos = keyboard.context === 'formula' ? keyboard.formulaCursor : 0;
 		this.renderFormulaCursor();
 		if (keyboard.anchor && keyboard.context === 'sheet') {
@@ -59,10 +67,48 @@ export default class CheckCommand {
 		}
 		const names = { n: 'NORMAL', i: 'INSERT', v: 'VISUAL', V: 'VISUAL-LINE', b: 'VISUAL-BLOCK' };
 		document.getElementById('modeDisplay').innerText = `-- ${keyboard.context === 'formula' ? 'FORMULA ' : ''}${names[keyboard.mode]} --`;
-		const input = document.getElementById('commandLine');
-		input.value = keyboard.command ?? keyboard.pending + keyboard.mappingKeys.join('');
-		input.setAttribute('aria-label', keyboard.command !== null ? 'Command or search' : 'Spreadsheet keyboard commands');
-		input.setSelectionRange(input.value.length, input.value.length);
+		const display = document.getElementById('commandLine');
+		display.textContent = keyboard.command ?? keyboard.pending + keyboard.mappingKeys.join('');
+		display.classList.toggle('typing-command', keyboard.command !== null);
+		const owner = this.sheet.spillCells.get(`${row}:${col}`);
+		this.ui.value = {
+			hints: keyboardHints(keyboard),
+			assist: keyboard.context === 'formula' ? { ...formulaAssist(keyboard.formula, keyboard.formulaCursor), inserting: keyboard.mode === 'i', selected: keyboard.completionIndex } : { suggestions: [], signature: null },
+			error: this.sheet.cellErrors.get(`${row}:${col}`) || '',
+			spill: owner ? `Spill ${this.sheet.columnLabel(owner.col)}${owner.row} · ${owner.rows} × ${owner.cols}${owner.row !== row || owner.col !== col ? ' · Edit source with i / Enter' : ''}` : '',
+		};
+		await nextTick();
+		// Apply the new assistance/footer sizes before ensuring the selection is visible. Waiting for a
+		// ResizeObserver alone leaves the last row underneath a footer that changed height during this render.
+		const style = document.documentElement.style;
+		const heights = { '--formula-bar-height': document.getElementById('topBar').offsetHeight, '--status-bar-height': this.footerHeight };
+		const resized = Object.entries(heights).some(([name, height]) => style.getPropertyValue(name) !== `${height}px`);
+		for (const [name, height] of Object.entries(heights)) style.setProperty(name, `${height}px`);
+		if (moved || resized) this.sheet.getCell(row, col)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+		this.renderOverlays(references, owner);
+	}
+
+	renderOverlays(references, owner) {
+		const layer = document.getElementById('gridOverlays');
+		if (!layer) return;
+		layer.replaceChildren();
+		const outline = (region, color, spill = false) => {
+			const first = this.sheet.getCell(region.r0, region.c0)?.parentElement.getBoundingClientRect();
+			const last = this.sheet.getCell(region.r1, region.c1)?.parentElement.getBoundingClientRect();
+			if (!first || !last) return;
+			const box = document.createElement('div');
+			box.className = spill ? 'spill-outline' : 'reference-outline';
+			box.dataset.range = `${this.sheet.columnLabel(region.c0)}${region.r0}:${this.sheet.columnLabel(region.c1)}${region.r1}`;
+			box.style.setProperty('--reference-color', color);
+			Object.assign(box.style, { left: `${first.left + window.scrollX}px`, top: `${first.top + window.scrollY}px`, width: `${last.right - first.left}px`, height: `${last.bottom - first.top}px` });
+			layer.append(box);
+		};
+		if (owner) outline({ r0: owner.row, c0: owner.col, r1: owner.row + owner.rows - 1, c1: owner.col + owner.cols - 1 }, '#8ba5c6', true);
+		const seen = new Set();
+		for (const ref of references) {
+			const key = JSON.stringify(ref.region);
+			if (ref.region && !seen.has(key)) { outline(ref.region, ref.color); seen.add(key); }
+		}
 	}
 
 	renderFormulaCursor() {
@@ -85,6 +131,7 @@ export default class CheckCommand {
 		const rect = range.getBoundingClientRect(), base = bar.getBoundingClientRect();
 		const x = rect.height ? rect.left - base.left + bar.scrollLeft : 0, y = rect.height ? rect.top - base.top + bar.scrollTop : 0;
 		cursor.className = keyboard.mode === 'i' ? 'i' : 'n';
+		cursor.hidden = keyboard.context !== 'formula';
 		Object.assign(cursor.style, { marginLeft: '0', left: `${x}px`, top: `${y}px`, width: rect.width ? `${rect.width}px` : '1ch' });
 		if (keyboard.context !== 'formula') return;
 		if (x < bar.scrollLeft) bar.scrollLeft = x;
@@ -114,29 +161,47 @@ export default class CheckCommand {
 		} else highlight(utf16(offset(rows, start)), utf16(offset(rows, end) + 1));
 	}
 
+	// Native controls and dialogs own their input. The spreadsheet receives keys regardless of which cell is focused.
+	acceptsInput(event) {
+		return !event.defaultPrevented && !event.target?.closest?.('input, textarea, select, [contenteditable="true"], [role="dialog"], [data-keyboard-ignore]');
+	}
+	connectInput() {
+		const root = document.getElementById('app');
+		root.tabIndex = 0; root.setAttribute('aria-label', 'Spreadsheet workspace'); root.setAttribute('role', 'region');
+		const keydown = event => this.handleKeydown(event);
+		const paste = event => {
+			if (!this.acceptsInput(event) || !(this.keyboard.mode === 'i' || this.keyboard.command !== null)) return;
+			event.preventDefault(); this.insertText(event.clipboardData.getData('text/plain'));
+		};
+		const composition = event => {
+			if (this.acceptsInput(event) && (this.keyboard.mode === 'i' || this.keyboard.command !== null)) this.insertText(event.data);
+		};
+		window.addEventListener('keydown', keydown); window.addEventListener('paste', paste); window.addEventListener('compositionend', composition);
+		this.focus(); this.render();
+		return () => {
+			window.removeEventListener('keydown', keydown); window.removeEventListener('paste', paste); window.removeEventListener('compositionend', composition);
+			clearTimeout(this.mappingTimer);
+		};
+	}
 	handleKeydown(event) {
-		if (event.isComposing || event.key === 'Process' || event.metaKey || event.altKey || ['Control', 'Shift', 'Alt', 'Meta'].includes(event.key)) return;
-		if (event.ctrlKey && event.key.toLowerCase() === 'v' && (this.keyboard.mode === 'i' || this.keyboard.command !== null)) return;
+		if (!this.acceptsInput(event) || event.isComposing || event.key === 'Process' || event.key === 'Dead' || event.altKey || ['Control', 'Shift', 'Alt', 'Meta'].includes(event.key)) return;
+		if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v' && (this.keyboard.mode === 'i' || this.keyboard.command !== null)) return;
+		if (event.metaKey) return;
 		const names = { Escape: 'Esc', Enter: 'CR', Backspace: 'BS', Delete: 'Del', ArrowLeft: 'Left', ArrowRight: 'Right', ArrowUp: 'Up', ArrowDown: 'Down', ' ': 'Space' };
 		let key = names[event.key] || event.key;
-		if (event.ctrlKey) key = `C-${key.length === 1 ? key.toLowerCase() : key}`;
-		else if (event.shiftKey && ['Left', 'Right', 'Up', 'Down'].includes(key)) key = `S-${key}`;
+		if (event.ctrlKey) key = `C-${event.shiftKey ? 'S-' : ''}${key.length === 1 ? key.toLowerCase() : key}`;
+		else if (event.shiftKey && ['CR', 'Left', 'Right', 'Up', 'Down'].includes(key)) key = `S-${key}`;
+		else if (event.shiftKey && /^[hjkl]$/i.test(key)) key = key.toUpperCase();
 		if (key.length > 1) key = `<${key}>`;
 		event.preventDefault();
 		this.keyboard.key(key);
 	}
-	// IME, paste and accessibility text insertion arrive as input rather than keydown.
-	checkCommandDirect(event) {
-		if (event.isComposing) return;
-		if (event.inputType === 'deleteContentBackward') this.keyboard.key('<BS>');
-		else this.insertText(event.data || '');
-	}
-	insertText(text) { for (const char of text) this.keyboard.key(char); this.render(); }
+	insertText(text) { for (const char of text) this.keyboard.key(char === '\n' && this.keyboard.command === null ? '<S-CR>' : char, false); this.render(); }
 	checkCommand(command) { this.keyboard.feed(command); }
 	handleEsc() { this.keyboard.key('<Esc>'); }
 	handleEnter() { this.keyboard.key('<CR>'); }
 	changeMode(mode) { if (mode === 'n') this.keyboard.escape(); else this.keyboard.mode = mode; this.render(); }
-	editCell() { this.keyboard.escape(); this.keyboard.context = 'formula'; this.keyboard.formulaCursor = 0; this.keyboard.feed('i'); }
+	editCell() { this.keyboard.escape(); this.keyboard.editOwner(); this.keyboard.context = 'formula'; this.keyboard.formulaCursor = 0; this.keyboard.feed('i'); }
 
 	viewport(keyboard = this.keyboard) {
 		if (keyboard.context === 'formula') {
@@ -147,7 +212,7 @@ export default class CheckCommand {
 		const top = document.getElementById('topBar').getBoundingClientRect().bottom + document.querySelector('thead').offsetHeight;
 		for (let row = 0; row < this.sheet.rows.length; row++) {
 			const rect = this.sheet.getCell(row, this.sheet.selCol)?.getBoundingClientRect();
-			if (rect && rect.top >= top && rect.bottom <= window.innerHeight - 24) visibleRows.push(row);
+			if (rect && rect.top >= top && rect.bottom <= window.innerHeight - this.footerHeight) visibleRows.push(row);
 		}
 		for (let col = 0; col < this.sheet.rows[0].length; col++) {
 			const rect = this.sheet.getCell(this.sheet.selRow, col)?.getBoundingClientRect();
@@ -158,7 +223,7 @@ export default class CheckCommand {
 	scroll(action, count, explicit = false) {
 		const keyboard = this.keyboard, formula = keyboard.context === 'formula', bar = document.getElementById('newFormBar');
 		const rect = (formula ? document.getElementById('formCursor') : this.sheet.getCell(this.sheet.selRow, this.sheet.selCol)).getBoundingClientRect();
-		const bounds = formula ? bar.getBoundingClientRect() : { top: document.getElementById('topBar').getBoundingClientRect().bottom + document.querySelector('thead').offsetHeight, left: 75, right: window.innerWidth, bottom: window.innerHeight - 24 };
+		const bounds = formula ? bar.getBoundingClientRect() : { top: document.getElementById('topBar').getBoundingClientRect().bottom + document.querySelector('thead').offsetHeight, left: 75, right: window.innerWidth, bottom: window.innerHeight - this.footerHeight };
 		const width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
 		const scroll = (x, y) => formula ? bar.scrollBy(x, y) : window.scrollBy(x, y);
 		if (['zz', 'z.', 'zt', 'z<CR>', 'zb', 'z-'].includes(action)) {

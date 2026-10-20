@@ -21,12 +21,12 @@ onUnmounted(() => resize.disconnect());
 function handleEnter() {
 	sheetManager.setFormula();
 	checkCommand.changeMode("n");
-	document.getElementById("commandLine").focus();
+	checkCommand.focus();
 }
 
 function handleEscape() {
 	checkCommand.changeMode("n");
-	document.getElementById("commandLine").focus();
+	checkCommand.focus();
 }
 
 function selectCell() {
@@ -41,7 +41,7 @@ function selectCell() {
 
 function focusFormulaBar() {
 	checkCommand.editCell();
-	document.getElementById("commandLine").focus();
+	checkCommand.focus();
 }
 
 </script>

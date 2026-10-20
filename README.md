@@ -61,7 +61,7 @@ AVG averages all values given in a range.
 #### COUNT: `COUNT(range)`
 Returns the number of cells in the range.
 
-#### IF: `SUMIF(conditionRange, criteria, valueRange)`
+#### SUMIF: `SUMIF(conditionRange, criteria, valueRange)`
 SUMIF allows you to filter through the range, valueRange, adding it if a corresponding cell is equal to the criteria. This is useful for things like budgets, where you may want to see a sum of your spending in certain categories.
 
 criteria is of format =3
@@ -72,7 +72,7 @@ below is an example of a SUMIF function being used.
 
 The above function would return a sum of all values on column B, within rows 0 and 10, where the corresponding value in column A is 5.
 
-There is currently only support for = criterion.
+Criteria support `=`, `<>` / `!=` / `!`, `<`, `>`, `<=`, and `>=`. Criteria may be quoted (e.g. `">5"`) or use the existing unquoted syntax (e.g. `>5`).
 
 There is currently no support for cell ranges being provided in the criteria.
 
@@ -82,6 +82,46 @@ There are more IF functions below:
 `SUMIF`: sum if
 
 All of the above if functions take the same parameters as SUMIF.
+
+### Nested formulas and dynamic arrays
+
+Functions accept other functions as arguments. Ranges and array results retain their rectangular shape:
+
+```text
+=IF(C1>0, "Profit", "Loss")
+=VSTACK(FILTER(A1:C6, C1:C6>100), FILTER(A1:C6, C1:C6<40))
+=SUM(FILTER(C1:C6, B1:B6="North"))
+=SORT(UNIQUE(FILTER(A1:C6, C1:C6>0)), 2, -1)
+```
+
+| Function | Behavior |
+| --- | --- |
+| `IF(condition, whenTrue, [whenFalse])` | Evaluate only the selected branch; the condition must be scalar. Omitted `whenFalse` defaults to FALSE. |
+| `IFERROR(value, fallback)` | Use the fallback if evaluating the value fails. Literal error-looking strings are still text; circular references remain errors. |
+| `FILTER(array, include, [ifEmpty])` | Keep rows whose corresponding mask is true. The mask must have one value per row. No matches returns `ifEmpty`, or `#CALC!` if omitted. |
+| `VSTACK(array, …)` | Stack arrays vertically. All inputs must have the same width. |
+| `HSTACK(array, …)` | Stack arrays horizontally. All inputs must have the same height. |
+| `SORT(array, [columnIndex], [sortOrder])` | Sort rows by a **zero-based** column within the input array (default 0), ascending (1) or descending (-1). Blanks sort last. |
+| `UNIQUE(array)` | Keep distinct rows, in their original order. |
+| `AND(condition, …)`, `OR(condition, …)`, `NOT(condition)` | Combine scalar conditions or elementwise array masks. |
+
+Comparisons accept `=`, `<>`, `<`, `>`, `<=`, `>=`, and mathjs `==`/`!=`. Comparisons and arithmetic apply elementwise to ranges; scalars broadcast, while two arrays must have the same dimensions. Text is case-sensitive. Numeric cell text is treated as numbers; quoted text remains text. Existing `SUM`, `AVG`/`MEAN`, and `COUNT` work on nested array results. For compatibility, COUNT counts cells (including blanks/text) and AVG divides the numeric sum by that cell count.
+
+Real-number formulas use 64-significant-digit decimal arithmetic, including intermediate references and spilled values. This avoids binary floating-point artifacts such as `0.1 + 0.2` displaying `0.30000000000000004`. Results are not rounded to a fixed number of decimal places. Display, chart and clipboard values still use native-number precision (about 16 significant digits); functions that only support native numbers use that precision too. Repeating fractions and irrational numbers remain finite-precision approximations.
+
+An array formula **spills** into empty cells below and to its right. A dashed outline identifies the selected spill and the footer names its source. Press `i` or Enter on a spill child to edit its source formula. Outputs are derived, not independently stored. Source changes, undo/redo and reopening a sheet rebuild them. A single reference to an array source passes the full array to another formula; a range reads each displayed element. Charts can read spilled values too.
+
+Occupied destinations, overlapping spills and sheet edges produce `#SPILL!` without overwriting anything. The footer and the cell tooltip explain errors. A FILTER mask or stack dimension mismatch gives `#VALUE!`; out-of-sheet references give `#REF!`. This is a focused array-function set, not complete Excel formula compatibility: FILTER filters rows, IF conditions are scalar, and stacks reject incompatible dimensions instead of padding them.
+
+### Editing formulas with the keyboard
+
+In FORMULA INSERT, **Ctrl-h/j/k/l** inserts a relative reference to a nearby cell. Further presses adjust that reference. **Shift-h/j/k/l** extends the active reference into a rectangular range, anchored at the current reference. Start with Ctrl-direction, then use Shift-direction to extend. Normal typing or moving the text caret finishes the reference; shifted letters outside a reference session remain text so function names are typeable. The next Ctrl-direction shortcut starts from the edited cell again.
+
+For example, editing D5: Ctrl-h inserts `[-1]{}` (C5), another Ctrl-h changes it to `[-2]{}` (B5), and Shift-k changes it to `[-2]{-1}:[-2]{}` (B4:B5). All offsets remain relative when the formula is copied elsewhere. Movement stops at sheet edges.
+
+While editing, absolute references, `[]{}` relative references, calculated references, and ranges are colored to match their grid outlines. Repeated references to the same cells share a color. Quoted text is never treated as a reference. Invalid/incomplete references do not highlight unrelated cells.
+
+Type a function prefix and press **Tab** to complete its name and parentheses; use Up/Down to choose a suggestion. Signature help highlights the current argument, including inside nested calls. **F4** toggles the reference under or immediately before the caret between ordinary coordinates and DataFlow-relative notation. On keyboards that reserve function keys, use Fn-F4 or remap `<F4>` in Lua.
 
 ### Formula-defined charts: `CHART()`
 
@@ -115,11 +155,11 @@ Text arguments use double quotes; escape embedded quotes as `\"` and backslashes
 The builder text is stored in the existing sheet format, so charts survive save/load, undo/redo, and copy/paste. Copying a chart's value also copies its builder formula; the pasted chart is anchored to its new cell. There is no image export, drag-resizing, or drag-positioning in this version; use builder methods to size and position charts.
 
 ## Commands
-Commands are entered into the command line at the bottom of the window.
+Type commands directly while the spreadsheet is focused. The bottom bar is a read-only display of commands, pending keys and messages, not an input field. Available shortcuts change with the current mode and prefix, including descriptions from Lua mappings. Native text controls such as the cell picker keep their own input behavior.
 
 **Sheet normal:** `hjkl` and counted arrows move between cells. `0`, `^`, `$`, `g_`, words, searches, marks, viewport motions and operators use spreadsheet meanings.
 
-**Formula normal:** press `Enter` to navigate the selected cell's text with the same motion vocabulary. `i/a/I/A` enter insert mode. `Esc` leaves insert mode; another `Esc` returns to the sheet. `Enter` commits an insert; `Ctrl-j` inserts a newline.
+**Formula normal:** press `Enter` to navigate the selected cell's text. `i/a/I/A` enter insert mode. Plain `j/k` leave formula normal and move down/up a cell; `gj/gk` navigate formula text lines. `Esc` leaves insert for formula normal; another `Esc` returns to the sheet. `Enter` commits insert directly to sheet NORMAL without moving cells; `Shift-Enter` inserts a newline.
 
 `v` selects a cell rectangle, `V` selects whole rows, and `Ctrl-v` selects a block. Use `d/c/y` with a motion or selection, `dd/cc/yy` for rows, `p/P` to put, `u/Ctrl-r` to undo/redo, and `.` to repeat an edit. `qa … q` records a macro; `@a` plays it.
 

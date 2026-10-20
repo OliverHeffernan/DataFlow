@@ -4,7 +4,7 @@
 			:id="colNo + ':' + rowNo"
 			class="cell"
 			:aria-label="value?.kind === 'chart' ? (value.title || `${value.type} chart`) : undefined"
-			:title="typeof value === 'string' && value.startsWith('Chart:') ? value : undefined"
+			:title="sheetManager.cellErrors.get(`${rowNo}:${colNo}`) || undefined"
 			@dblclick="handleDblClick"
 			@click="handleClick"
 			@contextmenu.prevent="handleRightClick"
@@ -83,14 +83,14 @@
 		if (event.shiftKey) { keyboard.anchor ||= keyboard.point; keyboard.mode = 'v'; }
 		else { keyboard.anchor = null; keyboard.mode = 'n'; }
 		keyboard.move({ row: props.rowNo, col: props.colNo });
-		document.getElementById("commandLine").focus();
+		checkCommand.focus();
 		return keyboard.render();
 	}
 
 	function handleDblClick() {
 		sheetManager.selectCell(props.rowNo, props.colNo);
 		checkCommand.editCell();
-		document.getElementById("commandLine").focus();
+		checkCommand.focus();
 	}
 
 	async function handleRightClick(event) {

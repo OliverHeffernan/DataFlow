@@ -24,6 +24,7 @@ function vim.keymap.set(modes, lhs, rhs, opts)
   for k, v in pairs(opts) do
     assert(k == "desc" or k == "silent" or (k == "remap" and v == false) or (k == "noremap" and v == true), "unsupported keymap option: " .. k)
   end
+  assert(opts.desc == nil or type(opts.desc) == "string", "desc must be a string")
   if type(modes) == "string" then modes = { modes } end
   assert(type(modes) == "table", "mode must be a string or list")
   for _, mode in ipairs(modes) do
@@ -32,7 +33,7 @@ function vim.keymap.set(modes, lhs, rhs, opts)
       s = s:gsub("<[Ll]eader>", function() return vim.g.mapleader end)
       return s:gsub("<[Ll]ocal[Ll]eader>", function() return vim.g.maplocalleader end)
     end
-    _map(mode, expand(lhs), expand(rhs))
+    _map(mode, expand(lhs), expand(rhs), opts.desc)
   end
 end
 function vim.keymap.del(modes, lhs)
@@ -51,7 +52,8 @@ end
 			else {
 				const rhs = to_jsstring(lauxlib.luaL_checkstring(state, 3));
 				if (lhs.length > 128 || rhs.length > 4096 || mappings.size >= 1000) return lauxlib.luaL_error(state, to_luastring('keymap limit exceeded'));
-				mappings.set(key, { mode: mode === 'v' ? 'x' : mode, lhs: tokenize(lhs), rhs: tokenize(rhs) });
+				const desc = lua.lua_isnoneornil(state, 4) ? '' : to_jsstring(lauxlib.luaL_checkstring(state, 4));
+				mappings.set(key, { mode: mode === 'v' ? 'x' : mode, lhs: tokenize(lhs), rhs: tokenize(rhs), desc });
 			}
 			return 0;
 		});

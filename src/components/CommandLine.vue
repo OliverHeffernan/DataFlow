@@ -1,18 +1,16 @@
 <template>
-	<div id="statusBar" @click="handleClick()">
-		<div id="modeDisplay">-- NORMAL --</div>
-		<input
-			id="commandLine"
-			placeholder="command line here"
-			spellcheck="false"
-			type="text"
-			@input="checkCommand.checkCommandDirect($event)"
-			@paste.prevent="checkCommand.insertText($event.clipboardData.getData('text/plain'))"
-			@keydown="checkCommand.handleKeydown($event)"
-		/>
+	<div id="statusBar" @click="checkCommand.focus()">
+		<div class="status-context" v-if="ui.error || ui.spill" :class="{ 'cell-error': ui.error }" role="status">{{ ui.error || ui.spill }}</div>
+		<div class="command-status">
+			<div id="modeDisplay">-- NORMAL --</div>
+			<div id="commandLine" aria-label="Commands and messages" aria-live="polite" data-message="Type : for commands · i to edit"></div>
+		</div>
+		<div id="shortcutBar" aria-label="Available keyboard shortcuts">
+			<span v-for="(hint, index) in ui.hints" :key="index" class="shortcut"><kbd>{{ hint.key }}</kbd><span>{{ hint.description }}</span></span>
+		</div>
 	</div>
 	<input id="luaConfigInput" type="file" accept=".lua" hidden @change="checkCommand.importConfig($event.target.files[0])" />
-	<div id="webFileUpload">
+	<div id="webFileUpload" role="dialog" aria-label="Open spreadsheet">
 		<input id="fileInput" type="file" />
 		<button id="readFileBtn" @click="openFileWeb()">Read File</button>
 		<button id="cancelButton" @click="closeWebFilePick()">Cancel</button>
@@ -20,22 +18,24 @@
 </template>
 
 <script setup>
+	import { onMounted, onUnmounted } from 'vue';
 	import SheetManager from '../classes/SheetManager.js';
 	const sheetManager = new SheetManager();
 
 	import CheckCommand from '../classes/CheckCommand.js';
 	const checkCommand = new CheckCommand();
-
-	import { save, open } from '@tauri-apps/plugin-dialog';
-	import { readTextFile, BaseDirectory } from '@tauri-apps/plugin-fs';
-	import { invoke } from '@tauri-apps/api/core';
+	const ui = checkCommand.ui;
+	let disconnect;
+	const resize = new ResizeObserver(() => {
+		document.documentElement.style.setProperty('--status-bar-height', `${document.getElementById('statusBar').offsetHeight}px`);
+	});
+	onMounted(() => { disconnect = checkCommand.connectInput(); resize.observe(document.getElementById('statusBar')); window.addEventListener('resize', refresh); });
+	onUnmounted(() => { disconnect?.(); resize.disconnect(); window.removeEventListener('resize', refresh); });
+	function refresh() { checkCommand.render(); }
 
 	function closeWebFilePick() {
 		document.getElementById("webFileUpload").style.display = "none";
-	}
-
-	function setPhMessage(mg) {
-		document.getElementById("commandLine").placeholder = mg;
+		checkCommand.focus();
 	}
 
 	function openFileWeb() {
@@ -46,62 +46,51 @@
 		const reader = new FileReader();
 
 		reader.onload = function(e) {
-			const data = JSON.parse(e.target.result);
-			sheetManager.rows = Array.isArray(data) ? data : data.rows;
-			sheetManager.styles = data.styles || sheetManager.rows.map(row => row.map(() => ({ ...sheetManager.defaultStyling })));
-			sheetManager.numOfRows.value = sheetManager.rows.length;
-			sheetManager.numOfCols.value = sheetManager.rows[0].length;
-			checkCommand.newSheet();
-			sheetManager.loadAllCells();
+			try {
+				const data = JSON.parse(e.target.result);
+				sheetManager.rows = Array.isArray(data) ? data : data.rows;
+				sheetManager.styles = data.styles || sheetManager.rows.map(row => row.map(() => ({ ...sheetManager.defaultStyling })));
+				sheetManager.numOfRows.value = sheetManager.rows.length;
+				sheetManager.numOfCols.value = sheetManager.rows[0].length;
+				sheetManager.loadAllCells();
+				checkCommand.newSheet();
+			} catch (error) { checkCommand.setPhMessage(`Open: ${error.message}`); }
 		}
 
 		reader.readAsText(file);
 
 
-		document.getElementById("webFileUpload").style.display = "none";
-	}
-	function handleClick() {
-		document.getElementById("commandLine").focus();
+		closeWebFilePick();
 	}
 </script>
 <style>
-#commandLine {
-	/*position: fixed;*/
-	/*width: 100%;*/
-	/*bottom: 0;*/
-	width: calc(100% - 70px);
-	color: white;
-	background-color: #15202E;
-	border: none;
-	outline: none;
-	z-index: 60;
-	/*box-shadow: rgba(0,0,0,0.5) 0px 0px 5px 0px;*/
-	text-shadow: 0 0 0 white;
-	margin-left: 10px;
-
-	/*width: calc(100%-100px);*/
-}
-
-#modeDisplay {
-	font-size: 11px;
-	flex-shrink: 0;
-	min-width: 70px;
-	white-space: nowrap;
-}
-
 #statusBar {
 	position: fixed;
-	display: flex;
 	width: 100%;
 	bottom: 0;
-	color: white;
-	background-color: #15202E;
-	border: none;
-	outline: none;
+	color: #dbe6f3;
+	background: #111d2a;
 	z-index: 50;
-	box-shadow: rgba(0,0,0,0.5) 0px 0px 5px 0px;
-	text-shadow: 0 0 0 white;
+	border-top: 1px solid #2a3d51;
+	font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
+
+.command-status { display: flex; align-items: center; min-height: 28px; padding: 0 12px; gap: 16px; }
+#commandLine {
+	flex: 1;
+	min-width: 0;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+#commandLine:empty::before { content: attr(data-message); color: #9aaec3; }
+#commandLine.typing-command::after { content: '▏'; color: #75e2bc; }
+#modeDisplay { flex-shrink: 0; color: #75e2bc; font-size: 11px; white-space: nowrap; }
+#shortcutBar { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 7px 12px; border-top: 1px solid #213247; max-height: 25vh; overflow: auto; }
+.shortcut { display: inline-flex; align-items: center; gap: 7px; color: #9aaec3; white-space: nowrap; }
+kbd { color: #dbe6f3; font: inherit; }
+.shortcut kbd { color: #9fd6ff; }
+.status-context { padding: 5px 12px; border-bottom: 1px solid #213247; color: #afc5df; }
+.status-context.cell-error { color: #ffb5a2; }
 
 #webFileUpload {
 	display: none;
@@ -114,6 +103,7 @@
 	border-radius: 20px;
 	padding: 20px;
 	box-shadow: black 0px 0px 50px;
+	z-index: 80;
 }
 
 #fileInput {
@@ -123,5 +113,5 @@
 #cancelButton {
 	margin-left: 5px;
 }
-
+@media (max-width: 600px) { .command-status { gap: 8px; } #shortcutBar { gap: 6px 14px; font-size: 11px; } }
 </style>

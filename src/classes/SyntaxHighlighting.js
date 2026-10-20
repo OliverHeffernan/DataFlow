@@ -1,77 +1,36 @@
-const operators = ["&#47;", "+", "-", "*", "&lt;", "&gt;", "&#61;"];
-const functions = ["SUM", "SUMIF", "AVG", "AVGIF", "COUNT", "COUNTIF"].sort((a, b) => b.length - a.length);
+import { quotedEnd } from './FormulaEditing.js';
+
 export default class SyntaxHighlighting {
-	highlight(form) {
-		// need to do the equals first, as it can be interfered with when there is an equal sign in the span tags.
-		// this is the same reasons that we do the / first.
-		// there should only be one highlighted equal sign in a formula
-		if (form[0] !== "=") {
-			return form.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-		}/* else {
-			form = form.substring(1);
-		}*/
-
-		if (/^=\s*CHART\b/.test(form)) {
-			// Keep quoted labels intact, including method names, references and brackets.
-			return form.split(/("(?:\\.|[^"\\])*(?:"|$))/g).map((part, i) => {
-				const escaped = this.preventHtmlInjection(part);
-				return i % 2 ? escaped : escaped.replace(
-					/\b(CHART|line|bar|scatter|x|series|title|xLabel|yLabel|size|width|height|position)(?=\s*\()/g,
-					"<span class='function'>$1</span>",
-				);
-			}).join("");
+	highlight(form, references = []) {
+		if (!form.startsWith('=')) return this.preventHtmlInjection(form);
+		const spans = new Map(references.map(ref => [ref.start, ref]));
+		const depths = { '(': 0, '[': 0, '{': 0 }, closes = { ')': '(', ']': '[', '}': '{' };
+		let html = '';
+		for (let i = 0; i < form.length;) {
+			const ref = spans.get(i), char = form[i];
+			if (ref) {
+				html += `<span class="formula-reference" style="color:${ref.color}">${this.preventHtmlInjection(form.slice(i, ref.end))}</span>`;
+				i = ref.end;
+			} else if (char === '"' || char === "'") {
+				const end = quotedEnd(form, i);
+				html += `<span class="formula-string">${this.preventHtmlInjection(form.slice(i, end))}</span>`;
+				i = end;
+			} else {
+				const name = form.slice(i).match(/^[A-Za-z_]+(?=\s*\()/)?.[0];
+				if (name) { html += `<span class="function">${name}</span>`; i += name.length; continue; }
+				const escaped = this.preventHtmlInjection(char);
+				if (Object.hasOwn(depths, char)) html += `<span class="depth${(++depths[char] - 1) % 6 + 1}">${escaped}</span>`;
+				else if (closes[char]) {
+					const open = closes[char], depth = Math.max(1, depths[open]--);
+					html += `<span class="depth${(depth - 1) % 6 + 1}">${escaped}</span>`;
+				} else html += '=+-*/^<>!'.includes(char) ? `<span class="operator">${escaped}</span>` : escaped;
+				i++;
+			}
 		}
-
-		form = this.preventHtmlInjection(form);
-
-
-		for (let i = 0; i < operators.length; i++) {
-			form = form.replaceAll(operators[i], "<span class='operator'>" + operators[i] + "</span>");
-		}
-
-		for (let i = 0; i < functions.length; i++) {
-			form = form.replaceAll(functions[i], "<span class='function'>" + functions[i] + "</span>");
-		}
-		//return "<span class='operator'>=</span>" + form;
-		//
-		form = this.rainbowBraces(form, "(", ")");
-		form = this.rainbowBraces(form, "{", "}");
-		form = this.rainbowBraces(form, "[", "]");
-		return form;
+		return html;
 	}
 
 	preventHtmlInjection(form) {
-		form = form.replaceAll("&", "&amp;");
-		form = form.replaceAll("<", "&lt;");
-		form = form.replaceAll(">", "&gt;");
-		form = form.replaceAll("=", "&#61;");
-		form = form.replaceAll("/", "&#47;");
-		return form;
-	}
-
-	rainbowBraces(form, open, close) {
-		let depth = 0;
-		let returning = "";
-		for (let i = 0; i < form.length; i++) {
-			if (form[i] === open) {
-				depth++;
-				returning += `<span class="depth${this.cycleDepth(depth)}">${form[i]}</span>`;
-			} else if (form[i] === close) {
-				returning += `<span class="depth${this.cycleDepth(depth)}">${form[i]}</span>`;
-				depth--;
-			} else {
-				returning += form[i];
-			}
-		}
-		return returning;
-	}
-
-	cycleDepth(depth) {
-		while (depth > 6) {
-			depth -= 6;
-		}
-
-		depth = Math.max(0, depth);
-		return depth;
+		return form.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 	}
 }

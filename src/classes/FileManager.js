@@ -111,6 +111,6 @@ export default class FileManager {
 	}
 
 	setPhMessage(mg) {
-		document.getElementById("commandLine").placeholder = mg;
+		document.getElementById("commandLine").dataset.message = mg;
 	}
 }

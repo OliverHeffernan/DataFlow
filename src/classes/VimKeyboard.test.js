@@ -194,10 +194,10 @@ test('invalid Lua, unsupported APIs and runaway scripts do not install partial m
 
 test('vertical motions remember the preferred column and sticky end of line', () => {
 	const v = formula('abcdefg\nxy\n123456789');
-	v.feed('5ljj'); assert.deepEqual(v.point, { row: 2, col: 5 });
-	v.feed('$kk'); assert.deepEqual(v.point, { row: 0, col: 6 });
-	v.feed('j'); assert.deepEqual(v.point, { row: 1, col: 1 });
-	v.feed('hjk'); assert.deepEqual(v.point, { row: 1, col: 0 });
+	v.feed('5lgjgj'); assert.deepEqual(v.point, { row: 2, col: 5 });
+	v.feed('$gkgk'); assert.deepEqual(v.point, { row: 0, col: 6 });
+	v.feed('gj'); assert.deepEqual(v.point, { row: 1, col: 1 });
+	v.feed('hgjgk'); assert.deepEqual(v.point, { row: 1, col: 0 });
 });
 
 test('line-ending operators preserve the newline and paragraph operators exclude the next line', () => {
@@ -209,11 +209,11 @@ test('line-ending operators preserve the newline and paragraph operators exclude
 
 test('linewise and blockwise registers put complete lines and columns of formula text', () => {
 	const line = formula('first\nsecond\nthird');
-	line.feed('jddP'); assert.equal(line.formula, 'first\nsecond\nthird');
+	line.feed('gjddP'); assert.equal(line.formula, 'first\nsecond\nthird');
 	const block = formula('abcd\nWXYZ');
 	block.feed('l<C-v>jly0P'); assert.equal(block.formula, 'bcabcd\nXYWXYZ');
 	const change = formula('first\nsecond\nthird');
-	change.feed('jccX<Esc>'); assert.equal(change.formula, 'first\nX\nthird');
+	change.feed('gjccX<Esc>'); assert.equal(change.formula, 'first\nX\nthird');
 });
 
 test('editing shortcuts respect row boundaries in both contexts', () => {
@@ -221,12 +221,12 @@ test('editing shortcuts respect row boundaries in both contexts', () => {
 	sheet.feed('lD'); assert.deepEqual(sheet.sheet.rows, [['a', '', ''], ['d', 'e', 'f']]);
 	sheet.feed('0X'); assert.equal(sheet.sheet.rows[0][0], 'a');
 	const text = formula('first\n  second\nthird');
-	text.feed('jI!<Esc>A?<Esc>'); assert.equal(text.formula, 'first\n  !second?\nthird');
+	text.feed('gjI!<Esc>A?<Esc>'); assert.equal(text.formula, 'first\n  !second?\nthird');
 	text.feed('0D'); assert.equal(text.formula, 'first\n\nthird');
 	text.feed('oadded<Esc>'); assert.equal(text.formula, 'first\n\nadded\nthird');
 	text.feed('0$2r!'); assert.equal(text.formula, 'first\n\nadded\nthird');
 	text.feed('0r!'); assert.equal(text.formula, 'first\n\n!dded\nthird');
-	text.feed('A<C-j>tail<C-[>'); assert.equal(text.formula, 'first\n\n!dded\ntail\nthird');
+	text.feed('A<S-CR>tail<C-[>'); assert.equal(text.formula, 'first\n\n!dded\ntail\nthird');
 	assert.equal(text.mode, 'n');
 	// Physical Ctrl-[ / Ctrl-m events bypass feed's key-notation tokenizer.
 	text.key('i'); text.key('<C-m>'); assert.equal(text.mode, 'n');
@@ -250,7 +250,7 @@ test('comment and conditional motions navigate nested formula text without inven
 	comment.feed('%'); assert.equal(comment.formulaCursor, 4);
 	comment.feed('%'); assert.equal(comment.formulaCursor, 0);
 	const conditional = formula('#if A\n#if B\nb\n#endif\n#else\nc\n#endif');
-	conditional.feed('2j[#'); assert.equal(conditional.point.row, 1);
+	conditional.feed('2gj[#'); assert.equal(conditional.point.row, 1);
 	conditional.feed(']#'); assert.equal(conditional.point.row, 3);
 	conditional.feed(']#'); assert.equal(conditional.point.row, 4);
 	conditional.feed('%'); assert.equal(conditional.point.row, 6);
@@ -281,4 +281,64 @@ vim.keymap.set('n', '<LocalLeader>x', 'G')
 vim.keymap.del('n', '<LocalLeader>x')`);
 	v.feed(' '); assert.equal(v.point.row, 0);
 	assert.equal(v.mappings.length, 1);
+});
+
+test('formula NORMAL j/k leave to sheet rows while operators, visual and gj/gk stay text motions', () => {
+	const grid = () => { const v = keyboard(Array.from({ length: 6 }, (_, r) => ['a\nb\nc', `r${r}`])); v.feed('2j<CR>'); return v; };
+	const down = grid(); down.feed('j'); assert.equal(down.context, 'sheet'); assert.deepEqual(down.point, { row: 3, col: 0 });
+	const counted = grid(); counted.feed('9j'); assert.deepEqual([counted.context, counted.mode, counted.point.row], ['sheet', 'n', 5]);
+	const up = grid(); up.feed('2k'); assert.deepEqual(up.point, { row: 0, col: 0 });
+	const clampUp = grid(); clampUp.feed('5k'); assert.deepEqual(clampUp.point, { row: 0, col: 0 });
+	const text = grid(); text.feed('gj'); assert.deepEqual([text.context, text.point.row], ['formula', 1]);
+	text.feed('gk'); assert.deepEqual([text.context, text.point.row], ['formula', 0]);
+	const op = grid(); op.feed('dj'); assert.deepEqual([op.context, op.formula], ['formula', 'c']);
+	const change = grid(); change.feed('gjckX<Esc>'); assert.deepEqual([change.context, change.formula], ['formula', 'X\nc']);
+	const visual = grid(); visual.feed('vjd'); assert.deepEqual([visual.context, visual.formula], ['formula', '\nc']);
+	const enter = grid(); enter.feed('GA!<CR>'); assert.deepEqual([enter.context, enter.mode, enter.point, enter.sheet.rows[2][0]], ['sheet', 'n', { row: 2, col: 0 }, 'a\nb\nc!']);
+	const esc = grid(); esc.feed('A!<Esc>'); assert.deepEqual([esc.context, esc.mode], ['formula', 'n']);
+	const newline = grid(); newline.feed('GA<S-CR>d<CR>'); assert.equal(newline.sheet.rows[2][0], 'a\nb\nc\nd');
+	const dot = grid(); dot.feed('GA!<CR>j.'); assert.deepEqual([dot.context, dot.mode, dot.sheet.rows[3][0]], ['sheet', 'n', 'a!\nb\nc']);
+});
+
+test('insert Ctrl-direction builds and adjusts one DataFlow-relative reference', () => {
+	const at = (row, col, text = '') => { const v = keyboard(Array.from({ length: 8 }, () => Array(6).fill(''))); v.sheet.selRow = row; v.sheet.selCol = col; v.setFormula(text); v.feed('<CR>A'); return v; };
+	const v = at(5, 3, '='); v.feed('<C-h>'); assert.equal(v.formula, '=[-1]{}');
+	v.feed('<C-k><C-k>'); assert.equal(v.formula, '=[-1]{-2}');
+	v.feed('<C-l><C-l><C-l>'); assert.equal(v.formula, '=[+2]{-2}');
+	v.feed('<C-j><C-j>'); assert.equal(v.formula, '=[+2]{}'); assert.equal(v.formulaCursor, 7);
+	v.feed('<C-h><C-h>'); assert.equal(v.formula, '=[]{}');
+	v.feed('+<C-j>'); assert.equal(v.formula, '=[]{}+[]{+1}');
+	const edge = at(0, 0); edge.feed('<C-h><C-k>'); assert.equal(edge.formula, '[]{}');
+	const far = at(7, 5); far.feed('<C-l><C-j><C-k>'); assert.equal(far.formula, '[]{-1}');
+	const replay = at(5, 3); replay.feed('<C-h><CR>l<CR>A<C-h><C-h><CR>'); assert.equal(replay.sheet.rows[5][4], '[-2]{}');
+	replay.feed('j.'); assert.equal(replay.sheet.rows[6][4], '[-2]{}');
+});
+
+test('Shift-direction extends active references, normalises, reverses and clamps', () => {
+	const at = (row, col) => { const v = keyboard(Array.from({ length: 8 }, () => Array(6).fill(''))); v.sheet.selRow = row; v.sheet.selCol = col; v.feed('<CR>i'); return v; };
+	const fresh = at(5, 3); fresh.feed('<C-k><C-j>KK'); assert.equal(fresh.formula, '[]{-2}:[]{}');
+	fresh.feed('<C-h>'); assert.equal(fresh.formula, '[-1]{-2}:[]{}');
+	fresh.feed('L<C-l><C-l>'); assert.equal(fresh.formula, '[]{-2}:[+2]{}');
+	fresh.feed('<C-j><C-j><C-j><C-j>'); assert.equal(fresh.formula, '[]{}:[+2]{+2}');
+	const scalar = at(5, 3); scalar.feed('<C-k>HH'); assert.equal(scalar.formula, '[-2]{-1}:[]{-1}');
+	scalar.feed('<C-l><C-l><C-l><C-l>'); assert.equal(scalar.formula, '[]{-1}:[+2]{-1}');
+	const clamped = at(1, 1); clamped.feed('<C-h><C-l>HHKKK'); assert.equal(clamped.formula, '[-1]{-1}:[]{}');
+	const down = at(5, 3); down.feed('<C-l>JJ'); assert.equal(down.formula, '[+1]{}:[+1]{+2}');
+	const shiftName = at(5, 3); shiftName.feed('<C-l><S-l>'); assert.equal(shiftName.formula, '[+1]{}:[+2]{}');
+	const text = at(5, 3); text.feed('=HSTACK(FILTER(A0:B1,B0:B1>0))');
+	assert.equal(text.formula, '=HSTACK(FILTER(A0:B1,B0:B1>0))');
+});
+
+test('reference sessions end on other keys and use code-point carets', () => {
+	const v = keyboard([['', '', ''], ['', 'é😀', ''], ['', '', '']]);
+	v.sheet.selRow = 1; v.sheet.selCol = 1; v.feed('<CR>A'); assert.equal(v.formulaCursor, 2);
+	v.feed('<C-h>'); assert.deepEqual([v.formula, v.formulaCursor], ['é😀[-1]{}', 8]);
+	v.feed(',<C-h>'); assert.equal(v.formula, 'é😀[-1]{},[-1]{}');
+	v.feed('<C-u><C-k>'); assert.deepEqual([v.formula, v.formulaCursor], ['[]{-1}', 6]);
+	v.feed('<Home><C-j>'); assert.deepEqual([v.formula, v.formulaCursor], ['[]{+1}[]{-1}', 6]);
+	v.feed('<Del><C-l>'); assert.equal(v.formula, '[]{+1}[+1]{}]{-1}');
+	v.feed('<BS><BS><C-k>'); assert.equal(v.formula, '[]{+1}[+1][]{-1}]{-1}');
+	v.feed('<Esc>aK'); assert.equal(v.formula, '[]{+1}[+1][]{-1}K]{-1}');
+	v.feed('<Esc>'); assert.equal(v.reference, null);
+	v.feed('A<C-h>'); v.resetNavigation(); assert.equal(v.reference, null);
 });

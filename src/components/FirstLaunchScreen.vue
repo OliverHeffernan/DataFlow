@@ -5,10 +5,11 @@
 		<img src="../assets/128x128.png" />
 
 		<h2> Harness the speed of light </h2>
-		<h2> Commands are entered into the input field at the bottom of the screen.</h2>
+		<h2> Type anywhere in the sheet. Commands and available shortcuts appear below.</h2>
 		<h2>Commands</h2>
 		<h3><span class="keystroke">hjkl</span> navigate cells; <span class="keystroke">Enter</span> navigates formula text.</h3>
-		<h3><span class="keystroke">i / a</span> edit; <span class="keystroke">Esc</span> leaves insert, then returns to the sheet.</h3>
+		<h3><span class="keystroke">i / a</span> edit; <span class="keystroke">Enter</span> commits to NORMAL.</h3>
+		<h3><span class="keystroke">Ctrl + hjkl</span> inserts a relative reference; then <span class="keystroke">Shift + hjkl</span> extends a range.</h3>
 		<h3><span class="keystroke">:configcreate</span> creates a Lua keybinding config; <span class="keystroke">:source</span> reloads it.</h3>
 		<h3><span class="keystroke">:clear</span> to create a blank spreadsheet.</h3>
 		<h3><span class="keystroke">:help</span> to open the documentation.</h3>
@@ -30,9 +31,10 @@ const colours = [
 	"white"
 ];
 import BlurBubble from './BlurBubble.vue';
+import CheckCommand from '../classes/CheckCommand.js';
 
 function focusComLine() {
-	document.getElementById("commandLine").focus();
+	new CheckCommand().focus();
 }
 
 </script>

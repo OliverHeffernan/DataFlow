@@ -5,11 +5,20 @@ DataFlow translates Neovim's motion vocabulary into two contexts. It is not an e
 ## Two contexts keep the same keys useful
 
 - **Sheet normal** (`-- NORMAL --`): a character is a cell, a line is a row, and the buffer is the sheet. `hjkl` moves between cells.
-- **Formula normal** (`-- FORMULA NORMAL --`): press `Enter` on a cell. Motions now operate on its literal formula text, including multiline text. `hjkl` moves by Unicode code point or text line, never to another cell.
+- **Formula normal** (`-- FORMULA NORMAL --`): press `Enter` on a cell. `h/l` move through its text; plain `j/k` (including counts) leave to sheet NORMAL and move down/up a cell. `gj/gk`, arrows, operators and visual selections retain text-line movement.
 - **Insert**: `i/a` insert before/after the text cursor; `I/A` insert at the first nonblank/end of its text line. From the sheet these edit the selected cell, not the first/last cell in the row. Double-clicking a cell also starts insert.
-- `Esc` cancels a pending command or visual selection, or commits insert and returns to formula normal. `Esc` again in formula normal returns to the sheet. `Ctrl-[` and `Ctrl-c` also escape. `Enter` commits insert rather than inserting a newline; use `Ctrl-j` for a newline.
+- `Esc` cancels a pending command or visual selection, or commits insert and returns to formula normal. `Esc` again in formula normal returns to the sheet. `Ctrl-[` and `Ctrl-c` also escape. `Enter` commits insert directly to sheet NORMAL, on the same cell. `Shift-Enter` inserts a newline.
 
-Type into the bottom command field, or click a cell to focus it. Uppercase keys mean Shift plus the letter. `<C-x>` below means Ctrl-x, and `<CR>` means Enter.
+Type directly with the spreadsheet focused; there is no bottom input field. The read-only footer displays typed commands, pending keys and messages. It shows contextual shortcuts, including valid continuations after a prefix and Lua mapping descriptions. Click a cell or the footer to return focus to the workspace. Native inputs, file dialogs and editable controls receive their own keys. Uppercase keys mean Shift plus the letter. `<C-x>` below means Ctrl-x, and `<CR>` means Enter.
+
+### Formula insert assistance
+
+- **Ctrl-h/j/k/l** starts a reference next to the edited cell, using DataFlow-relative notation (e.g. `[-1]{}`). Consecutive shortcuts adjust the same reference. Typing or moving the text caret ends that reference session.
+- **Shift-h/j/k/l** extends the active reference into a rectangular range with that reference as a fixed anchor. Start with Ctrl-direction first; Ctrl-direction can then also move the range endpoint. Ranges normalize to top-left/bottom-right and clamp at sheet edges. Outside an active reference session, shifted letters remain text (including in function names such as HSTACK and FILTER).
+- Absolute references, relative/calculated references and ranges get matching colors in the formula text and grid. Repeated references to the same region share colors; quoted strings are ignored. Highlights disappear on returning to the sheet.
+- **Tab** completes a function prefix with parentheses. **Up/Down** selects suggestions; Enter always commits rather than accepting a completion. Signature help highlights the active argument of the innermost supported function.
+- **F4** toggles the reference under or immediately before the caret between ordinary cell coordinates and `[]{}` relative notation. It works in formula normal and insert. Use Fn-F4 if the OS reserves F4, or remap `<F4>` in Lua.
+- Array formulas spill into empty cells. The selected spill has a dashed boundary and source label. `i/a/I/A` or Enter on a spill child edits the source, not an independent output. Error explanations appear in the footer and cell tooltip. See the [formula reference](../README.md#nested-formulas-and-dynamic-arrays).
 
 ## Motion coverage
 
@@ -17,7 +26,7 @@ Counts precede a motion: `12j`, `3w`, `2f,`. `0` is a motion unless it is part o
 
 | Keys | Sheet translation | Formula translation |
 | --- | --- | --- |
-| `h j k l`, arrows, Space, Backspace, Ctrl-h/j/n/p | Adjacent cell; vertical movement keeps the column | Adjacent code point/line; vertical movement remembers the preferred column, including sticky `$` |
+| `h j k l`, arrows, Space, Backspace, Ctrl-h/j/n/p | Adjacent cell; vertical movement keeps the column | Plain `j/k` in normal leave to adjacent sheet cells; other keys and operator/visual motions stay in text |
 | `0`, Home | First column, including blanks | First character |
 | `^` | First nonblank cell in this row | First nonblank character |
 | `$`, End | Final allocated column, **not** last populated cell | Last character; a count also moves down count − 1 lines |
@@ -123,7 +132,7 @@ vim.keymap.set("n", "Q", "<Nop>") -- disable a default key
 
 Modes: `n` = sheet normal, **`f` = formula normal (DataFlow extension)**, `i` = insert, `x` / `v` = visual, `o` = operator-pending, `c` = command/search entry. Use a mode list to affect both normal contexts. Mapping RHS strings are nonrecursive; callbacks, expressions, recursive maps, buffer options, `vim.cmd`, plugins and the rest of Neovim's Lua API are not supported. Accepted options are `desc`, `silent`, `remap=false`, `noremap=true`.
 
-Key notation: `<Esc>`, `<CR>` / `<Enter>`, `<BS>`, `<Del>`, `<Tab>`, `<Space>`, `<lt>`, `<Nop>`, arrows, Home/End, PageUp/PageDown, `<C-x>` and Shift-arrows. Use the shown capitalization; Ctrl-letter names use lowercase. Leader/localleader expand when a mapping is defined. Prefixes wait 500 ms for more keys; an unmatched prefix falls back to a complete shorter mapping or the original keys. Escape always cancels and cannot be remapped.
+Key notation: `<Esc>`, `<CR>` / `<Enter>`, `<S-CR>`, `<BS>`, `<Del>`, `<Tab>`, `<Space>`, `<lt>`, `<Nop>`, `<F4>`, arrows, Home/End, PageUp/PageDown, `<C-x>`, `<C-S-x>` and Shift-arrows. Use the shown capitalization; Ctrl-letter names use lowercase. Leader/localleader expand when a mapping is defined. Prefixes wait 500 ms for more keys; an unmatched prefix falls back to a complete shorter mapping or the original keys. Escape always cancels and cannot be remapped. Mapping `desc` values appear in the shortcut bar, and `<Nop>` mappings hide their disabled default shortcuts.
 
 Reload is atomic: syntax/runtime/API errors keep the previous mappings active and report an error in the command field. Configurations cannot access OS, filesystem, package loading, JavaScript, debug, coroutines, dynamic Lua loading, or protected calls. Limits: 128 KiB source, 1,000 mappings, 128-character LHS, 4,096-character RHS, an instruction budget and a 2-second worker timeout. Use this as a keymap configuration API, not a general-purpose Lua automation environment.
 

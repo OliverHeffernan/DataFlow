@@ -1,9 +1,21 @@
 import { clamp, compare, offset, pointAt, resolveMotion, textObject, wordSpans } from './VimMotions.js';
 import { tokenize } from './LuaKeybindings.js';
+import { formulaAssist, toggleReference } from './FormulaEditing.js';
 
 const aliases = { '<Left>': 'h', '<Right>': 'l', '<Up>': 'k', '<Down>': 'j', '<Home>': '0', '<End>': '$', '<BS>': 'h', '<C-h>': 'h', '<C-j>': 'j', '<C-n>': 'j', '<C-p>': 'k', '<C-Right>': 'W', '<C-Left>': 'B', '<S-Right>': 'w', '<S-Left>': 'b', '<C-Home>': 'gg' };
 const prefixes = ['g', "g'", 'g`', 'z', '[', ']', 'f', 'F', 't', 'T', 'm', "'", '`', 'q', '@', 'r'];
 const isVisual = mode => ['v', 'V', 'b'].includes(mode);
+const directions = { h: [0, -1], j: [1, 0], k: [-1, 0], l: [0, 1] };
+// Shift-direction extends an active reference; otherwise uppercase letters remain ordinary input.
+function directionKey(key, selecting) {
+	const match = key.match(/^<(C|S)-([hjkl])>$/), shifted = /^[HJKL]$/.test(key);
+	if (!match && !shifted) return null;
+	const extend = shifted || match[1] === 'S';
+	if (extend && !selecting) return null;
+	const [dr, dc] = directions[shifted ? key.toLowerCase() : match[2]];
+	return { dr, dc, extend };
+}
+const relative = (n, open, close) => `${open}${n ? (n > 0 ? '+' : '') + n : ''}${close}`;
 
 // Keyboard state is independent of the DOM so commands, mappings and macros take the same path.
 export default class VimKeyboard {
@@ -24,6 +36,8 @@ export default class VimKeyboard {
 		this.register = null;
 		this.lastChange = [];
 		this.changeKeys = [];
+		this.reference = null; this.literalKey = null;
+		this.completionIndex = 0;
 	}
 	get rows() { return this.context === 'sheet' ? this.sheet.rows : this.formula.split('\n').map(line => Array.from(line)); }
 	get formula() { return this.sheet.rows[this.sheet.selRow][this.sheet.selCol]; }
@@ -69,8 +83,13 @@ export default class VimKeyboard {
 			this.render(); return;
 		}
 		if (this.mode === 'i') { this.insertKey(key); this.render(); return; }
-		if (key === '<CR>' && !this.pending && this.context === 'sheet') { this.context = 'formula'; this.formulaCursor = 0; this.state.preferredColumn = 0; this.changeKeys = []; this.render(); return; }
+		if (key === '<F4>' && this.context === 'formula' && !this.pending && this.mode === 'n') {
+			if (toggleReference(this)) { this.formulaCursor = Math.max(0, this.formulaCursor - 1); this.commit(); }
+			this.render(); return;
+		}
+		if (key === '<CR>' && !this.pending && this.context === 'sheet') { this.editOwner(); this.context = 'formula'; this.formulaCursor = 0; this.state.preferredColumn = 0; this.changeKeys = []; this.render(); return; }
 		if (key === '<CR>' && this.pending !== 'z') key = '+';
+		this.literalKey = key;
 		if (!(key === '<End>' && this.pending.endsWith('g'))) key = aliases[key] || key;
 		this.pending += key;
 		this.executePending();
@@ -86,13 +105,13 @@ export default class VimKeyboard {
 
 	escape() {
 		const cancelling = this.pending || this.command !== null || this.mappingKeys.length;
-		this.mappingKeys = []; this.pending = ''; this.command = null;
+		this.mappingKeys = []; this.pending = ''; this.command = null; this.reference = null;
 		if (this.mode === 'i') {
 			this.formulaCursor = Math.max(0, this.formulaCursor - 1);
 			this.state.marks['^'] = this.point;
 			this.state.preferredColumn = this.point.col;
 			this.commit();
-		} else if (!isVisual(this.mode) && !cancelling) this.context = 'sheet';
+		} else if (!isVisual(this.mode) && !cancelling) this.leaveFormula();
 		if (this.anchor) this.saveVisual();
 		this.anchor = null; this.mode = 'n'; this.changeKeys = [];
 	}
@@ -112,10 +131,11 @@ export default class VimKeyboard {
 		}
 		if (!keepColumn) this.state.preferredColumn = this.point.col;
 	}
+	leaveFormula() { this.context = 'sheet'; this.reference = null; }
 	location() { return { context: this.context, row: this.sheet.selRow, col: this.sheet.selCol, cursor: this.formulaCursor }; }
 	restore(location) {
 		if (!location) return;
-		this.context = location.context;
+		this.context = location.context; this.reference = null;
 		this.sheet.selRow = clamp(location.row, 0, this.sheet.rows.length - 1);
 		this.sheet.selCol = clamp(location.col, 0, this.sheet.rows[0].length - 1);
 		this.formulaCursor = clamp(location.cursor, 0, Math.max(0, Array.from(this.formula).length - 1));
@@ -130,7 +150,7 @@ export default class VimKeyboard {
 	render() { return this.hooks.render?.(this); }
 	message(text) { this.hooks.message?.(text); }
 	resetNavigation() {
-		this.context = 'sheet'; this.mode = 'n'; this.pending = ''; this.command = null; this.anchor = null;
+		this.context = 'sheet'; this.mode = 'n'; this.pending = ''; this.command = null; this.anchor = null; this.reference = null;
 		this.mappingKeys = []; this.formulaCursor = 0; this.states.sheet = { marks: {} }; this.formulaStates.clear();
 		this.jumps = []; this.jumpIndex = 0; this.changes = []; this.changeIndex = 0; this.lastVisual = null;
 		this.move({ row: 0, col: 0 });
@@ -173,6 +193,12 @@ export default class VimKeyboard {
 			if (action === operator) {
 				this.operate(operator, { start: { row: this.point.row, col: 0 }, end: { row: Math.min(this.rows.length - 1, this.point.row + count - 1), col: 0 }, linewise: true }); this.done(); return;
 			}
+		}
+		// Literal j/k in formula NORMAL leaves the formula and moves the sheet selection; gj/gk, operators and visual j/k stay text motions.
+		if (!operator && this.mode === 'n' && this.context === 'formula' && ['j', 'k'].includes(action) && this.literalKey === action) {
+			this.leaveFormula();
+			this.move({ row: this.sheet.selRow + (action === 'j' ? count : -count), col: this.sheet.selCol });
+			this.done(); return;
 		}
 		if (action === 'q' && this.recording && !operator) { this.recording = null; this.done(); return; }
 		if (prefixes.includes(action) || ((operator || isVisual(this.mode)) && ['i', 'a'].includes(action))) return;
@@ -263,7 +289,7 @@ export default class VimKeyboard {
 				const end = { row: point.row, col: action === 'X' ? Math.max(0, point.col - 1) : Math.min(last, point.col + count - 1) };
 				this.operate(action === 's' ? 'c' : 'd', { start, end, empty: !this.rows[point.row].length || (action === 'X' && point.col === 0) }); return true;
 			}
-			if (this.context === 'sheet') { this.context = 'formula'; this.formulaCursor = 0; }
+			if (this.context === 'sheet') { this.editOwner(); this.context = 'formula'; this.formulaCursor = 0; }
 			const row = this.point.row, line = this.rows[row], base = offset(this.rows, { row, col: 0 });
 			if (action === 'I') this.formulaCursor = base + Math.max(0, line.findIndex(c => /\S/u.test(c)));
 			if (action === 'A') this.formulaCursor = base + line.length;
@@ -313,10 +339,43 @@ export default class VimKeyboard {
 		this.state.marks['>'] = compare(this.anchor, this.point) < 0 ? this.point : this.anchor;
 	}
 	setFormula(text) { this.sheet.rows[this.sheet.selRow][this.sheet.selCol] = text; }
+	editOwner() {
+		const owner = this.sheet.spillCells?.get(`${this.sheet.selRow}:${this.sheet.selCol}`);
+		if (owner) this.move(owner);
+	}
+	protectSpill(start, end) {
+		const contains = (row, col) => row >= start.row && row <= end.row && col >= start.col && col <= end.col;
+		for (const [key, owner] of this.sheet.spillCells ?? []) {
+			const [row, col] = key.split(':').map(Number);
+			if (contains(row, col) && !contains(owner.row, owner.col)) {
+				this.message(`Spill output is read-only; edit ${this.sheet.columnLabel(owner.col)}${owner.row}`);
+				this.anchor = null; this.mode = 'n'; this.move(owner); return true;
+			}
+		}
+		return false;
+	}
 	insertKey(key) {
+		const assist = formulaAssist(this.formula, this.formulaCursor);
+		if (assist.suggestions.length && ['<Up>', '<Down>'].includes(key)) {
+			this.completionIndex = (this.completionIndex + (key === '<Down>' ? 1 : -1) + assist.suggestions.length) % assist.suggestions.length;
+			this.reference = null; return;
+		}
+		if (key === '<Tab>' && assist.suggestions.length) {
+			const text = Array.from(this.formula), name = assist.suggestions[this.completionIndex % assist.suggestions.length];
+			text.splice(this.formulaCursor - assist.prefix.length, assist.prefix.length, ...`${name}()`);
+			this.formulaCursor += name.length - assist.prefix.length + 1;
+			this.setFormula(text.join('')); this.reference = null; this.completionIndex = 0; return;
+		}
+		this.completionIndex = 0;
+		if (key === '<F4>') { toggleReference(this); return; }
+		const direction = directionKey(key, this.reference);
+		if (direction) { this.insertReference(direction); return; }
+		this.reference = null;
+		key = key.replace(/^<S-([hjkl])>$/, (_, letter) => letter.toUpperCase());
 		const text = Array.from(this.formula);
-		if (key === '<CR>') { this.escape(); return; }
-		if (key === '<C-j>') key = '\n';
+		// Enter commits the edit and returns to the sheet on the same cell; Shift-Enter inserts a newline.
+		if (key === '<CR>') { this.escape(); this.leaveFormula(); return; }
+		if (key === '<S-CR>') key = '\n';
 		if (key === '<Left>') { this.formulaCursor = Math.max(0, this.formulaCursor - 1); return; }
 		if (key === '<Right>') { this.formulaCursor = Math.min(text.length, this.formulaCursor + 1); return; }
 		if (key === '<Home>' || key === '<C-a>') { this.formulaCursor = 0; return; }
@@ -330,6 +389,26 @@ export default class VimKeyboard {
 		else if (Array.from(key).length === 1 || key === '<Tab>') { text.splice(this.formulaCursor++, 0, key === '<Tab>' ? '\t' : key); }
 		this.setFormula(text.join(''));
 	}
+	// Positions are absolute sheet cells; the inserted token is relative to the edited cell. A session survives only
+	// while the token is unchanged and the caret still sits directly after it.
+	insertReference({ dr, dc, extend }) {
+		const origin = { row: this.sheet.selRow, col: this.sheet.selCol }, text = Array.from(this.formula);
+		let ref = this.reference;
+		const intact = ref && ref.origin.row === origin.row && ref.origin.col === origin.col && this.formulaCursor === ref.start + ref.length
+			&& text.slice(ref.start, ref.start + ref.length).join('') === ref.token;
+		if (!intact) ref = { start: Math.min(this.formulaCursor, text.length), length: 0, token: '', origin, anchor: extend ? origin : null, end: origin };
+		else if (extend && !ref.anchor) ref = { ...ref, anchor: ref.end };
+		const end = { row: clamp(ref.end.row + dr, 0, this.sheet.rows.length - 1), col: clamp(ref.end.col + dc, 0, this.sheet.rows[0].length - 1) };
+		const cell = point => relative(point.col - origin.col, '[', ']') + relative(point.row - origin.row, '{', '}');
+		const token = ref.anchor
+			? `${cell({ row: Math.min(ref.anchor.row, end.row), col: Math.min(ref.anchor.col, end.col) })}:${cell({ row: Math.max(ref.anchor.row, end.row), col: Math.max(ref.anchor.col, end.col) })}`
+			: cell(end);
+		const units = Array.from(token);
+		text.splice(ref.start, ref.length, ...units);
+		this.setFormula(text.join(''));
+		this.formulaCursor = ref.start + units.length;
+		this.reference = { ...ref, end, token, length: units.length };
+	}
 
 	operate(operator, range) {
 		let { start, end, linewise, block, empty, values } = range;
@@ -339,6 +418,7 @@ export default class VimKeyboard {
 		this.state.marks['['] = start; this.state.marks[']'] = end;
 		if (this.context === 'sheet') {
 			const left = linewise ? 0 : Math.min(start.col, end.col), right = linewise ? this.rows[0].length - 1 : Math.max(start.col, end.col);
+			if (operator !== 'y' && this.protectSpill({ row: start.row, col: left }, { row: end.row, col: right })) return;
 			const cells = this.rows.slice(start.row, end.row + 1).map((row, r) => row.slice(left, right + 1).map((value, c) => values ? String(this.sheet.getCopyValue?.(start.row + r, left + c) ?? value) : value));
 			this.register = { cells, linewise, text: cells.map(row => row.join('\t')).join('\n') };
 			if (operator !== 'y' && !empty) {
@@ -392,6 +472,8 @@ export default class VimKeyboard {
 				this.sheet.rows.splice(row, 0, ...copies);
 				this.sheet.styles.splice(row, 0, ...copies.map(r => r.map(() => ({ ...this.sheet.defaultStyling }))));
 			} else {
+				const end = { row: row + cells.length * count - 1, col: this.sheet.selCol + Math.max(...cells.map(line => line.length)) - 1 };
+				if (this.protectSpill(this.point, end)) return;
 				for (let n = 0; n < count; n++) for (let r = 0; r < cells.length && row + r + n * cells.length < this.rows.length; r++) {
 					for (let c = 0; c < cells[r].length && this.sheet.selCol + c < this.rows[0].length; c++) this.sheet.rows[row + r + n * cells.length][this.sheet.selCol + c] = cells[r][c];
 				}

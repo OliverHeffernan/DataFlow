@@ -10,7 +10,7 @@ vim.keymap.set("i", "jk", "<Esc>")
 `;
 
 export function tokenize(keys) {
-	return keys.match(/<(?:C-[^>]+|S-[^>]+|Esc|CR|Enter|BS|Del|Tab|Space|lt|Nop|Left|Right|Up|Down|Home|End|PageUp|PageDown)>|[^]/gu)?.map(key => {
+	return keys.match(/<(?:C-[^>]+|S-[^>]+|F\d+|Esc|CR|Enter|BS|Del|Tab|Space|lt|Nop|Left|Right|Up|Down|Home|End|PageUp|PageDown)>|[^]/gu)?.map(key => {
 		const aliases = { '<Enter>': '<CR>', '<Space>': ' ', '<lt>': '<', '<C-[>': '<Esc>', '<C-m>': '<CR>' };
 		return aliases[key] || key;
 	}) || [];
