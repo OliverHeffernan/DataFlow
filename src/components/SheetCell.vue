@@ -1,10 +1,13 @@
 <template>
 	<td class="tableCell">
 		<button
-			:id="colNo + ':' + rowNo"
+			:id="active ? colNo + ':' + rowNo : `window-${pane.id}-${colNo}:${rowNo}`"
 			class="cell"
+			:class="{ 'inactive-cursor': !active && rowNo === pane.row && colNo === pane.col }"
+			:data-cell="colNo + ':' + rowNo"
+			:style="cellStyle"
 			:aria-label="value?.kind === 'chart' ? (value.title || `${value.type} chart`) : undefined"
-			:title="sheetManager.cellErrors.get(`${rowNo}:${colNo}`) || presentation?.warning || undefined"
+			:title="result?.errors.get(`${rowNo}:${colNo}`) || presentation?.warning || undefined"
 			@dblclick="handleDblClick"
 			@click="handleClick"
 			@contextmenu.prevent="handleRightClick"
@@ -13,14 +16,14 @@
 			<template v-else>{{ presentation?.text ?? value }}</template>
 		</button>
 		<div
-			:id="'visual'+colNo+':'+rowNo"
+			:id="active ? 'visual'+colNo+':'+rowNo : undefined"
 			class="sel inactive"
 		></div>
 	</td>
 </template>
 
 <script setup>
-	import { computed, onMounted } from 'vue';
+	import { computed } from 'vue';
 	import CellChart from './CellChart.vue';
 	import SheetManager from '../classes/SheetManager.js';
 	const sheetManager = new SheetManager();
@@ -32,6 +35,8 @@
 	const checkCommand = new CheckCommand();
 
 	const props = defineProps({
+		pane: { type: Object, required: true },
+		active: Boolean,
 		rowNo: {
 			type: Number,
 			required: true,
@@ -40,43 +45,20 @@
 			type: Number,
 			required: true,
 		},
-		numOfCols: {
-			type: Number,
-			required: true,
-		},
-		numOfRows: {
-			type: Number,
-			required: true,
-		}
 	});
 
-	const value = computed(() => sheetManager.cellValues.value[props.rowNo]?.[props.colNo] ?? "");
-	const presentation = computed(() => sheetManager.cellPresentation.value[props.rowNo]?.[props.colNo]);
-
-	onMounted(() => {
-		//if (props.rowNo == sheetManager.value.numOfRows.value - 1 && props.colNo == sheetManager.value.numOfCols.value - 1) {
-		if (props.rowNo == props.numOfRows - 1 && props.colNo == props.numOfCols - 1) {
-			sheetManager.loadAllCells(sheetManager.numOfRows.value, sheetManager.numOfCols.value);
-			sheetManager.loadStyles();
-		}
+	const result = computed(() => sheetManager.sheetResults.value.get(props.pane.sheet));
+	const value = computed(() => result.value?.values[props.rowNo]?.[props.colNo] ?? "");
+	const presentation = computed(() => result.value?.presentation[props.rowNo]?.[props.colNo]);
+	const cellStyle = computed(() => {
+		sheetManager.styleVersion.value;
+		const style = props.pane.sheet.styles[props.rowNo]?.[props.colNo] ?? sheetManager.defaultStyling;
+		const colors = result.value?.colors?.get(`${props.rowNo}:${props.colNo}`) ?? {};
+		return { color: colors.fg ?? style.fg, backgroundColor: colors.bg ?? style.bg };
 	});
-	function handleMouseover() {
-		const thisRow = props.rowNo;
-		const thisCol = props.colNo;
-		if (visualManager.dragging) {
-			const startRow = sheetManager.selRow;
-			const startCol = sheetManager.selCol;
 			
-
-			// check if new cell
-			// if different, then do a visualselection
-			if (startRow != thisRow || startCol != thisCol) {
-				sheetManager.selectCell(thisRow, thisCol);
-			}
-		}
-	}
-			
-	function handleClick(event) {
+	async function handleClick(event) {
+		await checkCommand.activateWindow(props.pane.id);
 		const keyboard = checkCommand.keyboard;
 		keyboard.finishFormat();
 		if (keyboard.mode === 'i') keyboard.escape();
@@ -90,13 +72,15 @@
 		return keyboard.render();
 	}
 
-	function handleDblClick() {
+	async function handleDblClick() {
+		await checkCommand.activateWindow(props.pane.id);
 		sheetManager.selectCell(props.rowNo, props.colNo);
 		checkCommand.editCell();
 		checkCommand.focus();
 	}
 
 	async function handleRightClick(event) {
+		await checkCommand.activateWindow(props.pane.id);
 		const rcMenu = document.getElementById("rightClickMenu");
 		if (!checkCommand.keyboard.anchor) await handleClick(event);
 		rcMenu.className = "rcActive";
@@ -184,6 +168,8 @@ td {
 	/*outline: 2px solid white;*/
 	box-shadow: inset 0 0 0 2px white; /* Inner outline effect */
 }
+
+.inactive-cursor { box-shadow: inset 0 0 0 1px #688294; }
 
 .visualSelection {
 	/*background-color: rgba(0, 216, 255, 0.5);*/

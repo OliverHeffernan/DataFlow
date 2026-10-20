@@ -6,8 +6,9 @@ import { readTextFile } from "@tauri-apps/plugin-fs";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 export default class FileManager {
-	constructor(onOpen) {
+	constructor(onOpen, beforeOpen) {
 		this.onOpen = onOpen;
+		this.beforeOpen = beforeOpen;
 		FileManager.instance = this;
 	}
 
@@ -82,6 +83,7 @@ export default class FileManager {
 	}
 
 	async loadFile(content, path = null) {
+		this.beforeOpen?.();
 		sheetManager.loadWorkbook(JSON.parse(content), path);
 		await this.onOpen?.();
 		this.setPhMessage(path ? `Opened file from ${path} successfully` : 'Opened workbook successfully');

@@ -56,7 +56,7 @@
 
 		reader.onload = async function(e) {
 			try {
-				await new FileManager(() => checkCommand.newSheet()).loadFile(e.target.result);
+				await new FileManager(() => checkCommand.newSheet(), () => checkCommand.guardDrafts()).loadFile(e.target.result);
 			} catch (error) { checkCommand.setPhMessage(`Open: ${error.message}`); }
 		}
 

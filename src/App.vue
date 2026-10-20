@@ -1,34 +1,18 @@
 <template>
 	<FirstLaunchScreen v-if="launchManager.displayed" />
-	<FormulaBar />
+	<FormulaBar v-if="check.windows.active.content === 'sheet'" />
+	<div v-else id="topBar" class="rules-topbar">Conditional formatting · {{ check.windows.active.sheet.name }}<span>Ctrl-w h/j/k/l · Switch window</span></div>
 	<CommandLine />
 	<RightClickMenu />
-	<table>
-		<thead>
-			<tr>
-				<th class="rowLabelType rowLabels">abs</th>
-				<th class="rowLabelType relRow">rel</th>
-				<th v-for="(cell, index) in sheetManager.numOfCols" :key="index" class="labels colLabels">{{ sheetManager.columnLabel(index) }}</th>
-			</tr>
-		</thead>
-		<tbody>
-			<SheetRow
-				v-for="index in sheetManager.numOfRows"
-				:key="index - 1"
-				:row="sheetManager.rows[index - 1]"
-				:rowNo="index - 1"
-			/>
-		</tbody>
-	</table>
-	<div id="gridOverlays" aria-hidden="true"></div>
+	<main id="windows" aria-label="Workspace windows"><WindowNode :node="check.windows.state.root" /></main>
 
 </template>
 
 <script setup>
 	import "./styling/syntaxHighlighting.css";
 	import { ref } from 'vue';
-	import SheetManager from './classes/SheetManager.js';
-	import SheetRow from './components/SheetRow.vue';
+	import WindowNode from './components/WindowNode.vue';
+	import CheckCommand from './classes/CheckCommand.js';
 	import FormulaBar from './components/FormulaBar.vue';
 	import CommandLine from './components/CommandLine.vue';
 	import FirstLaunchScreen from './components/FirstLaunchScreen.vue';
@@ -37,8 +21,7 @@
 	import LaunchManager from './classes/LaunchManager.js';
 
 	const launchManager = ref(new LaunchManager());
-
-	const sheetManager = ref(new SheetManager());
+	const check = new CheckCommand();
 
 	let firstTime;
 	const testing = true;
@@ -63,7 +46,8 @@
 
 body {
 	margin: 0;
-	padding: 0 0 var(--status-bar-height, 64px);
+	padding: 0;
+	overflow: hidden;
 	background-color: #091119;
 
 }
@@ -80,12 +64,12 @@ body {
 
 table {
 	border-collapse: collapse;
-	margin-top: var(--formula-bar-height, 24px);
 	z-index: 10;
 }
 
-.cell { scroll-margin-top: calc(var(--formula-bar-height, 24px) + 28px); scroll-margin-bottom: calc(var(--status-bar-height, 64px) + 24px); }
-#gridOverlays { position: absolute; top: 0; left: 0; width: 0; height: 0; pointer-events: none; z-index: 25; }
+#windows { position: fixed; inset: var(--formula-bar-height, 24px) 0 var(--status-bar-height, 64px); display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); min-width: 0; min-height: 0; }
+.rules-topbar { position: fixed; inset: 0 0 auto; display: flex; box-sizing: border-box; padding: 4px 10px; gap: 20px; font: 12px/20px ui-monospace, monospace; color: #dbe6f3; background: #15202e; }
+.rules-topbar span { color: #9aaec3; margin-left: auto; }
 .reference-outline, .spill-outline { position: absolute; box-sizing: border-box; border: 2px solid var(--reference-color); pointer-events: none; }
 .reference-outline { background: color-mix(in srgb, var(--reference-color) 9%, transparent); }
 .spill-outline { border-style: dashed; }

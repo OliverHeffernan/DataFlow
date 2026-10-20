@@ -5,6 +5,7 @@ import { markName, datasetColumns, validateMarks, structuralMarks } from './Work
 import { presentCell } from './CellFormatting.js';
 import SyntaxHighlighting from "./SyntaxHighlighting.js";
 import { evaluateChart } from "./ChartFormula.js";
+import { adjustConditionalRules, evaluateConditionalRules, validateConditionalRules } from './ConditionalFormatting.js';
 
 import HistoryManager from "./HistoryManager.js";
 const historyManager = new HistoryManager();
@@ -53,8 +54,8 @@ class CalcPass {
 		this.rows = record.rows;
 		this.datasets = sheet.marks.filter(mark => mark.kind === 'dataset' && mark.sheetName === record.name);
 		this.id = sheet.sheets.indexOf(record);
-		session.passes.set(record, this);
 		this.session = session;
+		session.passes.set(record, this);
 		this.blocked = blocked;
 		this.results = new Map();
 		this.spills = new Map();
@@ -343,6 +344,7 @@ class CalcPass {
 		const typed = values.map(row => row.map(cellToValue));
 		const spills = new Map();
 		const errors = new Map();
+		const failures = new Map();
 		for (const [row, col] of this.formulaCells) {
 			const key = keyOf(row, col);
 			let value;
@@ -352,6 +354,7 @@ class CalcPass {
 				values[row][col] = errorText(error);
 				typed[row][col] = null;
 				errors.set(key, explain(error));
+				failures.set(key, error);
 				continue;
 			}
 			if (!Array.isArray(value)) {
@@ -364,6 +367,7 @@ class CalcPass {
 				values[row][col] = "#SPILL!";
 				typed[row][col] = null;
 				errors.set(key, state.reason);
+				failures.set(key, new FormulaError('#SPILL!', state.reason));
 				continue;
 			}
 			const owner = { row, col, rows: state.rows, cols: state.cols };
@@ -373,7 +377,7 @@ class CalcPass {
 				spills.set(keyOf(row + i, col + j), { ...owner });
 			}));
 		}
-		return { values, typed, spills, errors };
+		return { values, typed, spills, errors, failures };
 	}
 }
 
@@ -386,6 +390,8 @@ export default class SheetManager {
 
 		this.workbook = shallowReactive({ sheets: [{ name: 'Sheet1', rows: [], styles: [], selRow: 0, selCol: 0 }], activeSheetIndex: 0, marks: [] });
 		this.cellValues = shallowRef([]);
+		this.sheetResults = shallowRef(new Map());
+		this.styleVersion = ref(0);
 		this.cellPresentation = shallowRef([]);
 		this.formatPreview = null;
 		// derived by recalculate(): "row:col" -> { row, col, rows, cols } of the array formula spilling there
@@ -491,7 +497,11 @@ export default class SheetManager {
 	}
 
 	rewriteMark(name, replacement, column = null, newColumn = null) {
-		for (const sheet of this.sheets) sheet.rows = sheet.rows.map(row => row.map(text => rewriteMarkReferences(text, name, replacement, column, newColumn)));
+		const transform = text => rewriteMarkReferences(text, name, replacement, column, newColumn);
+		for (const sheet of this.sheets) {
+			sheet.rows = sheet.rows.map(row => row.map(transform));
+			if (sheet.conditionalRules) sheet.conditionalRules = sheet.conditionalRules.map(rule => ({ ...rule, source: transform(rule.source) }));
+		}
 	}
 
 	renameMark(name, replacement) {
@@ -504,7 +514,8 @@ export default class SheetManager {
 
 	deleteMark(name, force = false) {
 		const mark = this.mark(name);
-		if (!force && this.sheets.some(sheet => sheet.rows.some(row => row.some(text => rewriteMarkReferences(text, mark.name, null) !== text)))) throw new Error('Mark is referenced; use :delmarks! to invalidate its references');
+		if (!force && this.sheets.some(sheet => [...sheet.rows.flat(), ...(sheet.conditionalRules ?? []).map(rule => rule.source)]
+			.some(text => rewriteMarkReferences(text, mark.name, null) !== text))) throw new Error('Mark is referenced; use :delmarks! to invalidate its references');
 		this.rewriteMark(mark.name, null);
 		this.workbook.marks = this.marks.filter(item => item !== mark);
 		this.recalculate(); historyManager.do(this);
@@ -628,6 +639,7 @@ export default class SheetManager {
 		const transform = text => rewriteSheetReferences(text, oldName, newName);
 		for (const sheet of this.sheets) {
 			sheet.rows = sheet.rows.map(row => row.map(transform));
+			if (sheet.conditionalRules) sheet.conditionalRules = sheet.conditionalRules.map(rule => ({ ...rule, source: transform(rule.source) }));
 		}
 	}
 
@@ -653,12 +665,12 @@ export default class SheetManager {
 	deleteSheet(target = this.workbook.activeSheetIndex + 1, force = false) {
 		if (this.sheets.length === 1) throw new Error('Cannot delete the last sheet');
 		const index = this.sheetIndex(target), removed = this.sheets[index], active = this.activeSheet;
-		const referenced = this.sheets.some(sheet => sheet !== removed && sheet.rows.some(row => row.some(text =>
-			rewriteSheetReferences(text, removed.name, null) !== text)));
+		const referenced = this.sheets.some(sheet => sheet !== removed && [...sheet.rows.flat(), ...(sheet.conditionalRules ?? []).map(rule => rule.source)]
+			.some(text => rewriteSheetReferences(text, removed.name, null) !== text));
 		const hasData = removed.rows.some(row => row.some(value => value !== '' && value != null));
 		const hasStyles = removed.styles.some(row => row.some(style => Object.entries(style).some(([key, value]) => value !== this.defaultStyling[key])));
 		const owned = this.marks.filter(mark => mark.sheetName === removed.name);
-		if (!force && (hasData || hasStyles || referenced || owned.length)) throw new Error('Sheet has data, styles, or references; use :sheetdelete! to delete it');
+		if (!force && (hasData || hasStyles || referenced || owned.length || removed.conditionalRules?.length)) throw new Error('Sheet has data, styles, or references; use :sheetdelete! to delete it');
 		for (const mark of owned) this.rewriteMark(mark.name, null);
 		this.workbook.marks = this.marks.filter(mark => mark.sheetName !== removed.name);
 		this.rewriteSheetReferences(removed.name, null);
@@ -679,6 +691,7 @@ export default class SheetManager {
 		draft.workbook = { ...workbook, activeSheetIndex: activeSheet };
 		draft.pass = null;
 		draft.cellValues = { value: [] };
+		draft.sheetResults = { value: new Map() };
 		draft.cellPresentation = { value: [] };
 		draft.formatPreview = null;
 		draft.spillCells = new Map();
@@ -703,7 +716,7 @@ export default class SheetManager {
 		}), activeSheetIndex: Math.max(0, sheets.findIndex(sheet => sheet.name === active)) });
 		this.numOfRows.value = this.rows.length;
 		this.numOfCols.value = this.rows[0].length;
-		this.loadAllCells(undefined, undefined, calculation?.sheets[this.workbook.activeSheetIndex]);
+		this.loadAllCells(undefined, undefined, calculation);
 	}
 
 	loadWorkbook(data, path = null) {
@@ -719,6 +732,7 @@ export default class SheetManager {
 			if (!Array.isArray(rows) || !rows.length || !Array.isArray(rows[0]) || !rows[0].length || rows.some(row => !Array.isArray(row) || row.length !== rows[0].length || row.some(value => typeof value !== 'string' && typeof value !== 'number'))) throw new Error(`Invalid cell grid in ${name}`);
 			const styles = sheet.styles;
 			if (styles != null && (!Array.isArray(styles) || styles.length !== rows.length || styles.some((row, r) => !Array.isArray(row) || row.length !== rows[r].length || row.some(style => !style || typeof style !== 'object' || Array.isArray(style))))) throw new Error(`Invalid styles in ${name}`);
+			if (sheet.conditionalRules !== undefined) validateConditionalRules(sheet.conditionalRules, rows);
 			return { ...JSON.parse(JSON.stringify(sheet)), name: name.trim(), rows: rows.map(row => row.map(String)), styles: rows.map((row, r) => row.map((_, c) => ({ ...this.defaultStyling, ...styles?.[r]?.[c] }))), selRow: 0, selCol: 0 };
 		});
 		const active = data?.activeSheet ?? 0;
@@ -739,6 +753,7 @@ export default class SheetManager {
 	clearScreen() {
 		for (const mark of this.marks.filter(mark => mark.kind === 'dataset' && mark.sheetName === this.activeSheet.name)) this.rewriteMark(mark.name, null);
 		this.workbook.marks = this.marks.filter(mark => mark.kind !== 'dataset' || mark.sheetName !== this.activeSheet.name);
+		if (this.activeSheet.conditionalRules) this.activeSheet.conditionalRules = [];
 		this.rows = [];
 		this.styles = [];
 
@@ -762,23 +777,8 @@ export default class SheetManager {
 	}
 
 	loadStyles() {
-		//const cols = this.numOfCols.value;
-		//const rows = this.numOfRows.value;
-		//
-		const cols = this.rows[0].length;
-		const rows = this.rows.length;
-
-		for (let x = 0; x < cols; x++) {
-			for (let y = 0; y < rows; y++) {
-				try {
-					const styles = this.styles[y][x];
-					const com = `:hi bg ${styles.bg} fg ${styles.fg}`;
-					this.setStyles(com, y, x, false);
-				} catch (e) {
-					console.log(e.message);
-				}
-			}
-		}
+		// Every view binds colours from the model; never write one window's DOM to style a sheet.
+		this.styleVersion.value++;
 	}
 
 	setStyles(com, row, col, recordUndo = true) {
@@ -792,14 +792,12 @@ export default class SheetManager {
 			const validColor = style.color !== "";
 			if (split[i - 1] == "bg") {
 				if (validColor) {
-					this.getCell(row, col).style.backgroundColor = split[i];
 					this.styles[row][col].bg = split[i];
 				} else {
 					this.setPlaceholder(color + "is not a valid CSS color");
 				}
 			} else if (split[i - 1] == "fg") {
 				if (validColor) {
-					this.getCell(row, col).style.color = split[i];
 					this.styles[row][col].fg = split[i];
 				} else {
 					this.setPlaceholder(color + "is not a valid CSS color");
@@ -810,6 +808,7 @@ export default class SheetManager {
 				this.resetAllStyles();
 			}
 		}
+		this.loadStyles();
 		if (recordUndo) {
 			historyManager.do(this, 105);
 		}
@@ -821,9 +820,22 @@ export default class SheetManager {
 
 	resetAllStyles() {
 		// Existing highlight resets affect colours, not number formats or layout metadata.
-		this.styles = this.styles.map(row => row.map(style => ({ ...style, ...this.defaultStyling })));
+		this.styles = this.styles.map(row => row.map(style => ({ ...style, fg: this.defaultStyling.fg, bg: this.defaultStyling.bg })));
 		this.loadStyles();
 		historyManager.do(this, 141);
+	}
+
+	setConditionalRules(rules) {
+		const next = validateConditionalRules(rules, this.rows);
+		if (JSON.stringify(next) === JSON.stringify(this.activeSheet.conditionalRules ?? [])) return false;
+		this.activeSheet.conditionalRules = next;
+		this.recalculate();
+		historyManager.do(this);
+		return true;
+	}
+
+	adjustConditionalRules(axis, at, removed, inserted) {
+		if (this.activeSheet.conditionalRules?.length) this.activeSheet.conditionalRules = adjustConditionalRules(this.activeSheet.conditionalRules, axis, at, removed, inserted);
 	}
 
 	// function to get the formula for a specific cell
@@ -861,7 +873,7 @@ export default class SheetManager {
 	// Data only, from the final verified attempt. Foreign-sheet passes share the same session.
 	// Optional exact reads precede the UI's lossy decimal conversion; no pass/ctx escapes.
 	calculateWorkbook(read = null) {
-		return this.runPass((active, session) => {
+		const calculation = this.runPass((active, session) => {
 			const passes = this.sheets.map(record => session.passes.get(record) ?? new CalcPass(this, active.blocked, session, record));
 			const sheets = passes.map(pass => pass.snapshot());
 			let cells;
@@ -884,6 +896,10 @@ export default class SheetManager {
 			}
 			return { sheets, cells };
 		});
+		// Predicates only read settled typed values; they cannot affect spill discovery.
+		const results = new Map(this.sheets.map((record, i) => [record, calculation.sheets[i]]));
+		for (const record of this.sheets) Object.assign(results.get(record), evaluateConditionalRules(record, results, this.sheets, (name, column) => this.resolveMark(name, column)));
+		return calculation;
 	}
 
 	// Value of a cell: stored text, a formula result (the full 2D array at an array formula), or the
@@ -913,12 +929,14 @@ export default class SheetManager {
 		return this.runPass(pass => toCellValue(isFormula(pass.raw(row, col)) ? pass.result(row, col) : pass.raw(row, col)));
 	}
 
-	// Recompute every cell value, spill output and error explanation from sheet.rows (DOM-free).
+	// One settled workbook pass feeds every visible window. Inactive sheets must not show stale data.
 	recalculate() {
-		return this.installCalculation(this.runPass(pass => pass.snapshot()));
+		return this.installCalculation(this.calculateWorkbook());
 	}
 
-	installCalculation({ values, typed, spills, errors }) {
+	installCalculation({ sheets }) {
+		this.sheetResults.value = new Map(this.sheets.map((record, i) => [record, sheets[i]]));
+		const { values, typed, spills, errors } = this.sheetResults.value.get(this.activeSheet);
 		this.spillCells.clear();
 		spills.forEach((value, key) => this.spillCells.set(key, value));
 		this.cellErrors.clear();
@@ -930,12 +948,17 @@ export default class SheetManager {
 	}
 
 	refreshPresentation() {
-		const preview = this.formatPreview?.sheet === this.activeSheet ? this.formatPreview.styles : null;
-		this.cellPresentation.value = this.cellValues.value.map((row, r) => row.map((legacy, c) => {
-			const value = this.calculated?.typed[r]?.[c];
-			const text = toDisplayString(legacy);
-			return { value, ...(this.cellErrors.has(keyOf(r, c)) ? { text, warning: '' } : presentCell(value, preview?.get(keyOf(r, c)) ?? this.styles[r]?.[c], text)) };
-		}));
+		const results = new Map();
+		for (const [record, result] of this.sheetResults.value) {
+			const preview = this.formatPreview?.sheet === record ? this.formatPreview.styles : null;
+			const presentation = result.values.map((row, r) => row.map((legacy, c) => {
+				const value = result.typed[r][c], text = toDisplayString(legacy);
+				return { value, ...(result.errors.has(keyOf(r, c)) ? { text, warning: '' } : presentCell(value, preview?.get(keyOf(r, c)) ?? record.styles[r]?.[c], text)) };
+			}));
+			results.set(record, { ...result, presentation });
+		}
+		this.sheetResults.value = results;
+		this.cellPresentation.value = results.get(this.activeSheet)?.presentation ?? [];
 	}
 
 	// DOM-free, raw-content-atomic edit on the active sheet. Writes require raw string values
@@ -1006,99 +1029,28 @@ export default class SheetManager {
 	selectCell(row, col) {
 		row = Math.max(0, Math.min(row, this.rows.length - 1));
 		col = Math.max(0, Math.min(col, this.rows[0].length - 1));
-		if (document.getElementsByClassName("rcActive").length != 0) {
-			document.getElementsByClassName("rcActive")[0].className =
-				"cellRightClick rcInactive";
-		}
-		// tries to select the cell, if it fails, it logs the error
-		try {
-			this.selRow = row;
-			this.selCol = col;
-
-			let newBar = document.getElementById("formText");
-			//newBar.innerText = this.getFormula(row, col);
-			newBar.innerHTML = new SyntaxHighlighting().highlight(this.getFormula(row, col),);
-
-			// if it is defined, remove the focussed class from the previously selected cell
-			if (this.getSelectedCell() != undefined) {
-				this.getSelectedCell().className = "cell";
-			}
-
-			// update the cell picker value
-			document.getElementById("cellPicker").value =
-				this.columnLabel(col) + row;
-
-			// add the focussed class to the new selected cell
-			this.getCell(row, col).className = "focussed cell";
-
-			// update the relative row numbers
-			this.updateRelRows();
-			let scrollCol = col;
-			if (this.selCol < this.prevCol) {
-				scrollCol = col > 1 ? col - 1 : 0;
-			}
-			let scrollRow = row;
-			if (this.selRow > this.prevRow) {
-				scrollRow =
-					row < this.numOfRows.value - 1 ? row + 1 : this.numOfRows.value - 1;
-			} else if (this.selRow < this.prevRow) {
-				scrollRow = row > 2 ? row - 2 : 0;
-			}
-
-			const cell = this.getCell(scrollRow, scrollCol);
-
-			const initialPos = cell.getBoundingClientRect();
-
-			this.getCell(scrollRow, scrollCol).scrollIntoView({
-				block: "nearest",
-				inline: "nearest",
-			});
-
-			const finalPos = cell.getBoundingClientRect();
-
-			const scrolled =
-				initialPos.top !== finalPos.top || initialPos.left !== finalPos.left;
-
-			// if scrolling to first col, then scroll all the way
-			let scrollEdge = false;
-			let left = window.scrollX;
-			let top = window.scrollY;
-			if (col == 0) {
-				left = 0;
-				scrollEdge = true;
-			}
-
-			// if scrolling to last row, then scroll all the way
-			if (row == this.numOfRows.value - 1) {
-				top = document.body.scrollHeight;
-				scrollEdge = true;
-			}
-
-			// if scrolling to first row, then scroll all the way
-			if (row < 2) {
-				top = 0;
-				scrollEdge = true;
-			}
-
-			if (scrollEdge) {
-				window.scrollTo({
-					left: left,
-					top: top,
-				});
-			}
-
-			this.prevRow = this.selRow;
-			this.prevCol = this.selCol;
-
-			visualManager.setVisual(this.selRow, this.selCol, this.cellCurPos, this.numOfCols.value);
-
-			this.setCellCurPos(0, this.getFormula(this.selRow, this.selCol));
-
-			this.tempForm = this.getFormula(this.selRow, this.selCol);
-		} catch (e) {
-			console.log(e.message);
-		}
+		this.selRow = row; this.selCol = col;
+		const menu = document.getElementsByClassName('rcActive')[0];
+		if (menu) menu.className = 'cellRightClick rcInactive';
+		const picker = document.getElementById('cellPicker');
+		if (picker) picker.value = this.columnLabel(col) + row;
+		this.getSelectedCell()?.classList.remove('focussed');
+		this.getCell(row, col)?.classList.add('focussed');
+		this.ensureCellVisible(row, col);
+		this.tempForm = this.getFormula(row, col);
 		this.clearPlaceholder();
+	}
+
+	ensureCellVisible(row, col) {
+		const cell = this.getCell(row, col), viewport = cell?.closest('.sheet-viewport');
+		if (!viewport) return;
+		const rect = cell.getBoundingClientRect(), bounds = viewport.getBoundingClientRect();
+		const header = viewport.querySelector('thead').offsetHeight;
+		const labels = [...viewport.querySelectorAll('thead .rowLabelType')].reduce((sum, label) => sum + label.offsetWidth, 0);
+		if (rect.top < bounds.top + header) viewport.scrollTop -= bounds.top + header - rect.top;
+		else if (rect.bottom > bounds.bottom) viewport.scrollTop += rect.bottom - bounds.bottom;
+		if (rect.left < bounds.left + labels) viewport.scrollLeft -= bounds.left + labels - rect.left;
+		else if (rect.right > bounds.right) viewport.scrollLeft += rect.right - bounds.right;
 	}
 
 	scrollToCenterSelCell() {
@@ -1265,10 +1217,7 @@ export default class SheetManager {
 
 	// function to update the relative row numbers
 	updateRelRows() {
-		let labels = document.getElementsByClassName("relRow");
-		for (let i = 1; i < labels.length; i++) {
-			labels[i].innerText = Math.abs(this.selRow - i + 1);
-		}
+		// SheetRow binds labels to each window's own cursor.
 	}
 
 	// functions for saving using strings, temporary before i work out backend
@@ -1317,6 +1266,7 @@ export default class SheetManager {
 
 	removeColAtIndex(index) {
 		this.editMarkedStructure('col', index, 1, 0);
+		this.adjustConditionalRules('col', index, 1, 0);
 		for (let i = 0; i < this.rows.length; i++) {
 			this.rows[i].splice(index, 1);
 			this.styles[i].splice(index, 1);
@@ -1336,6 +1286,7 @@ export default class SheetManager {
 
 	removeRowAtIndex(index) {
 		this.editMarkedStructure('row', index, 1, 0);
+		this.adjustConditionalRules('row', index, 1, 0);
 		this.rows.splice(index, 1);
 		this.styles.splice(index, 1);
 		this.numOfRows.value--;
@@ -1364,6 +1315,7 @@ export default class SheetManager {
 		const rowsToInsert = Array.from({ length: amount }, createRow);
 		const stylesToInsert = Array.from({ length: amount }, createStyleRow);
 
+		this.adjustConditionalRules('row', index, 0, amount);
 		this.rows.splice(index, 0, ...rowsToInsert);
 		this.styles.splice(index, 0, ...stylesToInsert);
 
@@ -1376,6 +1328,7 @@ export default class SheetManager {
 
 	insertColumnAtIndex(index) {
 		this.editMarkedStructure('col', index, 0, 1);
+		this.adjustConditionalRules('col', index, 0, 1);
 		for (let i = 0; i < this.numOfRows.value; i++) {
 			this.rows[i].splice(index, 0, "");
 			this.styles[i].splice(index, 0, {

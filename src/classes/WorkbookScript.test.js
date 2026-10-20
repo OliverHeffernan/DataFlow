@@ -2,6 +2,9 @@ import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import SheetManager from './SheetManager.js';
 import HistoryManager from './HistoryManager.js';
+import CheckCommand from './CheckCommand.js';
+import WindowManager from './WindowManager.js';
+import VimKeyboard from './VimKeyboard.js';
 import { captureScriptWorkbook, executeWorkbookScript, publishWorkbookScript } from './WorkbookScript.js';
 
 const sheet = new SheetManager(), history = new HistoryManager();
@@ -29,6 +32,7 @@ test('cross-sheet exact reads, read-your-writes and dataset growth publish as on
 	sheet.sheets[1].acceptedMetadata = { preserve: ['sheet'] };
 	sheet.styles[0][0] = { fg: 'white', bg: 'transparent', formatKind: 'number', formatDigits: 3, formatGroup: true };
 	sheet.sheets[1].styles[0][1] = { fg: 'orange', bg: 'navy', formatKind: 'currency', formatDigits: 3, formatCurrency: 'USD' };
+	sheet.sheets[1].conditionalRules = [{ id: 1, source: '=CF().range(A0:B1).when(AND(isNumeric([]{}), []{}>3)).fg("lime")' }];
 	sheet.rows[2][0] = 'amount'; sheet.rows[3][0] = '';
 	sheet.setMark('sales', { r0: 2, c0: 0, r1: 2, c1: 0 }, 'dataset');
 	const before = content();
@@ -47,7 +51,10 @@ df.log(df.sheet('Report'):range('C2'):read_values()[1][1].decimal)
 	assert.deepEqual(sheet.sheets[1].acceptedMetadata, { preserve: ['sheet'] });
 	assert.deepEqual(sheet.sheets[1].styles[0][1], { fg: 'orange', bg: 'navy', formatKind: 'currency', formatDigits: 3, formatCurrency: 'USD' });
 	assert.equal(sheet.cellPresentation.value[0][0].text, '9,007,199,254,740,993.125');
-	for (const field of ['cellPresentation', 'formatPreview', 'calculated', 'typed']) assert.equal(Object.hasOwn(sheet.serializeWorkbook(), field), false);
+	const report = sheet.sheetResults.value.get(sheet.sheets[1]);
+	assert.equal(report.presentation[0][1].text, 'USD 2.000');
+	assert.deepEqual([...report.colors], [['0:0', { fg: 'lime' }], ['1:0', { fg: 'lime' }], ['1:1', { fg: 'lime' }]]);
+	for (const field of ['cellPresentation', 'formatPreview', 'calculated', 'typed', 'sheetResults', 'windows']) assert.equal(Object.hasOwn(sheet.serializeWorkbook(), field), false);
 	assert.equal(sheet.path, '/keep.dflo');
 	history.undo(sheet); assert.deepEqual(JSON.parse(content()), JSON.parse(before));
 	history.redo(sheet); assert.equal(sheet.describeDataset('sales').rowCount, 1);
@@ -104,6 +111,43 @@ test('navigation during a job preserves current sheet/cursor/cache; stale edits 
 	const formatted = content();
 	assert.throws(() => publishWorkbookScript(sheet, beforeFormat, result), /Workbook changed/);
 	assert.equal(content(), formatted);
+});
+
+test('window publication keeps current focus and finishes FORMAT before stale script validation', () => {
+	const check = Object.assign(Object.create(CheckCommand.prototype), {
+		sheet, windows: new WindowManager(sheet.activeSheet), render() {},
+	});
+	check.currentWindow = check.windows.active;
+	check.keyboard = new VimKeyboard(sheet);
+	check.keyboard.move({ row: 1, col: 1 });
+	check.keyboard.anchor = { row: 0, col: 0 }; check.keyboard.mode = 'v';
+	const request = captureScriptWorkbook(sheet, check.captureWindowContext());
+	const result = executeWorkbookScript({ ...request, source: `df.active_sheet():range('B0'):write_raw({{'19'}}); df.sheet('Report'):range('A0'):write_raw({{'=Inputs!B0*2'}})` });
+	const left = check.currentWindow, right = check.windows.split('vertical');
+	left.row = 1; left.col = 1; left.scrollTop = 31;
+	right.sheet = sheet.sheets[1]; right.row = 2; right.col = 1; right.scrollLeft = 47;
+	check.currentWindow = right;
+	sheet.switchSheet('Report'); sheet.selRow = 2; sheet.selCol = 1;
+	check.keyboard = new VimKeyboard(sheet, { formatChange: () => history.do(sheet) });
+	assert.equal(check.preserveWindows(() => publishWorkbookScript(sheet, request, result)), true);
+	assert.equal(check.windows.active, right); assert.equal(sheet.activeSheet.name, 'Report');
+	assert.deepEqual([sheet.selRow, sheet.selCol, left.row, left.col, left.scrollTop, right.scrollLeft], [2, 1, 1, 1, 31, 47]);
+	assert.equal(sheet.cellPresentation.value[0][0].text, '38');
+	assert.equal(sheet.sheetResults.value.get(left.sheet).presentation[0][1].text, '19');
+	const stale = captureScriptWorkbook(sheet, check.captureWindowContext());
+	const late = executeWorkbookScript({ ...stale, source: `df.sheet('Inputs'):range('C0'):write_raw({{'must not publish'}})` });
+	check.keyboard.feed('gFfj<CR>d6<CR>');
+	assert.equal(sheet.styles[2][1].formatDigits, undefined);
+	assert.throws(() => check.preserveWindows(() => publishWorkbookScript(sheet, stale, late)), /Workbook changed/);
+	assert.equal(sheet.styles[2][1].formatDigits, 6);
+	assert.equal(sheet.sheets[0].rows[0][2], '');
+	assert.equal(check.windows.active, right);
+	check.preserveWindows(() => history.undo(sheet));
+	assert.equal(sheet.styles[2][1].formatDigits, undefined);
+	assert.equal(sheet.rows[0][0], '=Inputs!B0*2');
+	check.preserveWindows(() => history.undo(sheet));
+	assert.equal(sheet.sheets[0].rows[0][1], '2'); assert.equal(sheet.rows[0][0], '');
+	assert.equal(check.windows.active, right);
 });
 
 test('spill owners/children and dataset headers remain protected across ordered batches', () => {

@@ -35,6 +35,70 @@ Sheet-switch commands reset transient navigation marks, jumps, searches, and vis
 
 `:w` saves **all sheets**, their names, styles, and the active sheet; `:wa` saves the workbook as another file. Browser saves download the same workbook format as desktop saves. `:o` still reads old single-sheet `{rows, styles}` `.dflo` files and rows-only JSON arrays (including `.heff` files); each becomes Sheet1 with default styling where absent. Saving upgrades to the workbook format; older app versions do not understand new workbook files. Invalid files do not replace the current workbook.
 
+### Split windows share data, not navigation
+
+| Command / keys | Action |
+| --- | --- |
+| `:splitv` | Split the active window left/right; focus the new right window |
+| `:splith` | Split the active window top/bottom; focus the new bottom window |
+| `Ctrl-w h/j/k/l` | Focus the nearest window left/down/up/right; stay put at an outer edge |
+| `:sheet 2` / `:sheet name` | Replace the active window's content with that sheet |
+| `:cf` | Replace the active window's content with its sheet's conditional rules |
+| `:close` / `Ctrl-w c` | Close the active window, keeping at least one window open |
+| `:close!` | Close even with an unapplied rule draft, discarding that window's draft |
+
+Splits nest in either direction. Drag a separator to resize it, or Tab to it and use Left/Right for a vertical separator, Up/Down for a horizontal separator. Escape returns keyboard focus to the workspace. In INSERT, Ctrl-w retains Vim's delete-word meaning; Escape to NORMAL before navigating windows.
+
+Each window keeps its own cursor, scroll, keyboard navigation and rule draft. Several windows can show the same sheet; edits, styling, charts, spills and cross-sheet calculations update every view. The formula bar and command footer belong to the focused window. Window navigation also works in formula NORMAL, visual selections and rule text NORMAL. Registers, macros and Lua mappings remain shared, including when a macro changes windows.
+
+FORMAT previews use the invoking sheet and range, appearing in every view of that sheet without affecting other sheets. Switching windows or publishing workbook data finishes confirmed FORMAT adjustments on the original target first, with one undo step. An unbound Ctrl-w outside FORMAT text input finishes the session and starts window navigation; explicit Lua FORMAT bindings and text inputs retain their keys. Conditional-rule windows cannot enter cell FORMAT.
+
+Window splits, focus, cursors, scroll and unapplied drafts are session state: they are not saved in `.dflo` or restored by workbook undo. Undo rebinds windows to restored sheets by name and clamps cursors to the restored dimensions; a removed sheet falls back to the first sheet. Opening another workbook keeps the split layout and rebinds its views, but refuses to discard unapplied rule drafts.
+
+For host integrations, `CheckCommand.captureWindowContext()` returns a detached `{windowId, sheetName, cursor: {row, col}, selection: {r0, c0, r1, c1}}` from a sheet window; rule windows reject capture. Capture once before an asynchronous picker/worker. Wrap subsequent **synchronous live publication** in `preserveWindows(publish)` to retain the currently focused window, not the invocation's old focus. The callback owns validation, calculation and history. Detached worker calculations must not use this UI wrapper. Both helpers leave window state outside workbook metadata.
+
+### Conditional rules use the formula builder
+
+Select a target rectangle, then type `:splitv`, `:cf`, and `a` to keep the sheet visible beside a new rule draft. The builder starts with the selected range. It is configuration text in the rules window, not a cell formula:
+
+```text
+=CF()
+  .name("Overdue tasks")
+  .range(A1:D6)
+  .when(C{}="Overdue")
+  .bg("#40381c")
+  .fg("#f4d779")
+```
+
+Use Vim text editing in the draft: `i` inserts, `Esc` returns to text NORMAL, `Shift-Enter` inserts a newline, and `Tab` completes builder methods, functions and backtick marks/columns. Plain `j/k` remain text-line motions here. Enter applies the whole draft atomically; errors leave it open. Draft `u` / Ctrl-r affects only the text buffer. Switching windows retains the draft. Apply or `:cf discard` before replacing it, closing normally, saving or opening a workbook. A draft whose sheet/rule changed in another view must be copied, discarded and reopened rather than overwriting that newer work.
+
+In the rule list, `j/k` selects, `a` creates, Enter or `i` edits, `x` deletes, and `J/K` moves a rule later/earlier. `u` / Ctrl-r uses chronological workbook undo/redo. Commands are also available for Lua mappings:
+
+| Command | Action |
+| --- | --- |
+| `:cf` / `:cf list` | Show the rule list; `list` leaves an unchanged editor |
+| `:cf new` | Start a rule using the last sheet selection in that window |
+| `:cf edit [id]` | Edit the selected rule, or the displayed numeric ID |
+| `:cf apply` / `:cf discard` | Apply or discard the window's draft |
+| `:cf delete [id]` | Remove the selected rule or a specific ID |
+| `:cf up` / `:cf down` | Move the selected rule earlier/later |
+
+`.range()` takes one local absolute cell/rectangle with zero-based rows. `.when()` evaluates the existing formula language once per target cell, with that cell as the reference origin: `[]{}` reads that cell, `C{}` reads column C on its row, `[-1]{}` reads its left neighbour, and `A0` always reads A0. Cross-sheet coordinates keep the same origin on the target sheet. Backtick marks and dataset columns use the workbook's existing read-only descriptors. No Excel `$` anchoring or separate expression language is introduced.
+
+Examples of conditions:
+
+```text
+AND(isNumeric([]{}), []{}>100)
+AND([]{}<>"", COUNTIF(A1:A20, []{})>1)
+SUM(`sales.amount)>`budget
+```
+
+Predicates read precise calculated values **before display formatting**, not rendered text or chart labels. Numeric cell text is numeric; blank cells are `""`, so guard numeric thresholds with `isNumeric`. Spill sources and children read their individual displayed elements, retaining numeric precision. Actual errors propagate into a per-rule diagnostic and add no conditional colour for that target; error-looking text stays text. Lazy `IF` and `IFERROR` work as in cells, including uncatchable circular errors. An independent true condition can colour an error cell without reading the error. Chart targets are skipped; reading a chart in a predicate is an error.
+
+Only foreground/background colours are supported initially, using hex or CSS named colours. A matching rule overrides direct `:hi` styling; later matching rules win independently for each colour channel. Nonmatching rules restore the underlying direct colours automatically. Rules do not mutate stored styles, values, wrapping, alignment, number formats or geometry. Colour scales, icons and data bars are not included. Predicates run after a settled workbook calculation and can only read it; random functions, assignments, callbacks and evaluator/configuration capabilities are rejected, even in unused branches.
+
+Rule target rectangles shift when rows/columns are inserted before them, expand for insertions inside, and shrink/drop on deletion. Literal coordinates inside predicates stay positional, like ordinary cell formulas; named references follow their own structural rules. Sheet/mark/column renames rewrite real predicate references without changing quoted labels; forced deletion permanently invalidates those references. Creating, editing, reordering and deleting rules each creates one workbook undo step. Rules save as sheet metadata in v3 `.dflo`, duplicate independently, and recalculate after load/undo or any source edit. Invalid saved rules reject the entire open without replacing live data. `:clear` removes rules on the cleared sheet; undo restores them with its cells/styles.
+
 ### Cross-sheet formula references
 
 Unqualified references still address the sheet containing the formula. Add a sheet name and `!` to read another sheet, using the existing zero-based row labels:
@@ -391,6 +455,6 @@ Source ≤128 KiB; individual transferred cell ≤16 KiB; aggregate reads/writes
 
 Coverage follows the families in [Neovim motion.txt](https://neovim.io/doc/user/motion.html), with the spreadsheet translations above. It does **not** claim byte-for-byte Neovim parity. Searches use JavaScript Unicode regular expressions, not Vim regex syntax or search offsets. Text motions count Unicode code points, not grapheme clusters or tab-expanded screen columns. Formula section/method/comment/tag/bracket navigation is lexical, without language parsing, nroff macros, configurable matchpairs, or matchit. Sheet marks are persistent workbook references; formula text/special navigation marks are session-local. Uppercase marks do not open other files and numbered ShaDa marks are unavailable.
 
-Definition/declaration and tag motions (`gd/gD`, Ctrl-], `g]`, `g<C-]>`, Ctrl-t), file/include navigation (`gf`, Ctrl-w variants, `[i/]i`), folds (`zj/zk`), diff (`[c/]c`), diagnostics (`[d/]d`), quickfix/location lists and Neovim window/buffer switching have no backing subsystem. `gF` opens DataFlow's format panel, not file navigation. Use the sheet commands above to switch workbook sheets. Unsupported motions are not silently redirected to unrelated cells. Neovim Select mode, named/numbered registers, arbitrary operators (`gq`, `=`, shell filters, folds), Ex ranges/scripts and full insert/replace-mode command parity are outside this implementation.
+Definition/declaration and tag motions (`gd/gD`, Ctrl-], `g]`, `g<C-]>`, Ctrl-t), file/include navigation (`gf`, `[i/]i`), folds (`zj/zk`), diff (`[c/]c`), diagnostics (`[d/]d`), quickfix/location lists and general Neovim buffer switching have no backing subsystem. `gF` opens DataFlow's format panel, not file navigation. DataFlow's sheet and split-window commands above are supported, not the full Neovim window API. Unsupported motions are not silently redirected to unrelated cells. Neovim Select mode, named/numbered registers, arbitrary operators (`gq`, `=`, shell filters, folds), Ex ranges/scripts and full insert/replace-mode command parity are outside this implementation.
 
 Run `npm test` for the keyboard/Lua contract tests, `npm run build` for the frontend, and `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib` for native config-file creation/reload tests.
