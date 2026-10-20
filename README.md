@@ -176,6 +176,18 @@ Type commands directly while the spreadsheet is focused. The bottom bar is a rea
 
 `v` selects a cell rectangle, `V` selects whole rows, and `Ctrl-v` selects a block. Use `d/c/y` with a motion or selection, `dd/cc/yy` for rows, `p/P` to put, `u/Ctrl-r` to undo/redo, and `.` to repeat an edit. `qa … q` records a macro; `@a` plays it.
 
+**Persistent marks:** `ma` names a cell, or a visual rectangle; backtick then `a` jumps back. Long names use `:mark tax_rate B0` or `:mark expenses B1:B8`. Names are workbook-wide and case-insensitive. Reference them with a backtick, not Excel-style names:
+
+```text
+=`tax_rate * B3
+=SUM(`expenses)
+:dataset sales A0:B2
+=SUM(`sales.amount)
+=CHART().bar().series(`sales.amount).x(`sales.item)
+```
+
+A dataset adds literal unique column headers and a bounded record body to a mark. Adjacent committed writes expand it into blank rows within its fixed columns; `:datasetappend sales 3` explicitly includes three blank records. Headers rename through `:datasetcolumnrename`; datasets do not add in-place sorting/filtering, validation, grouping, or automatic formula filling. `:marks`, `:markgoto`, `:markrename`, and `:delmarks[!]` manage definitions. Marks, schemas and cell changes save together in v3 `.dflo` and participate in chronological workbook undo. Legacy files remain readable. See the [mark/dataset rules](docs/keyboard.md#persistent-marks-name-inputs-and-ranges) for bounds, rename/delete and expansion details.
+
 **Lua configuration:** `:configcreate` creates an `init.lua` template. Edit it and use `:source` to reload. In a browser, download the template, edit it, and import it with `:config`; valid configurations persist in browser storage.
 
 See the [keyboard reference](docs/keyboard.md) for the complete motion coverage matrix, spreadsheet translations, Lua API, limitations, and migration from the old shortcuts.

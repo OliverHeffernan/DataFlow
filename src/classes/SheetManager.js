@@ -1,6 +1,7 @@
 import { ref, shallowRef, shallowReactive } from "vue";
 //import { reactive } from "vue";
-import { FormulaError, cellLabel, cellToValue, evaluateFormula, toCellValue, rewriteSheetReferences } from "./FormulaFunctions.js";
+import { FormulaError, cellLabel, cellToValue, evaluateFormula, toCellValue, rewriteSheetReferences, rewriteMarkReferences } from "./FormulaFunctions.js";
+import { markName, datasetColumns, validateMarks, structuralMarks } from './WorkbookMarks.js';
 import SyntaxHighlighting from "./SyntaxHighlighting.js";
 import { evaluateChart } from "./ChartFormula.js";
 
@@ -49,6 +50,7 @@ const intersects = (row, col, rows, cols, region) => row <= region.r1 && col <= 
 class CalcPass {
 	constructor(sheet, blocked, session, record = sheet.activeSheet) {
 		this.rows = record.rows;
+		this.datasets = sheet.marks.filter(mark => mark.kind === 'dataset' && mark.sheetName === record.name);
 		this.id = sheet.sheets.indexOf(record);
 		session.passes.set(record, this);
 		this.blocked = blocked;
@@ -64,6 +66,7 @@ class CalcPass {
 			if (isFormula(raw)) this.formulaCells.push([r, c]);
 		}));
 		this.ctx = {
+			mark: (name, column) => sheet.resolveMark(name, column),
 			sheet: name => {
 				const target = sheet.sheets.find(item => item.name.toLowerCase() === name.toLowerCase());
 				if (!target) throw new FormulaError('#REF!', `Unknown sheet: ${name}`);
@@ -262,6 +265,7 @@ class CalcPass {
 
 	baseProblem(row, col, rows, cols) {
 		const range = `${cellLabel(row, col)}:${cellLabel(row + rows - 1, col + cols - 1)}`;
+		if (this.datasets.some(mark => intersects(row, col, rows, cols, mark.bounds))) return `Spill range ${range} intersects a dataset; dataset formulas must be scalar`;
 		for (let r = row; r < row + rows; r++) {
 			if (!this.inSheet(r, col + cols - 1)) return `Spill range ${range} (${rows}×${cols}) extends beyond the edge of the sheet`;
 		}
@@ -373,7 +377,7 @@ export default class SheetManager {
 			return SheetManager.instance;
 		}
 
-		this.workbook = shallowReactive({ sheets: [{ name: 'Sheet1', rows: [], styles: [], selRow: 0, selCol: 0 }], activeSheetIndex: 0 });
+		this.workbook = shallowReactive({ sheets: [{ name: 'Sheet1', rows: [], styles: [], selRow: 0, selCol: 0 }], activeSheetIndex: 0, marks: [] });
 		this.cellValues = shallowRef([]);
 		// derived by recalculate(): "row:col" -> { row, col, rows, cols } of the array formula spilling there
 		this.spillCells = new Map();
@@ -427,6 +431,153 @@ export default class SheetManager {
 	set selRow(row) { this.activeSheet.selRow = row; }
 	get selCol() { return this.activeSheet.selCol; }
 	set selCol(col) { this.activeSheet.selCol = col; }
+	get marks() { return this.workbook.marks ?? []; }
+
+	mark(name) {
+		const mark = this.marks.find(mark => mark.name.toLowerCase() === String(name).toLowerCase());
+		if (!mark) throw new FormulaError('#NAME?', `Unknown mark: ${name}`);
+		return mark;
+	}
+
+	// Read-only descriptors for formula/editor/chart/automation consumers. No live handles escape.
+	resolveMark(name, column) {
+		const mark = this.mark(name);
+		if (!mark.bounds) throw new FormulaError('#REF!', `Mark ${name}'s cells were deleted`);
+		let { r0, c0, r1, c1 } = mark.bounds;
+		if (mark.kind === 'dataset') {
+			r0++;
+			if (column !== undefined) {
+				const item = datasetColumns(mark, this.sheets).find(item => item.name.toLowerCase() === column.toLowerCase());
+				if (!item) throw new FormulaError('#REF!', `Unknown column ${column} in ${name}`);
+				c0 = c1 = item.col;
+			}
+		} else if (column !== undefined) throw new FormulaError('#REF!', `Mark ${name} is not a dataset`);
+		return { name: mark.name, sheetName: mark.sheetName, mode: mark.kind === 'cell' ? 'cell' : 'range', r0, c0, r1, c1, height: r1 - r0 + 1, width: c1 - c0 + 1 };
+	}
+
+	describeDataset(name) {
+		const mark = this.mark(name);
+		if (mark.kind !== 'dataset') throw new Error(`Mark ${name} is not a dataset`);
+		return { ...this.resolveMark(name), header: { ...mark.bounds, r1: mark.bounds.r0 }, columns: datasetColumns(mark, this.sheets), rowCount: mark.bounds.r1 - mark.bounds.r0 };
+	}
+
+	setMark(name, bounds, kind = 'cell', sheetName = this.activeSheet.name) {
+		if (!markName(name)) throw new Error('Mark names must be identifiers: letters/underscore, then letters/digits/underscore');
+		const previous = this.marks.find(mark => mark.name.toLowerCase() === name.toLowerCase());
+		if (previous?.kind === 'dataset') throw new Error('Remove the dataset definition before resetting its mark');
+		const next = [...this.marks.filter(mark => mark !== previous), { name, kind, sheetName, bounds: { ...bounds } }];
+		validateMarks(next, this.sheets);
+		if (kind === 'dataset') {
+			const target = this.sheets.find(sheet => sheet.name === sheetName);
+			// Inspect the target's actual spill map, not the active sheet's same coordinates.
+			const oldActive = this.workbook.activeSheetIndex;
+			try {
+				this.workbook.activeSheetIndex = this.sheets.indexOf(target);
+				this.recalculate();
+				if ([...this.spillCells.keys()].some(key => { const [row, col] = key.split(':').map(Number); return intersects(row, col, 1, 1, bounds); })) throw new Error('A dataset cannot contain spill cells');
+			} finally { this.workbook.activeSheetIndex = oldActive; this.recalculate(); }
+		}
+		this.workbook.marks = next;
+		this.recalculate(); historyManager.do(this);
+	}
+
+	rewriteMark(name, replacement, column = null, newColumn = null) {
+		for (const sheet of this.sheets) sheet.rows = sheet.rows.map(row => row.map(text => rewriteMarkReferences(text, name, replacement, column, newColumn)));
+	}
+
+	renameMark(name, replacement) {
+		const mark = this.mark(name);
+		if (!markName(replacement) || this.marks.some(item => item !== mark && item.name.toLowerCase() === replacement.toLowerCase())) throw new Error('Invalid or duplicate mark name');
+		this.rewriteMark(mark.name, replacement);
+		this.workbook.marks = this.marks.map(item => item === mark ? { ...item, name: replacement } : item);
+		this.recalculate(); historyManager.do(this);
+	}
+
+	deleteMark(name, force = false) {
+		const mark = this.mark(name);
+		if (!force && this.sheets.some(sheet => sheet.rows.some(row => row.some(text => rewriteMarkReferences(text, mark.name, null) !== text)))) throw new Error('Mark is referenced; use :delmarks! to invalidate its references');
+		this.rewriteMark(mark.name, null);
+		this.workbook.marks = this.marks.filter(item => item !== mark);
+		this.recalculate(); historyManager.do(this);
+	}
+
+	renameDatasetColumn(name, column, replacement) {
+		const mark = this.mark(name), schema = this.describeDataset(name);
+		const item = schema.columns.find(item => item.name.toLowerCase() === column.toLowerCase());
+		if (!item || !markName(replacement) || schema.columns.some(other => other !== item && other.name.toLowerCase() === replacement.toLowerCase())) throw new Error('Invalid or duplicate dataset column');
+		this.sheets.find(sheet => sheet.name === mark.sheetName).rows[mark.bounds.r0][item.col] = replacement;
+		this.rewriteMark(mark.name, mark.name, item.name, replacement);
+		this.recalculate(); historyManager.do(this);
+	}
+
+	// Pure preflight seam consumed by fill's applyRangeEdit. Publication/history stay caller-owned.
+	prepareMarkWrites(writes, baseline = this.rows) {
+		const next = this.marks.map(mark => ({ ...mark, bounds: mark.bounds && { ...mark.bounds } }));
+		for (const mark of next.filter(mark => mark.kind === 'dataset' && mark.sheetName === this.activeSheet.name)) {
+			const b = mark.bounds;
+			if (writes.some(write => write.row === b.r0 && write.col >= b.c0 && write.col <= b.c1 && write.value !== baseline[write.row][write.col])) throw new Error(`Use :datasetcolumnrename to edit ${mark.name}'s headers`);
+			const added = writes.filter(write => write.row > b.r1 && write.col >= b.c0 && write.col <= b.c1);
+			if (!added.length || !added.some(write => !isEmpty(write.value))) continue;
+			const writtenRows = new Set(added.map(write => write.row));
+			let first = Infinity, end = b.r1;
+			for (const row of writtenRows) { first = Math.min(first, row); end = Math.max(end, row); }
+			if (first !== b.r1 + 1) continue;
+			// Only a single block confined to dataset columns may imply new records.
+			if (writes.some(write => write.col < b.c0 || write.col > b.c1)) continue;
+			for (let row = b.r1 + 1; row <= end; row++) {
+				if (!writtenRows.has(row)) throw new Error('Dataset expansion cannot skip rows');
+				for (let col = b.c0; col <= b.c1; col++) {
+					if (!isEmpty(baseline[row]?.[col]) || this.spillCells.has(keyOf(row, col))) throw new Error(`Dataset ${mark.name} expansion is blocked at ${cellLabel(row, col)}`);
+				}
+			}
+			b.r1 = end;
+		}
+		return validateMarks(next, this.sheets);
+	}
+
+	appendDataset(name, count = 1) {
+		const mark = this.mark(name);
+		if (mark.kind !== 'dataset' || !Number.isInteger(count) || count < 1) throw new Error('Append requires a dataset and a positive row count');
+		const target = this.sheets.find(sheet => sheet.name === mark.sheetName), b = mark.bounds;
+		if (b.r1 + count >= target.rows.length) throw new Error('Append exceeds sheet bounds; insert sheet rows first');
+		const active = this.workbook.activeSheetIndex;
+		try {
+			this.workbook.activeSheetIndex = this.sheets.indexOf(target); this.recalculate();
+			for (let row = b.r1 + 1; row <= b.r1 + count; row++) for (let col = b.c0; col <= b.c1; col++) {
+				if (!isEmpty(target.rows[row][col]) || this.spillCells.has(keyOf(row, col))) throw new Error('Append destinations must be blank and not spill-covered');
+			}
+			const next = this.marks.map(item => item === mark ? { ...item, bounds: { ...b, r1: b.r1 + count } } : item);
+			validateMarks(next, this.sheets); this.workbook.marks = next;
+		} finally { this.workbook.activeSheetIndex = active; this.recalculate(); }
+		historyManager.do(this);
+	}
+
+	editMarkedStructure(axis, at, removed, inserted) {
+		this.workbook.marks = structuralMarks(this.marks, this.activeSheet.name, axis, at, removed, inserted);
+		this.markStructureChanged = true;
+	}
+
+	noteMarkWrite(row, col) {
+		(this.markWriteCells ??= new Set()).add(keyOf(row, col));
+	}
+
+	commitMarkedEdit() {
+		const previous = historyManager.historyFor(this).undo.at(-1);
+		try {
+			if (!this.markStructureChanged && previous) {
+				const baseline = previous.state.sheets.find(sheet => sheet.name === this.activeSheet.name)?.rows;
+				if (baseline && baseline.length === this.rows.length && baseline[0].length === this.rows[0].length) {
+					const writes = [];
+					this.rows.forEach((row, r) => row.forEach((value, c) => { if (value !== baseline[r][c] || this.markWriteCells?.has(keyOf(r, c))) writes.push({ row: r, col: c, value }); }));
+					this.workbook.marks = this.prepareMarkWrites(writes, baseline);
+				}
+			}
+			validateMarks(this.marks, this.sheets);
+		} catch (error) {
+			if (previous) historyManager.loadState(this, previous);
+			throw error;
+		} finally { this.markStructureChanged = false; this.markWriteCells = null; }
+	}
 
 	validateSheetName(name, except = null) {
 		if (typeof name !== 'string' || !name.trim() || /[\x00-\x1f\x7f]/.test(name)) throw new Error('A sheet name must be non-empty and on one line');
@@ -474,6 +625,7 @@ export default class SheetManager {
 	renameSheet(name) {
 		name = this.validateSheetName(name, this.activeSheet);
 		this.rewriteSheetReferences(this.activeSheet.name, name);
+		this.workbook.marks = this.marks.map(mark => mark.sheetName === this.activeSheet.name ? { ...mark, sheetName: name } : mark);
 		this.activeSheet.name = name;
 		this.workbook.sheets = [...this.sheets];
 		this.recalculate();
@@ -496,7 +648,10 @@ export default class SheetManager {
 			rewriteSheetReferences(text, removed.name, null) !== text)));
 		const hasData = removed.rows.some(row => row.some(value => value !== '' && value != null));
 		const hasStyles = removed.styles.some(row => row.some(style => style.fg !== this.defaultStyling.fg || style.bg !== this.defaultStyling.bg));
-		if (!force && (hasData || hasStyles || referenced)) throw new Error('Sheet has data, styles, or references; use :sheetdelete! to delete it permanently');
+		const owned = this.marks.filter(mark => mark.sheetName === removed.name);
+		if (!force && (hasData || hasStyles || referenced || owned.length)) throw new Error('Sheet has data, styles, or references; use :sheetdelete! to delete it');
+		for (const mark of owned) this.rewriteMark(mark.name, null);
+		this.workbook.marks = this.marks.filter(mark => mark.sheetName !== removed.name);
 		this.rewriteSheetReferences(removed.name, null);
 		this.workbook.sheets = this.sheets.filter(sheet => sheet !== removed);
 		this.switchSheet(active === removed ? Math.min(index + 1, this.sheets.length) : this.sheets.indexOf(active) + 1);
@@ -505,7 +660,7 @@ export default class SheetManager {
 
 	serializeWorkbook() {
 		const { activeSheetIndex, ...data } = this.workbook;
-		return { ...data, version: 2, activeSheet: activeSheetIndex, sheets: this.sheets.map(({ selRow, selCol, ...sheet }) => sheet) };
+		return { ...data, version: 3, activeSheet: activeSheetIndex, sheets: this.sheets.map(({ selRow, selCol, ...sheet }) => sheet) };
 	}
 
 	restoreWorkbook(data) {
@@ -525,7 +680,7 @@ export default class SheetManager {
 
 	loadWorkbook(data, path = null) {
 		// Validate the whole file before replacing any existing work. Both legacy layouts remain readable.
-		if (data?.version !== undefined && ![1, 2].includes(data.version)) throw new Error(`Unsupported workbook version: ${data.version}`);
+		if (data?.version !== undefined && ![1, 2, 3].includes(data.version)) throw new Error(`Unsupported workbook version: ${data.version}`);
 		const source = Array.isArray(data) ? [{ rows: data }] : data?.sheets ?? [data];
 		if (!Array.isArray(source) || !source.length) throw new Error('Invalid workbook: at least one sheet is required');
 		const names = new Set();
@@ -540,9 +695,12 @@ export default class SheetManager {
 		});
 		const active = data?.activeSheet ?? 0;
 		if (!Number.isInteger(active) || active < 0 || active >= sheets.length) throw new Error('Invalid active sheet');
+		const marks = JSON.parse(JSON.stringify(data?.marks === undefined ? [] : data.marks));
+		validateMarks(marks, sheets);
 		const { version, activeSheet, sheets: ignored, ...metadata } = data?.sheets ? data : {};
 		for (const key of Object.keys(this.workbook)) delete this.workbook[key];
 		Object.assign(this.workbook, JSON.parse(JSON.stringify(metadata)));
+		this.workbook.marks = marks;
 		this.workbook.sheets = sheets;
 		this.workbook.activeSheetIndex = active;
 		this.path = path;
@@ -551,6 +709,8 @@ export default class SheetManager {
 	}
 
 	clearScreen() {
+		for (const mark of this.marks.filter(mark => mark.kind === 'dataset' && mark.sheetName === this.activeSheet.name)) this.rewriteMark(mark.name, null);
+		this.workbook.marks = this.marks.filter(mark => mark.kind !== 'dataset' || mark.sheetName !== this.activeSheet.name);
 		this.rows = [];
 		this.styles = [];
 
@@ -850,6 +1010,7 @@ export default class SheetManager {
 		// set the formula from the formula bar to the selected cell
 		this.rows[this.selRow][this.selCol] =
 			document.getElementById("formulaBar")?.value ?? this.tempForm;
+		this.commitMarkedEdit();
 
 		// update the value of the selected cell
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
@@ -865,6 +1026,7 @@ export default class SheetManager {
 		const oldValue = this.getFormula(this.selRow, this.selCol);
 
 		this.rows[this.selRow][this.selCol] = value;
+		this.commitMarkedEdit();
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 		historyManager.do(this, 353);
 	}
@@ -912,9 +1074,11 @@ export default class SheetManager {
 		for (let i = 0; i < amount; i++) {
 			for (let y = 0; y < this.copyBuffer.length; y++) {
 				for (let x = 0; x < this.copyBuffer[y].length; x++) {
+					this.noteMarkWrite(this.selRow + y, this.selCol + x);
 					this.rows[this.selRow + y][this.selCol + x] = this.copyBuffer[y][x];
 				}
 			}
+			this.commitMarkedEdit();
 			this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 			//this.moveDown(1);
 			if (!horizontal) {
@@ -1016,6 +1180,7 @@ export default class SheetManager {
 			return;
 		}
 		let data = JSON.parse(str);
+		if (this.marks.some(mark => mark.sheetName === this.activeSheet.name)) throw new Error('Remove sheet marks before replacing its grid; open a workbook to replace cells and definitions together');
 		this.rows = data;
 		this.loadAllCells(data.length, data[0].length);
 		this.clearPlaceholder();
@@ -1044,6 +1209,7 @@ export default class SheetManager {
 	}
 
 	removeColAtIndex(index) {
+		this.editMarkedStructure('col', index, 1, 0);
 		for (let i = 0; i < this.rows.length; i++) {
 			this.rows[i].splice(index, 1);
 			this.styles[i].splice(index, 1);
@@ -1051,6 +1217,7 @@ export default class SheetManager {
 
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 		this.selectCell(this.selRow, this.selCol);
+		this.commitMarkedEdit();
 		historyManager.do(this, 546);
 	}
 
@@ -1061,11 +1228,13 @@ export default class SheetManager {
 	}
 
 	removeRowAtIndex(index) {
+		this.editMarkedStructure('row', index, 1, 0);
 		this.rows.splice(index, 1);
 		this.styles.splice(index, 1);
 		this.numOfRows.value--;
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 		this.selectCell(this.selRow, this.selCol);
+		this.commitMarkedEdit();
 		historyManager.do(this, 563);
 	}
 
@@ -1076,6 +1245,7 @@ export default class SheetManager {
 	}
 
 	insertRowAtIndex(index, amount = 1) {
+		this.editMarkedStructure('row', index, 0, amount);
 		const createRow = () =>
 			Array.from({ length: this.numOfCols.value }, () => "");
 		const createStyleRow = () =>
@@ -1093,10 +1263,12 @@ export default class SheetManager {
 		this.numOfRows.value += amount;
 		this.selectCell(this.selRow, this.selCol);
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
+		this.commitMarkedEdit();
 		historyManager.do(this, 578);
 	}
 
 	insertColumnAtIndex(index) {
+		this.editMarkedStructure('col', index, 0, 1);
 		for (let i = 0; i < this.numOfRows.value; i++) {
 			this.rows[i].splice(index, 0, "");
 			this.styles[i].splice(index, 0, {
@@ -1108,6 +1280,7 @@ export default class SheetManager {
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 
 		this.selectCell(this.selRow, this.selCol);
+		this.commitMarkedEdit();
 		historyManager.do(this, 599);
 	}
 

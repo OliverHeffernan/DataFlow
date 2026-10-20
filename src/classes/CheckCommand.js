@@ -12,6 +12,7 @@ import { configTemplate, defaultTimeoutlen } from './LuaKeybindings.js';
 import { formulaAssist, formulaReferences } from './FormulaEditing.js';
 import { keyboardHints } from './KeyboardHints.js';
 import SyntaxHighlighting from './SyntaxHighlighting.js';
+import { cellLabel, referenceSpans, resolveReference } from './FormulaFunctions.js';
 
 export default class CheckCommand {
 	constructor() {
@@ -26,6 +27,7 @@ export default class CheckCommand {
 			message: text => this.setPhMessage(text),
 			ex: command => this.handleEnterFromCom(command),
 			change: () => { this.syncSize(); this.history.do(this.sheet); nextTick(() => this.sheet.loadAllCells()); },
+			sheetChanged: () => { this.renderedRow = null; nextTick(() => this.sheet.loadStyles()); },
 			undo: (redo, count) => { this.history[redo ? 'redo' : 'undo'](this.sheet, count); this.keyboard.move(this.keyboard.point); },
 			copy: register => {
 				if (register.cells) this.sheet.yank(register.cells);
@@ -81,7 +83,7 @@ export default class CheckCommand {
 		const owner = this.sheet.spillCells.get(`${row}:${col}`);
 		this.ui.value = {
 			hints: keyboardHints(keyboard),
-			assist: keyboard.context === 'formula' ? { ...formulaAssist(keyboard.formula, keyboard.formulaCursor), inserting: keyboard.mode === 'i', selected: keyboard.completionIndex } : { suggestions: [], signature: null },
+			assist: keyboard.context === 'formula' ? { ...formulaAssist(keyboard.formula, keyboard.formulaCursor, this.sheet), inserting: keyboard.mode === 'i', selected: keyboard.completionIndex } : { suggestions: [], signature: null },
 			error: this.sheet.cellErrors.get(`${row}:${col}`) || '',
 			spill: owner ? `Spill ${this.sheet.columnLabel(owner.col)}${owner.row} · ${owner.rows} × ${owner.cols}${owner.row !== row || owner.col !== col ? ' · Edit source with i / Enter' : ''}` : '',
 		};
@@ -324,8 +326,58 @@ export default class CheckCommand {
 		this.setPhMessage(`Sheet ${this.sheet.workbook.activeSheetIndex + 1}/${this.sheet.sheets.length}: ${this.sheet.activeSheet.name}`);
 	}
 
+	async markCommand(action, argument = '', force = '') {
+		if (force && action !== 'delmarks') throw new Error('Only :delmarks accepts !');
+		const args = argument.trim().split(/\s+/).filter(Boolean), name = args[0];
+		if (action === 'marks') {
+			if (args.length > 1) throw new Error('Usage: :marks [name]');
+			const marks = name ? [this.sheet.mark(name)] : this.sheet.marks;
+			this.setPhMessage(marks.map(mark => `${mark.name}: ${mark.sheetName}!${mark.bounds ? `${cellLabel(mark.bounds.r0, mark.bounds.c0)}:${cellLabel(mark.bounds.r1, mark.bounds.c1)}` : '#REF!'}${mark.kind === 'dataset' ? ` · ${this.sheet.describeDataset(mark.name).rowCount} records` : ''}`).join(' · ') || 'No marks');
+			return;
+		}
+		if (action === 'mark' || action === 'dataset') {
+			if (!name) throw new Error(`Usage: :${action} name [absolute reference]`);
+			const text = argument.trim().slice(name.length).trim();
+			let sheetName = this.sheet.activeSheet.name, bounds, kind;
+			if (text) {
+				const span = referenceSpans(text)[0];
+				if (!span || span.start !== 0 || span.end !== text.length || !/^[A-Z]+\d+(?:\s*:\s*[A-Z]+\d+)?$/.test(span.reference)) throw new Error('Use an absolute cell or rectangle, optionally sheet-qualified');
+				if (span.sheetName !== undefined) {
+					const target = this.sheet.sheets.find(sheet => sheet.name.toLowerCase() === span.sheetName.toLowerCase());
+					if (!target) throw new Error('Unknown target sheet');
+					sheetName = target.name;
+				}
+				bounds = resolveReference(span.reference, 0, 0, {}); kind = span.reference.includes(':') ? 'range' : 'cell';
+			} else {
+				if (this.keyboard.context !== 'sheet') throw new Error('Select sheet cells before setting a mark');
+				const a = this.keyboard.anchor ?? this.keyboard.point, b = this.keyboard.point;
+				bounds = { r0: Math.min(a.row, b.row), c0: this.keyboard.mode === 'V' ? 0 : Math.min(a.col, b.col), r1: Math.max(a.row, b.row), c1: this.keyboard.mode === 'V' ? this.sheet.rows[0].length - 1 : Math.max(a.col, b.col) };
+				kind = this.keyboard.anchor ? 'range' : 'cell';
+			}
+			this.sheet.setMark(name, bounds, action === 'dataset' ? 'dataset' : kind, sheetName);
+		} else if (action === 'markrename') {
+			if (args.length !== 2) throw new Error('Usage: :markrename old new');
+			this.sheet.renameMark(...args);
+		} else if (action === 'delmarks') {
+			if (args.length !== 1) throw new Error('Usage: :delmarks[!] name');
+			this.sheet.deleteMark(name, Boolean(force));
+		} else if (action === 'datasetcolumnrename') {
+			if (args.length !== 3) throw new Error('Usage: :datasetcolumnrename dataset old new');
+			this.sheet.renameDatasetColumn(...args);
+		} else if (action === 'datasetappend') {
+			if (args.length < 1 || args.length > 2 || (args[1] && !/^\d+$/.test(args[1]))) throw new Error('Usage: :datasetappend name [count]');
+			this.sheet.appendDataset(name, args[1] ? Number(args[1]) : 1);
+		} else if (action === 'markgoto') {
+			if (args.length !== 1) throw new Error('Usage: :markgoto name');
+			this.keyboard.gotoMark(name); this.renderedRow = null;
+		}
+		await this.render(); this.sheet.loadStyles(); this.setPhMessage(`${action}: ${name}`);
+	}
+
 	async handleEnterFromCom(command) {
 		try {
+			const marks = command.trim().match(/^:(marks|markrename|markgoto|mark|delmarks|datasetappend|datasetcolumnrename|dataset)(!?)(?:\s+(.*))?$/);
+			if (marks) return await this.markCommand(marks[1], marks[3], marks[2]);
 			const sheetCommand = command.trim().match(/^:(sheets|sheetnew|sheetduplicate|sheetrename|sheetnext|sheetprev|sheetmove|sheetdelete|sheet)(!?)(?:\s+(.*))?$/);
 			if (sheetCommand) return await this.sheetCommand(sheetCommand[1], sheetCommand[3]?.trim(), sheetCommand[2]);
 			const files = new FileManager(() => this.newSheet());
@@ -373,6 +425,6 @@ export default class CheckCommand {
 			}
 			else this.setPhMessage(`Unknown command: ${command}`);
 			this.syncSize(); this.keyboard.move(this.keyboard.point); this.render();
-		} catch (error) { this.setPhMessage(error.message || String(error)); }
+		} catch (error) { this.setPhMessage(error.explanation || error.message || String(error)); }
 	}
 }

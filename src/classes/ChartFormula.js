@@ -105,9 +105,12 @@ export function evaluateChart(source, row, col, ctx) {
 		// Resolve references only in range arguments, never inside titles or names.
 		const span = referenceSpans(arg)[0];
 		if (!span || span.start !== 0 || span.end !== arg.length) throw new Error(`Invalid range: ${arg}`);
-		if (span.prefix === '#REF!') throw new Error('Referenced sheet was deleted');
-		const target = span.sheetName === undefined ? ctx : ctx.sheet(span.sheetName);
-		const { r0, c0, r1, c1 } = resolveReference(span.reference, row, col, target);
+		if (span.prefix === '#REF!') throw new Error('Referenced sheet or mark was deleted');
+		let target = span.sheetName === undefined ? ctx : ctx.sheet(span.sheetName);
+		const resolved = resolveReference(span.kind === 'mark' ? arg : span.reference, row, col, target);
+		const { r0, c0, r1, c1 } = resolved;
+		if (resolved.sheetName) target = ctx.sheet(resolved.sheetName);
+		if (resolved.height === 0) throw new Error('Dataset has no records');
 		if (r1 < r0 || c1 < c0 || (r0 !== r1 && c0 !== c1)) {
 			throw new Error(`Use a single row or column in ascending order: ${arg}`);
 		}
