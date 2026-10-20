@@ -1,4 +1,5 @@
 <template>
+	<div :inert="recovery.state.dialog || recovery.state.locked ? true : undefined">
 	<FirstLaunchScreen v-if="launchManager.displayed" />
 	<FormulaBar />
 	<CommandLine />
@@ -21,24 +22,37 @@
 		</tbody>
 	</table>
 	<div id="gridOverlays" aria-hidden="true"></div>
-
+	</div>
+	<RecoveryDialog :manager="recovery" />
 </template>
 
 <script setup>
 	import "./styling/syntaxHighlighting.css";
-	import { ref } from 'vue';
+	import { ref, onMounted, onUnmounted } from 'vue';
 	import SheetManager from './classes/SheetManager.js';
 	import SheetRow from './components/SheetRow.vue';
 	import FormulaBar from './components/FormulaBar.vue';
 	import CommandLine from './components/CommandLine.vue';
 	import FirstLaunchScreen from './components/FirstLaunchScreen.vue';
 	import RightClickMenu from './components/RightClickMenu.vue';
+	import RecoveryDialog from './components/RecoveryDialog.vue';
+	import RecoveryManager from './classes/RecoveryManager.js';
+	import CheckCommand from './classes/CheckCommand.js';
+	import FileManager from './classes/FileManager.js';
 
 	import LaunchManager from './classes/LaunchManager.js';
 
 	const launchManager = ref(new LaunchManager());
 
 	const sheetManager = ref(new SheetManager());
+	const recovery = new RecoveryManager(new SheetManager());
+	sheetManager.value.recovery = recovery;
+	recovery.save = () => new FileManager().saveFile();
+	recovery.focus = () => new CheckCommand().focus();
+	recovery.report = text => new CheckCommand().setPhMessage(text);
+	recovery.onOpen = async () => { new LaunchManager().hide(); await new CheckCommand().newSheet(false); };
+	onMounted(() => { recovery.start().catch(error => { recovery.state.error = error.message || String(error); }); });
+	onUnmounted(() => { recovery.close().catch(() => {}); });
 
 	let firstTime;
 	const testing = true;

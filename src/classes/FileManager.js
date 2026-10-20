@@ -6,39 +6,48 @@ import { readTextFile } from "@tauri-apps/plugin-fs";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 export default class FileManager {
-	constructor(onOpen) {
+	constructor(onOpen, io = {}) {
 		this.onOpen = onOpen;
+		this.io = { native: isTauri(), save, open, readTextFile, invoke, ...io };
 		FileManager.instance = this;
 	}
 
 	async saveFile(saveAs = false) {
-		if (!isTauri()) {
-			this.downloadFile(JSON.stringify(sheetManager.serializeWorkbook()), "sheet.dflo");
-			this.setPhMessage('Downloaded workbook as sheet.dflo');
-			return;
-		}
-		try {
-			let path;
-			if (sheetManager.path == null || saveAs) {
-				path = await save({
-					filters: [
-						{
-							name: "DataFlow workbook",
-							extensions: ["dflo"],
-						},
-					],
-				});
-			} else {
-				path = sheetManager.path;
-			}
+		// One manual write at a time, including across short-lived FileManagers.
+		if (sheetManager.saving) return sheetManager.saving;
+		const operation = this.writeWorkbook(saveAs);
+		sheetManager.saving = operation;
+		try { return await operation; }
+		finally { sheetManager.saving = null; }
+	}
 
-			if (!path) return;
-			let content = JSON.stringify(sheetManager.serializeWorkbook());
-			await invoke("write_file", { path: path, content: content });
-			sheetManager.path = path;
-			this.setPhMessage("Saved file to " + path + " successfully");
+	async writeWorkbook(saveAs) {
+		const recovery = sheetManager.recovery;
+		const captured = recovery?.capture() ?? { content: JSON.stringify(sheetManager.serializeWorkbook()) };
+		try {
+			if (!this.io.native) {
+				const name = recovery?.state.name === 'Untitled' ? 'sheet.dflo' : recovery?.state.name || 'sheet.dflo';
+				this.downloadFile(captured.content, name);
+				await recovery?.saved(captured, name, true);
+				this.setPhMessage(`Download requested: ${name}; browser recovery retained`);
+				return { status: 'exported' };
+			}
+			const path = sheetManager.path != null && !saveAs ? sheetManager.path : await this.io.save({
+				defaultPath: recovery?.state.name === 'Untitled' ? 'sheet.dflo' : recovery?.state.name,
+				filters: [{ name: 'DataFlow workbook', extensions: ['dflo'] }],
+			});
+			if (!path) return { status: 'cancelled' };
+			if (recovery && captured.document !== recovery.document) return { status: 'cancelled' };
+			const destination = await this.io.invoke('write_file', { path, content: captured.content });
+			if (recovery) await recovery.saved(captured, destination);
+			else sheetManager.path = destination;
+			this.setPhMessage(`Saved workbook to ${destination}`);
+			return { status: 'saved', path: destination };
 		} catch (e) {
-			this.setPhMessage(`Save: ${e.message || String(e)}`);
+			const error = e.message || String(e);
+			if (recovery) recovery.state.error = `Save: ${error}`;
+			this.setPhMessage(`Save failed: ${error}. Work and recovery retained.`);
+			return { status: 'failed', error };
 		}
 	}
 
@@ -60,12 +69,12 @@ export default class FileManager {
 	}
 
 	async openFile() {
-		if (!isTauri()) {
+		if (!this.io.native) {
 			document.getElementById("webFileUpload").style.display = "block";
 			return;
 		}
 		try {
-			const path = await open({
+			const path = await this.io.open({
 				filters: [
 					{
 						name: "DataFlow workbook (including legacy files)",
@@ -75,19 +84,25 @@ export default class FileManager {
 			});
 
 			if (!path) return;
-			await this.loadFile(await readTextFile(path), path);
+			return await this.loadFile(await this.io.readTextFile(path), path);
 		} catch (e) {
 			this.setPhMessage(`Open: ${e.message || String(e)}`);
 		}
 	}
 
 	async loadFile(content, path = null) {
-		sheetManager.loadWorkbook(JSON.parse(content), path);
+		const data = JSON.parse(content);
+		sheetManager.validateWorkbook(data);
+		if (sheetManager.saving) await sheetManager.saving;
+		if (sheetManager.recovery && !await sheetManager.recovery.guard()) return false;
+		sheetManager.loadWorkbook(data, path);
 		await this.onOpen?.();
 		this.setPhMessage(path ? `Opened file from ${path} successfully` : 'Opened workbook successfully');
+		return true;
 	}
 
 	setPhMessage(mg) {
-		document.getElementById("commandLine").dataset.message = mg;
+		const display = document.getElementById('commandLine');
+		if (display) display.dataset.message = mg;
 	}
 }

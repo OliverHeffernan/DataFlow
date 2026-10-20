@@ -392,6 +392,7 @@ export default class SheetManager {
 		this.prevCol = 0;
 		this.copyBuffer = [[]];
 		this.path = null;
+		this.workbookListeners = new Set();
 		this.defaultStyling = {
 			fg: "white",
 			bg: "transparent",
@@ -413,7 +414,7 @@ export default class SheetManager {
 			this.rows.push(row);
 			this.styles.push(styleRow);
 		}
-		historyManager.do(this);
+		historyManager.reset(this);
 		SheetManager.instance = this;
 	}
 
@@ -427,6 +428,32 @@ export default class SheetManager {
 	set selRow(row) { this.activeSheet.selRow = row; }
 	get selCol() { return this.activeSheet.selCol; }
 	set selCol(col) { this.activeSheet.selCol = col; }
+
+	onWorkbookChange(listener) {
+		this.workbookListeners.add(listener);
+		return () => this.workbookListeners.delete(listener);
+	}
+
+	// Content notifications settle after a synchronous edit, independently of
+	// history grouping and derived calculation/rendering. A validated file load
+	// establishes its baseline immediately, before any subsequent user edits.
+	notifyWorkbookChanged(kind = 'content') {
+		if (kind === 'baseline') {
+			this.pendingWorkbookChange = null;
+			for (const listener of this.workbookListeners) listener(kind);
+			return;
+		}
+		if (this.pendingWorkbookChange) {
+			if (kind === 'content') this.pendingWorkbookChange = kind;
+			return;
+		}
+		this.pendingWorkbookChange = kind;
+		queueMicrotask(() => {
+			const change = this.pendingWorkbookChange;
+			this.pendingWorkbookChange = null;
+			if (change) for (const listener of this.workbookListeners) listener(change);
+		});
+	}
 
 	validateSheetName(name, except = null) {
 		if (typeof name !== 'string' || !name.trim() || /[\x00-\x1f\x7f]/.test(name)) throw new Error('A sheet name must be non-empty and on one line');
@@ -452,6 +479,7 @@ export default class SheetManager {
 		this.numOfRows.value = this.rows.length;
 		this.numOfCols.value = this.rows[0].length;
 		this.recalculate();
+		this.notifyWorkbookChanged('view');
 	}
 
 	createSheet(name = this.unusedSheetName(), duplicate = false) {
@@ -461,6 +489,7 @@ export default class SheetManager {
 		this.workbook.sheets = [...this.sheets, { name, rows, styles, selRow: 0, selCol: 0 }];
 		this.switchSheet(this.sheets.length);
 		historyManager.reset(this);
+		this.notifyWorkbookChanged();
 	}
 
 	rewriteSheetReferences(oldName, newName) {
@@ -473,18 +502,22 @@ export default class SheetManager {
 
 	renameSheet(name) {
 		name = this.validateSheetName(name, this.activeSheet);
+		if (name === this.activeSheet.name) return;
 		this.rewriteSheetReferences(this.activeSheet.name, name);
 		this.activeSheet.name = name;
 		this.workbook.sheets = [...this.sheets];
 		this.recalculate();
+		this.notifyWorkbookChanged();
 	}
 
 	moveSheet(position) {
 		const index = this.sheetIndex(position), sheets = [...this.sheets], active = this.activeSheet;
+		if (index === this.workbook.activeSheetIndex) return;
 		sheets.splice(this.workbook.activeSheetIndex, 1);
 		sheets.splice(index, 0, active);
 		this.workbook.sheets = sheets;
 		this.workbook.activeSheetIndex = index;
+		this.notifyWorkbookChanged();
 	}
 
 	deleteSheet(target = this.workbook.activeSheetIndex + 1, force = false) {
@@ -498,14 +531,16 @@ export default class SheetManager {
 		this.rewriteSheetReferences(removed.name, null);
 		this.workbook.sheets = this.sheets.filter(sheet => sheet !== removed);
 		this.switchSheet(active === removed ? Math.min(index + 1, this.sheets.length) : this.sheets.indexOf(active) + 1);
+		this.notifyWorkbookChanged();
 	}
 
 	serializeWorkbook() {
 		return { version: 2, activeSheet: this.workbook.activeSheetIndex, sheets: this.sheets.map(({ name, rows, styles }) => ({ name, rows, styles })) };
 	}
 
-	loadWorkbook(data, path = null) {
+	validateWorkbook(data) {
 		// Validate the whole file before replacing any existing work. Both legacy layouts remain readable.
+		if (data?.version != null && data.version !== 2) throw new Error(`Unsupported workbook version: ${data.version}`);
 		const source = Array.isArray(data) ? [{ rows: data }] : data?.sheets ?? [data];
 		if (!Array.isArray(source) || !source.length) throw new Error('Invalid workbook: at least one sheet is required');
 		const names = new Set();
@@ -520,10 +555,16 @@ export default class SheetManager {
 		});
 		const active = data?.activeSheet ?? 0;
 		if (!Number.isInteger(active) || active < 0 || active >= sheets.length) throw new Error('Invalid active sheet');
+		return { sheets, active };
+	}
+
+	loadWorkbook(data, path = null) {
+		const { sheets, active } = this.validateWorkbook(data);
 		this.workbook.sheets = sheets;
 		this.path = path;
 		this.switchSheet(active + 1);
 		for (const sheet of sheets) historyManager.reset(sheet);
+		this.notifyWorkbookChanged('baseline');
 	}
 
 	clearScreen() {
@@ -546,6 +587,7 @@ export default class SheetManager {
 
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 		this.loadStyles();
+		historyManager.do(this);
 	}
 
 	loadStyles() {

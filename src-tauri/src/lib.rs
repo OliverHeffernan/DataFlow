@@ -1,13 +1,27 @@
+mod atomic;
+mod lifecycle;
+mod recovery;
 mod updates;
+
+use lifecycle::Lifecycle;
+use recovery::{RecoveryEntry, RecoveryStore};
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(Lifecycle::default())
         .setup(|app| {
+            let recovery_root = app
+                .path()
+                .app_local_data_dir()
+                .map(|directory| directory.join("recovery"))
+                .map_err(|error| error.to_string());
+            app.manage(RecoveryStore::new(recovery_root));
             updates::setup(app)?;
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -18,9 +32,84 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![write_file, keybinding_config])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .on_window_event(|window, event| {
+            window.state::<Lifecycle>().on_window_event(window, event);
+        })
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                webview.state::<Lifecycle>().frontend_reset();
+            }
+        })
+        .invoke_handler(tauri::generate_handler![
+            write_file,
+            keybinding_config,
+            recovery_write,
+            recovery_list,
+            recovery_resolve,
+            recovery_release,
+            lifecycle::lifecycle_ready,
+            lifecycle::lifecycle_complete
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+    app.run(|app, event| {
+        app.state::<Lifecycle>().on_run_event(app, &event);
+    });
+}
+
+async fn blocking<T: Send + 'static>(
+    task: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| format!("Background task failed: {error}"))?
+}
+
+/// Atomically writes a workbook and returns the normalised destination.
+#[tauri::command]
+async fn write_file(path: String, content: String) -> Result<String, String> {
+    blocking(move || {
+        let destination = atomic::normalize_destination(&path)?;
+        atomic::write_atomic(&destination, content.as_bytes())
+            .map_err(|error| format!("Could not save {}: {error}", destination.display()))?;
+        Ok(destination.to_string_lossy().into_owned())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn recovery_write(
+    store: tauri::State<'_, RecoveryStore>,
+    record: serde_json::Value,
+) -> Result<(), String> {
+    let store = store.inner().clone();
+    blocking(move || store.write(record)).await
+}
+
+#[tauri::command]
+async fn recovery_list(
+    store: tauri::State<'_, RecoveryStore>,
+) -> Result<Vec<RecoveryEntry>, String> {
+    let store = store.inner().clone();
+    blocking(move || store.list()).await
+}
+
+#[tauri::command]
+async fn recovery_resolve(
+    store: tauri::State<'_, RecoveryStore>,
+    id: String,
+) -> Result<(), String> {
+    let store = store.inner().clone();
+    blocking(move || store.resolve(&id)).await
+}
+
+#[tauri::command]
+async fn recovery_release(
+    store: tauri::State<'_, RecoveryStore>,
+    id: String,
+) -> Result<(), String> {
+    let store = store.inner().clone();
+    blocking(move || store.release(&id)).await
 }
 
 #[derive(serde::Serialize)]
@@ -124,37 +213,4 @@ mod tests {
         assert!(config_at(&directory, false, None).is_err());
         std::fs::remove_dir_all(directory).unwrap();
     }
-}
-
-#[tauri::command]
-fn write_file(_path: String, content: String) {
-    use std::fs::File;
-    use std::io::Write;
-
-    let mut path = _path;
-
-    if path.split('.').last() == Some("h") {
-        path.truncate(path.len() - 2);
-    }
-    if path.split('.').last() != Some("dflo") {
-        path.push_str(".dflo");
-    }
-
-    let mut file = File::create(path).unwrap();
-    file.write_all(content.as_bytes()).unwrap();
-}
-
-#[tauri::command]
-fn read_file(_path: String) {
-    use std::fs::File;
-    use std::io::Read;
-
-    let mut path = _path;
-
-    let mut file = File::open(path).unwrap();
-    let mut content = String::new();
-    file.read_to_string(&mut content).unwrap();
-
-    //use tauri::Manager;
-    //emit("file-read", Some(content).unwrap());
 }

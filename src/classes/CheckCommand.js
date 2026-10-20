@@ -171,7 +171,7 @@ export default class CheckCommand {
 
 	// Native controls and dialogs own their input. The spreadsheet receives keys regardless of which cell is focused.
 	acceptsInput(event) {
-		return !event.defaultPrevented && !event.target?.closest?.('input, textarea, select, [contenteditable="true"], [role="dialog"], [data-keyboard-ignore]');
+		return !this.sheet.recovery?.state.locked && !this.sheet.recovery?.state.dialog && !event.defaultPrevented && !event.target?.closest?.('input, textarea, select, [contenteditable="true"], [role="dialog"], [data-keyboard-ignore]');
 	}
 	connectInput() {
 		const root = document.getElementById('app');
@@ -326,6 +326,8 @@ export default class CheckCommand {
 
 	async handleEnterFromCom(command) {
 		try {
+			if (this.sheet.recovery?.state.locked) return;
+			if (/^:(autosave|recover|recoverdiscard)(\s|$)/.test(command)) return await this.sheet.recovery?.command(command);
 			if (/^:(?:fill|series)(?:\s|!|$)/.test(command.trim())) {
 				this.keyboard.changeKeys = []; // Failed/no-op Ex input must not leak into the next edit's dot recording.
 				const range = command.trim().match(/^:(fill|series)\s+(down|right|up|left)(?:\s+(\d+))?(?:\s+step\s+(\S+))?$/);
@@ -336,12 +338,12 @@ export default class CheckCommand {
 			}
 			const sheetCommand = command.trim().match(/^:(sheets|sheetnew|sheetduplicate|sheetrename|sheetnext|sheetprev|sheetmove|sheetdelete|sheet)(!?)(?:\s+(.*))?$/);
 			if (sheetCommand) return await this.sheetCommand(sheetCommand[1], sheetCommand[3]?.trim(), sheetCommand[2]);
-			const files = new FileManager(() => this.newSheet());
+			const files = new FileManager(async () => { await this.newSheet(false); new LaunchManager().hide(); });
 			if ([':config', ':configload', ':configcreate', ':source', ':configreload'].includes(command)) await this.configCommand(command);
 			else if (command === ':w') return await files.saveFile();
 			else if (command === ':wa') return await files.saveFile(true);
 			else if (command === ':o') { await files.openFile(); new LaunchManager().hide(); return; }
-			else if (command === ':clear') { this.sheet.clearScreen(); await this.newSheet(); new LaunchManager().hide(); return; }
+			else if (command === ':clear') { this.sheet.clearScreen(); await this.newSheet(false); new LaunchManager().hide(); return; }
 			else if (command === ':forceloadstyles') this.sheet.loadStyles();
 			else if (command === ':resetallstyles') this.sheet.resetAllStyles();
 			else if (command.startsWith(':hi ')) this.sheet.setStyles(command, this.sheet.selRow, this.sheet.selCol);

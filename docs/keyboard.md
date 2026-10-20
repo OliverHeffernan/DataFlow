@@ -29,9 +29,15 @@ Each `.dflo` file is a workbook. The footer lists its numbered sheets and highli
 
 Names are case-insensitively unique and may contain spaces: `:sheetnew Sales 2026`, then `:sheet Sales 2026`. Use the whole name without surrounding quotes in commands. All-digit switch/delete arguments mean sheet numbers. Invalid names, targets, and positions leave the workbook unchanged.
 
-Each sheet retains its cursor position, dimensions, data, styling, and separate undo/redo history while switching. Switching resets marks, jumps, searches, and visual selections so they cannot accidentally target another sheet. Registers, macros, mappings, and repeat edits remain session-wide; yanking on one sheet and putting on another works. Sheet creation, renaming, reordering, and deletion are not undone by `u`; rename/delete also update stored references in cell undo histories. `:clear` clears only the current sheet and resets its navigation and undo history.
+Each sheet retains its cursor position, dimensions, data, styling, and separate undo/redo history while switching. Switching resets marks, jumps, searches, and visual selections so they cannot accidentally target another sheet. Registers, macros, mappings, and repeat edits remain session-wide; yanking on one sheet and putting on another works. Sheet creation, renaming, reordering, and deletion are not undone by `u`; rename/delete also update stored references in cell undo histories. `:clear` clears only the current sheet as one undoable edit and resets navigation, not its undo history.
 
 `:w` saves **all sheets**, their names, styles, and the active sheet; `:wa` saves the workbook as another file. Browser saves download the same workbook format as desktop saves. `:o` still reads old single-sheet `{rows, styles}` `.dflo` files and rows-only JSON arrays (including `.heff` files); each becomes Sheet1 with default styling where absent. Saving upgrades to the workbook format; older app versions do not understand new workbook files. Invalid files do not replace the current workbook.
+
+### Recovery without overwriting files
+
+Recovery checkpoints typing even before Escape, independently of undo grouping. `:recover` opens a keyboard-only-capable list: `j/k` or arrows select, Enter restores a detached unsaved copy, `d` opens discard confirmation (Cancel focused), and Escape dismisses. `:recover 2` restores an entry directly; `:recoverdiscard 2` asks to discard it. `:autosave` reports status; `:autosave off/on` changes the session setting; `:autosave now` writes immediately. The footer marks modified work with `*` and separately reports checkpoint status or errors.
+
+Opening/recovering another workbook and supported native exits ask what to do with dirty work. Tab/Shift-Tab cycles the choices, Enter activates the focused choice, and Escape cancels. Native save failures report failure and never trigger downloads. Browser export remains explicit and retains recovery, since download completion cannot be verified. See [recovery behavior and platform limits](../README.md#automatic-recovery), including macOS Dock Quit and browser storage limitations.
 
 ### Cross-sheet formula references
 

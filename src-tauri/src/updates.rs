@@ -1,3 +1,4 @@
+use crate::lifecycle::Lifecycle;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -6,7 +7,7 @@ use std::time::Duration;
 #[cfg(not(target_os = "macos"))]
 use tauri::menu::Submenu;
 use tauri::menu::{Menu, MenuItem};
-use tauri::{App, AppHandle};
+use tauri::{App, AppHandle, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -23,6 +24,7 @@ pub fn setup(app: &App) -> tauri::Result<()> {
     #[cfg(not(target_os = "macos"))]
     menu.prepend(&Submenu::with_items(app, "Dataflow", true, &[&check])?)?;
 
+    crate::lifecycle::route_quit_items(app, &menu)?;
     app.set_menu(menu)?;
     let busy = Arc::new(AtomicBool::new(false));
     app.on_menu_event(move |app, event| {
@@ -93,12 +95,12 @@ async fn check_and_install(
 
     let install = app.dialog()
         .message(format!(
-            "Dataflow {} is available (installed: {}).\n\nSave your work before updating. Installing will restart the app and discard unsaved changes.\n\nChoose Cancel to return to your sheet and save, then check for updates again.",
+            "Dataflow {} is available (installed: {}).\n\nThe update will be downloaded and verified first. Before it is installed, Dataflow will ask what to do with any unsaved work, then restart.",
             update.version, app.package_info().version
         ))
         .title("Update Dataflow?")
         .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom("Install and restart".into(), "Cancel".into()))
+        .buttons(MessageDialogButtons::OkCancelCustom("Download and install".into(), "Cancel".into()))
         .blocking_show();
     if !install {
         return Ok(());
@@ -106,8 +108,9 @@ async fn check_and_install(
 
     let _ = menu_item.set_text("Downloading update…");
     let mut downloaded = 0_u64;
-    update
-        .download_and_install(
+    // `download` verifies the signature before returning the package.
+    let package = update
+        .download(
             |bytes, total| {
                 downloaded += bytes as u64;
                 let label = match total.filter(|total| *total > 0) {
@@ -120,9 +123,24 @@ async fn check_and_install(
                 let _ = menu_item.set_text(label);
             },
             || {
-                let _ = menu_item.set_text("Verifying and installing update…");
+                let _ = menu_item.set_text("Verifying update…");
             },
         )
         .await?;
+
+    // Approval must precede install: Windows exits inside `install`, and
+    // restarts cannot be prevented. The frontend saves, keeps, or discards
+    // unsaved work (or cancels) and keeps input locked while proceeding.
+    let _ = menu_item.set_text("Waiting for unsaved work…");
+    let lifecycle = app.state::<Lifecycle>().inner().clone();
+    if !lifecycle.request_update(app)? {
+        return Ok(());
+    }
+
+    let _ = menu_item.set_text("Installing update…");
+    if let Err(error) = update.install(&package) {
+        lifecycle.install_finished(app);
+        return Err(error.into());
+    }
     app.restart();
 }

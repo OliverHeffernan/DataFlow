@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/OliverHeffernan/DataFlow/main/insta
 
 Open `~/Applications/Dataflow.app`. If macOS blocks the first launch, use **System Settings → Privacy & Security → Open Anyway**; builds are ad-hoc signed, not Apple-notarized.
 
-For updates, choose **Dataflow → Check for Updates…** in the menu bar. Save your work before installing: the app restarts to finish the update. Each push to `main` automatically builds and publishes a new version after both Mac builds succeed.
+For updates, choose **Dataflow → Check for Updates…** in the menu bar. Before installation/restart, the app asks whether to save, keep recovery, discard changes, or cancel if the workbook is modified. Each push to `main` automatically builds and publishes a new version after both Mac builds succeed.
 
 **Maintainers:** complete the [one-time signing-key setup](docs/releases.md#one-time-maintainer-setup) before the first release. The same guide covers releases, update behavior, and limitations. To build locally instead, clone the repository, run `npm ci`, then `npm run tauri build`.
 
@@ -185,15 +185,38 @@ See the [keyboard reference](docs/keyboard.md) for the complete motion coverage 
 To open a preexisting file, enter `:o` into the command line, then press `enter`, you will be prompted with a open file dialog, simply choose the file you would like to open.
 
 ### Write/Save file `:w`:
-To save/write the current file, type `:w` into the command line, then press `enter`. If the file is has not already been saved to the harddrive, you will be prompted with a save file dialog, simply choose the location of the file. If the file has previously been saved, it will be replaced.
+Type `:w`, then Enter, to save the entire workbook. Desktop saves ask for a destination when untitled, or replace the current file using a same-directory temporary file, file sync, and atomic rename (plus directory sync on Unix). A failed save is reported, keeps the workbook dirty and retains recovery; it **never falls back to a download**. A failure after rename but before directory sync can mean the destination changed without confirmed durability, so retry the save.
+
+In a browser, `:w` intentionally requests a `.dflo` download. Browsers cannot confirm that the download completed or replace an opened file. The footer reports a download request, not a confirmed save, and keeps local recovery even after exporting.
 
 ### Save as `:wa`:
 To save a file to a new location, enter the command `:wa` into the command line, then press `enter`, and choose where you would like to save it.
 
 This is useful when you want to have a template file to duplicate, for example, a monthly budget template.
 
-### Clear sheet/new file `:clear`:
-If you want to clear the screen, or you want a new file (make sure you have saved the current file before doing this), type the above command and press enter.
+### Clear current sheet `:clear`:
+Clear the current sheet's cells/styles without changing its name, the workbook path, or other sheets. This is one undoable edit (`u` restores it), not a new workbook or a saved baseline.
+
+### Automatic recovery
+
+Recovery writes **separate local copies, never the original workbook**, for saved and untitled work. After an edit, a checkpoint is scheduled after 1 second of inactivity, or after at most 5 seconds of continuous input (busy event loops/storage can delay completion). Text in INSERT is included before Escape. Two generations are retained; unreadable checkpoints are reported and the newest valid workbook is offered. Recovery does not store derived formula values, spills, chart images, or undo history: these are rebuilt from stored content. Unresolved copies are not silently expired.
+
+| Command | Action |
+| --- | --- |
+| `:recover` | List recovery copies; `j/k` or arrows select, Enter restores, `d` asks to discard, Escape dismisses |
+| `:recover 2` | Restore the second listed copy as a detached, dirty workbook with a suggested recovered filename |
+| `:recoverdiscard 2` | Ask before permanently deleting that copy; Cancel is initially focused |
+| `:autosave` | Report recovery status |
+| `:autosave on` / `:autosave off` | Enable/disable automatic checkpoints for this session only; existing copies remain |
+| `:autosave now` | Checkpoint immediately, including when automatic checkpoints are off |
+
+The footer's `*` means content differs from the last successful save/export/open baseline; undoing back to that content clears it when checked. Sheet navigation and recalculation do not modify content. Checkpoint progress/errors are separate from the dirty marker. A restored copy has no save path: its old path is context only, so `:w` asks for a destination on desktop. A successfully saved clean desktop workbook resolves its recovery copy; editing during a save keeps newer work dirty and recoverable.
+
+Opening/recovering another workbook, closing the native window, Cmd-Q/app-menu Quit, and installing an update offer **Save / Keep recovery / Discard changes / Cancel** when dirty. Keep recovery must finish successfully before leaving; failed storage or cancelled/failed saves keep the editor open. The browser version offers **Download & keep recovery** instead of Save. Browser reload/tab close uses the browser's generic unsaved-work warning; asynchronous final writes are not guaranteed, so the last completed checkpoint is the recovery boundary.
+
+Desktop copies live in the app-local-data `recovery` directory (on macOS, `~/Library/Application Support/com.oliverheffernan.dataflow/recovery`), with private Unix permissions and OS locks. Browser copies live in IndexedDB for that browser/profile/origin; clearing site data removes them. Live owners cannot be discarded; restoring their checkpoint creates another copy. Without browser Web Locks, ownership is unknown, so such copies can be restored but not discarded by another session.
+
+These are **local recovery copies, not backups or encryption**. They contain workbook content and may include the original filename/path. Disk failure, cleared/denied/quota-limited browser storage, force-quit and power loss can lose work since the latest completed checkpoint. Tauri's current macOS runtime also bypasses the close handshake for **Dock → Quit and OS logout/shutdown**; use Cmd-Q or the app menu for the guarded exit. Fixing that upstream limitation requires a separate native-runtime change. Recovery errors remain visible; no alternate download/localStorage fallback hides them.
 
 ### Styling `:hi`
 Let's say I want to style a cell with a lightblue background, and a black font colour. To achieve this, I would select the desired cell, and type the following command.
