@@ -1,9 +1,9 @@
 <template>
 	<div ref="root" class="format-control" data-format-panel>
-		<button class="format-badge" :class="{ open: session }" :disabled="!session && !format?.enabled" aria-label="Cell format" :aria-expanded="!!session" aria-controls="format-panel" @mousedown.prevent @click="toggle">
+		<button class="format-badge" :class="{ open: session }" :disabled="!session && !format?.enabled" :title="format?.summary ?? 'General'" aria-label="Cell format" :aria-expanded="!!session" aria-controls="format-panel" @mousedown.prevent @click="toggle">
 			<span>{{ format?.summary ?? 'General' }}</span><kbd v-if="session ? key('Done') : format?.openKey">{{ session ? key('Done') : format.openKey }}</kbd><span aria-hidden="true">{{ session ? '⌃' : '⌄' }}</span>
 		</button>
-		<section v-if="session" id="format-panel" role="dialog" aria-modal="false" aria-labelledby="format-title" class="format-panel" :class="{ 'panel-left': format.panelLeft }" @mousedown.prevent>
+		<section v-if="session" id="format-panel" role="dialog" aria-modal="false" aria-labelledby="format-title" class="format-panel" @mousedown.prevent>
 			<header><strong id="format-title">Format</strong><span>{{ session.scope }} · {{ session.draft.size }} {{ session.draft.size === 1 ? 'cell' : 'cells' }}</span></header>
 			<div class="format-rows">
 				<div v-for="(row, index) in session.rows" :key="row.key" class="format-row" :class="{ selected: index === session.index, 'type-row': row.key === 'formatKind' }">
@@ -34,7 +34,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import CheckCommand from '../classes/CheckCommand.js';
 const command = new CheckCommand(), ui = command.ui, root = ref(null);
 const format = computed(() => ui.value.format), session = computed(() => format.value?.session);
@@ -44,21 +44,29 @@ function action(name) { if (name === 'Done') command.keyboard.finishFormat(); el
 function activate(row) { if (session.value.menu || session.value.input) return; session.value.activate(row); command.render(); command.focus(); }
 function choose(index) { session.value.menu.index = index; action('Select'); }
 function outside(event) { if (session.value && !root.value.contains(event.target)) command.keyboard.finishFormat(); }
+watch(ui, async () => {
+	await nextTick();
+	const panel = root.value?.querySelector('.format-panel');
+	const target = panel?.querySelector('.chosen, .format-input') ?? panel?.querySelector('.format-row.selected');
+	if (!target) return;
+	const bounds = panel.getBoundingClientRect(), rect = target.getBoundingClientRect();
+	if (rect.bottom > bounds.bottom - 8) panel.scrollTop += rect.bottom - bounds.bottom + 8;
+	else if (rect.top < bounds.top + 8) panel.scrollTop -= bounds.top + 8 - rect.top;
+});
 onMounted(() => window.addEventListener('pointerdown', outside, true));
 onUnmounted(() => window.removeEventListener('pointerdown', outside, true));
 </script>
 
 <style scoped>
-.format-control { position: relative; flex: 0 1 auto; align-self: flex-start; min-width: 0; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.format-control { flex: 0 1 auto; align-self: flex-start; min-width: 0; max-width: 45%; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 button, input { color: inherit; font: inherit; }
 button { cursor: pointer; }
-.format-badge { display: flex; align-items: center; gap: 10px; max-width: min(340px, 48vw); min-height: 26px; margin: 3px 6px; padding: 3px 10px; border: 1px solid #38516b; border-radius: 7px; color: #dbe6f3; background: #1b3045; }
+.format-badge { display: flex; align-items: center; gap: 10px; max-width: min(340px, calc(100% - 12px)); min-height: 26px; margin: 3px 6px; padding: 3px 10px; border: 1px solid #38516b; border-radius: 7px; color: #dbe6f3; background: #1b3045; }
 .format-badge > span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .format-badge.open, .format-badge:hover { border-color: #79a9ce; background: #223e57; }
 .format-badge:disabled { opacity: .45; cursor: default; }
 kbd { flex-shrink: 0; display: inline-block; border: 1px solid #3a526a; border-radius: 4px; padding: 0 5px; font: inherit; color: #b3cfe6; background: #21364b; white-space: nowrap; }
-.format-panel { position: absolute; top: calc(100% + 7px); right: 7px; width: min(420px, calc(100vw - 20px)); max-height: calc(100dvh - var(--formula-bar-height, 32px) - var(--status-bar-height, 90px) - 20px); overflow-y: auto; box-sizing: border-box; padding: 16px; border: 1px solid #4c6c89; border-radius: 10px; color: #dbe6f3; background: #142233; box-shadow: 0 12px 32px #0008; }
-.format-panel.panel-left { position: fixed; left: 10px; right: auto; top: calc(var(--formula-bar-height, 32px) + 7px); }
+.format-panel { position: absolute; top: calc(var(--pane-formula-height, 36px) + 6px); right: 6px; width: min(420px, calc(100% - 12px)); max-height: max(0px, calc(100% - var(--pane-formula-height, 36px) - 40px)); overflow-y: auto; box-sizing: border-box; padding: 16px; border: 1px solid #4c6c89; border-radius: 10px; color: #dbe6f3; background: #142233; box-shadow: 0 12px 32px #0008; }
 header { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid #2c4157; }
 header strong { font-size: 18px; font-weight: 500; }
 header span, .preview-note, .format-note { color: #97b5d0; }
@@ -87,6 +95,5 @@ footer { display: flex; justify-content: space-between; border-top: 1px solid #2
 footer button { display: flex; align-items: center; gap: 7px; border: 0; background: none; color: #b3cfe6; padding: 3px; }
 button:hover { color: #90f0d0; }
 button:focus-visible { outline: 2px solid #75e2bc; outline-offset: 2px; }
-@media (max-width: 640px) { .format-panel { position: fixed; left: 10px; right: auto; top: auto; bottom: calc(var(--status-bar-height, 90px) + 8px); max-height: 55dvh; } }
 @media (max-width: 480px) { .format-panel { padding: 10px; } .format-badge { gap: 5px; } .setting-label { flex-basis: 39%; } }
 </style>

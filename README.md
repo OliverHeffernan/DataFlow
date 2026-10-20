@@ -36,7 +36,7 @@ Known upstream findings as of October 2026:
 The updater's unused legacy Windows ZIP support is disabled; macOS `.app.tar.gz` updates, TLS, and system-proxy support remain enabled. Vue's optional in-app devtools plugin was removed to reduce development dependencies; the Vue Devtools browser extension can still be used.
 
 ## Functions
-Functions are entered in the formula bar at the top of the screen. These are used to set the value of a cell mathematically.
+Functions are entered in the formula bar at the top of each sheet pane. These are used to set the value of a cell mathematically.
 
 To use a function, begin the formula with `=`, so that DataFlow knows it is a formula, and not just text.
 ### Mathjs
@@ -122,9 +122,9 @@ Comparisons accept `=`, `<>`, `<`, `>`, `<=`, `>=`, and mathjs `==`/`!=`. Compar
 
 Real-number formulas use 64-significant-digit decimal arithmetic, including intermediate references and spilled values. This avoids binary floating-point artifacts such as `0.1 + 0.2` displaying `0.30000000000000004`. Results are not rounded to a fixed number of decimal places. Display, chart and clipboard values still use native-number precision (about 16 significant digits); functions that only support native numbers use that precision too. Repeating fractions and irrational numbers remain finite-precision approximations.
 
-An array formula **spills** into empty cells below and to its right. A dashed outline identifies the selected spill and the footer names its source. Press `i` or Enter on a spill child to edit its source formula. Outputs are derived, not independently stored. Source changes, undo/redo and reopening a sheet rebuild them. A single reference to an array source passes the full array to another formula; a range reads each displayed element. Charts can read spilled values too.
+An array formula **spills** into empty cells below and to its right. A dashed outline identifies the selected spill and the pane's bottom bar names its source. Press `i` or Enter on a spill child to edit its source formula. Outputs are derived, not independently stored. Source changes, undo/redo and reopening a sheet rebuild them. A single reference to an array source passes the full array to another formula; a range reads each displayed element. Charts can read spilled values too.
 
-Occupied destinations, overlapping spills and sheet edges produce `#SPILL!` without overwriting anything. The footer and the cell tooltip explain errors. A FILTER mask or stack dimension mismatch gives `#VALUE!`; out-of-sheet references give `#REF!`. This is a focused array-function set, not complete Excel formula compatibility: FILTER filters rows, IF conditions are scalar, and stacks reject incompatible dimensions instead of padding them.
+Occupied destinations, overlapping spills and sheet edges produce `#SPILL!` without overwriting anything. The pane's bottom bar and the cell tooltip explain errors. A FILTER mask or stack dimension mismatch gives `#VALUE!`; out-of-sheet references give `#REF!`. This is a focused array-function set, not complete Excel formula compatibility: FILTER filters rows, IF conditions are scalar, and stacks reject incompatible dimensions instead of padding them.
 
 ### Lookups and joins
 
@@ -275,7 +275,7 @@ Applied conditional rules are recovered with sheet metadata; their colours are r
 | `:autosave on` / `:autosave off` | Enable/disable automatic checkpoints for this session only; existing copies remain |
 | `:autosave now` | Checkpoint immediately, including when automatic checkpoints are off |
 
-The footer's `*` means content differs from the last successful save/export/open baseline; undoing back to that content clears it when checked. Sheet navigation and recalculation do not modify content. Checkpoint progress/errors are separate from the dirty marker. A restored copy has no save path: its old path is context only, so `:w` asks for a destination on desktop. A successfully saved clean desktop workbook resolves its recovery copy; editing during a save keeps newer work dirty and recoverable.
+Recovery runs without a persistent status row or dirty marker. Use `:autosave` to check checkpoint status; errors appear on the command line and in recovery dialogs. Dirty-work prompts still compare content with the last successful save/export/open baseline; sheet navigation and recalculation do not modify content. A restored copy has no save path: its old path is context only, so `:w` asks for a destination on desktop. A successfully saved clean desktop workbook resolves its recovery copy; editing during a save keeps newer work dirty and recoverable.
 
 Opening/recovering another workbook, closing the native window, Cmd-Q/app-menu Quit, and installing an update offer **Save / Keep recovery / Discard changes / Cancel** when dirty. Keep recovery must finish successfully before leaving; failed storage or cancelled/failed saves keep the editor open. The browser version offers **Download & keep recovery** instead of Save. Browser reload/tab close uses the browser's generic unsaved-work warning; asynchronous final writes are not guaranteed, so the last completed checkpoint is the recovery boundary.
 

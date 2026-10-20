@@ -20,7 +20,9 @@ function scrolled() {
 	props.pane.scrollTop = viewport.value.scrollTop; props.pane.scrollLeft = viewport.value.scrollLeft;
 	if (props.active) check.refreshOverlays();
 }
-const observer = new ResizeObserver(() => { if (props.active) check.refreshOverlays(); });
+const observer = new ResizeObserver(() => {
+	if (props.active) { manager.ensureCellVisible(props.pane.row, props.pane.col); check.refreshOverlays(); }
+});
 onMounted(() => { viewport.value.scrollTop = props.pane.scrollTop; viewport.value.scrollLeft = props.pane.scrollLeft; observer.observe(viewport.value); });
 onUnmounted(() => observer.disconnect());
 </script>

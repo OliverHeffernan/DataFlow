@@ -13,7 +13,7 @@ Type directly with the spreadsheet focused; there is no bottom input field. The 
 
 ### Multiple sheets in one file
 
-Each `.dflo` file is a workbook. The footer lists its numbered sheets and highlights the active one. Type a command followed by Enter:
+Each `.dflo` file is a workbook. Each pane's bottom bar shows its sheet name and one-based sheet number / total sheets, such as `1/2`. Type a command followed by Enter:
 
 | Command | Action |
 | --- | --- |
@@ -37,7 +37,7 @@ Sheet-switch commands reset transient navigation marks, jumps, searches, and vis
 
 ### Recovery without overwriting files
 
-Recovery checkpoints typing even before Escape, independently of undo grouping. `:recover` opens a keyboard-only-capable list: `j/k` or arrows select, Enter restores a detached unsaved copy, `d` opens discard confirmation (Cancel focused), and Escape dismisses. `:recover 2` restores an entry directly; `:recoverdiscard 2` asks to discard it. `:autosave` reports status; `:autosave off/on` changes the session setting; `:autosave now` writes immediately. The footer marks modified work with `*` and separately reports checkpoint status or errors.
+Recovery checkpoints typing even before Escape, independently of undo grouping. `:recover` opens a keyboard-only-capable list: `j/k` or arrows select, Enter restores a detached unsaved copy, `d` opens discard confirmation (Cancel focused), and Escape dismisses. `:recover 2` restores an entry directly; `:recoverdiscard 2` asks to discard it. `:autosave` reports status; `:autosave off/on` changes the session setting; `:autosave now` writes immediately. Recovery runs without a persistent status row; errors and requested status appear on the command line.
 
 Opening/recovering another workbook and supported native exits ask what to do with dirty work. Tab/Shift-Tab cycles the choices, Enter activates the focused choice, and Escape cancels. Native save failures report failure and never trigger downloads. Browser export remains explicit and retains recovery, since download completion cannot be verified. See [recovery behavior and platform limits](../README.md#automatic-recovery), including macOS Dock Quit and browser storage limitations.
 
@@ -55,7 +55,7 @@ Opening/recovering another workbook and supported native exits ask what to do wi
 
 Splits nest in either direction. Drag a separator to resize it, or Tab to it and use Left/Right for a vertical separator, Up/Down for a horizontal separator. Escape returns keyboard focus to the workspace. In INSERT, Ctrl-w retains Vim's delete-word meaning; Escape to NORMAL before navigating windows.
 
-Each window keeps its own cursor, scroll, keyboard navigation and rule draft. Several windows can show the same sheet; edits, styling, charts, spills and cross-sheet calculations update every view. The formula bar and command footer belong to the focused window. Window navigation also works in formula NORMAL, visual selections and rule text NORMAL. Registers, macros and Lua mappings remain shared, including when a macro changes windows.
+Each window keeps its own cursor, scroll, keyboard navigation and rule draft. Several windows can show the same sheet; edits, styling, charts, spills and cross-sheet calculations update every view. Each sheet pane owns its formula bar, format controls and cell diagnostics; inactive panes show the formula and format at their own cursor. Format and completion popups stay inside that pane. The pane's title and sheet count sit at its bottom. Only the mode/command line and contextual shortcut helper are global. Window navigation also works in formula NORMAL, visual selections and rule text NORMAL. Registers, macros and Lua mappings remain shared, including when a macro changes windows.
 
 Changing panes during sheet INSERT commits pending cells and dataset bounds together before moving focus, even between views of the same sheet. Returning retains INSERT, its caret and repeat recording. Unchanged content adds no undo step; rejected edits roll back, stay in the current pane and return to NORMAL. CF text drafts remain unapplied when switching panes.
 
@@ -194,7 +194,7 @@ For other features, `SheetManager.resolveMark(name, column?)` returns a detached
 - Absolute references, relative/calculated references and ranges get matching colors in the formula text and grid. Repeated references to the same region share colors; quoted strings are ignored. Highlights disappear on returning to the sheet.
 - **Tab** completes a function prefix with parentheses, including `CHART()` builder methods after a dot (e.g. `.se` → `.series()`). **Up/Down** selects suggestions; Enter always commits rather than accepting a completion. Signature help highlights the active argument of the innermost supported function or chart method.
 - **F4** toggles the reference under or immediately before the caret between ordinary cell coordinates and `[]{}` relative notation. It works in formula normal and insert. Use Fn-F4 if the OS reserves F4, or remap `<F4>` in Lua.
-- Array formulas spill into empty cells. The selected spill has a dashed boundary and source label. `i/a/I/A` or Enter on a spill child edits the source, not an independent output. Error explanations appear in the footer and cell tooltip. See the [formula reference](../README.md#nested-formulas-and-dynamic-arrays).
+- Array formulas spill into empty cells. The selected spill has a dashed boundary and source label. `i/a/I/A` or Enter on a spill child edits the source, not an independent output. Error explanations appear in the pane's bottom bar and cell tooltip. See the [formula reference](../README.md#nested-formulas-and-dynamic-arrays).
 
 ## Motion coverage
 

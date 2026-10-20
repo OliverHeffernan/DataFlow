@@ -29,7 +29,7 @@ export default class CheckCommand {
 		this.visual = new VisualManager();
 		this.windows = new WindowManager(this.sheet.activeSheet);
 		this.currentWindow = this.windows.active;
-		this.ui = shallowRef({ hints: [], assist: { suggestions: [], signature: null }, error: '', spill: '' });
+		this.ui = shallowRef({ hints: [], assist: { suggestions: [], signature: null } });
 		this.script = shallowRef(null);
 		this.keyboard = this.createKeyboard();
 		this.currentWindow.keyboard = this.keyboard;
@@ -236,9 +236,8 @@ export default class CheckCommand {
 			{ key: 'j k', description: 'Select rule' }, { key: 'a', description: 'New rule' }, { key: 'Enter', description: 'Edit' },
 			{ key: 'x', description: 'Delete' }, { key: 'J K', description: 'Reorder' }, { key: 'u / Ctrl R', description: 'Undo / redo' },
 			{ key: 'Ctrl W → h j k l', description: 'Window' }, { key: ':', description: 'Command' },
-		], assist: session.state.editing ? { ...formulaAssist(session.state.draft, keyboard.formulaCursor, this.sheet, 'CF'), inserting: keyboard.mode === 'i', selected: keyboard.completionIndex } : { suggestions: [], signature: null }, error: session.state.error, spill: '' };
+		], assist: session.state.editing ? { ...formulaAssist(session.state.draft, keyboard.formulaCursor, this.sheet, 'CF'), inserting: keyboard.mode === 'i', selected: keyboard.completionIndex } : { suggestions: [], signature: null } };
 		await nextTick();
-		document.documentElement.style.setProperty('--formula-bar-height', `${document.getElementById('topBar').offsetHeight}px`);
 		document.documentElement.style.setProperty('--status-bar-height', `${this.footerHeight}px`);
 	}
 
@@ -282,7 +281,6 @@ export default class CheckCommand {
 			if (warning) warnings.push(`${cellLabel(r, c)}: ${warning}`);
 		}
 		const shortcut = (action, mode) => session?.input && !['Select', 'Done', 'Backspace'].includes(action) ? '' : formatShortcut(keyboard.mappings, action, mode);
-		const panelLeft = window.innerWidth >= 900 && this.sheet.getCell(row, col)?.getBoundingClientRect().left > window.innerWidth - 440;
 		const formatHints = session ? [
 			['Previous', 'Move up'], ['Next', 'Move down'], ['Select', session.input ? 'Confirm' : 'Choose / edit'],
 			...(session.input ? [['Backspace', 'Erase']] : session.menu ? [] : session.rows.map(item => [item.action, item.label])),
@@ -291,15 +289,13 @@ export default class CheckCommand {
 		this.ui.value = {
 			hints: formatHints ?? keyboardHints(keyboard),
 			assist: keyboard.context === 'formula' ? { ...formulaAssist(keyboard.formula, keyboard.formulaCursor, this.sheet), inserting: keyboard.mode === 'i', selected: keyboard.completionIndex } : { suggestions: [], signature: null },
-			error: this.sheet.cellErrors.get(`${row}:${col}`) || this.sheet.cellPresentation.value[row]?.[col]?.warning || '',
-			spill: owner ? `Spill ${this.sheet.columnLabel(owner.col)}${owner.row} · ${owner.rows} × ${owner.cols}${owner.row !== row || owner.col !== col ? ' · Edit source with i / Enter' : ''}` : '',
-			format: { session, summary: session?.summary ?? summarizeFormats(styles), warnings, shortcut, panelLeft, openKey: shortcut('Open', keyboard.mappingMode), enabled: keyboard.mode !== 'i' && keyboard.command === null && !(keyboard.context === 'formula' && keyboard.anchor) },
+			format: { session, summary: session?.summary ?? summarizeFormats(styles), warnings, shortcut, openKey: shortcut('Open', keyboard.mappingMode), enabled: keyboard.mode !== 'i' && keyboard.command === null && !(keyboard.context === 'formula' && keyboard.anchor) },
 		};
 		await nextTick();
 		// Apply the new assistance/footer sizes before ensuring the selection is visible. Waiting for a
 		// ResizeObserver alone leaves the last row underneath a footer that changed height during this render.
 		const style = document.documentElement.style;
-		const heights = { '--formula-bar-height': document.getElementById('topBar').offsetHeight, '--status-bar-height': this.footerHeight };
+		const heights = { '--status-bar-height': this.footerHeight };
 		const resized = Object.entries(heights).some(([name, height]) => style.getPropertyValue(name) !== `${height}px`);
 		for (const [name, height] of Object.entries(heights)) style.setProperty(name, `${height}px`);
 		if (moved || resized) this.sheet.ensureCellVisible(row, col);

@@ -1,16 +1,5 @@
 <template>
 	<div id="statusBar" @click="checkCommand.focus()">
-		<div class="sheet-strip">
-			<span v-if="recovery" class="workbook-state" :title="recovery.state.sourcePath || 'Recovery never overwrites the original file'">{{ recovery.state.name }}{{ recovery.state.dirty ? ' *' : '' }}</span>
-			<ol class="sheet-list" aria-label="Workbook sheets">
-				<li v-for="(sheet, index) in sheetManager.sheets" :key="sheet.name" :aria-current="index === sheetManager.workbook.activeSheetIndex ? 'true' : undefined"><span class="sheet-number">{{ index + 1 }}</span>{{ sheet.name }}</li>
-			</ol>
-			<span class="sheet-help"><kbd>:sheet</kbd> switch · <kbd>:sheetnew</kbd> create</span>
-		</div>
-		<div v-if="recovery" class="recovery-status" :class="{ 'cell-error': recovery.state.error }" role="status">
-			{{ recovery.state.error || (!recovery.state.enabled ? 'Automatic recovery off · :autosave on' : recovery.state.pending ? 'Recovery pending…' : recovery.state.lastCheckpoint ? 'Recovery up to date · ' + new Date(recovery.state.lastCheckpoint).toLocaleTimeString() : 'Recovery on · :recover lists copies') }}
-		</div>
-		<div class="status-context" v-if="ui.error || ui.spill" :class="{ 'cell-error': ui.error }" role="status">{{ ui.error || ui.spill }}</div>
 		<div class="command-status">
 			<div id="modeDisplay">-- NORMAL --</div>
 			<div id="commandLine" aria-label="Commands and messages" aria-live="polite" data-message="Type : for commands · i to edit"></div>
@@ -85,16 +74,6 @@
 	font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-.sheet-strip { display: flex; align-items: center; gap: 20px; padding: 0 12px; border-bottom: 1px solid #2a3d51; }
-.sheet-list { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; list-style: none; margin: 0; padding: 0; }
-.sheet-list li { display: flex; gap: 8px; align-items: center; padding: 6px 10px; white-space: nowrap; color: #9aaec3; border-bottom: 2px solid transparent; }
-.sheet-list li[aria-current="true"] { color: #75e2bc; background: #192c3a; border-bottom-color: #75e2bc; }
-.sheet-number { color: #9aaec3; font-size: 10px; }
-.sheet-help { color: #9aaec3; flex-shrink: 0; }
-.workbook-state { color: #dbe6f3; max-width: 30vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recovery-status { padding: 3px 12px; color: #9aaec3; overflow-wrap: anywhere; border-bottom: 1px solid #213247; }
-.recovery-status.cell-error { color: #ffb5a2; }
-
 .command-status { display: flex; align-items: center; min-height: 28px; padding: 0 12px; gap: 16px; }
 #commandLine {
 	flex: 1;
@@ -109,8 +88,6 @@
 .shortcut { display: inline-flex; align-items: center; gap: 7px; color: #9aaec3; white-space: nowrap; }
 kbd { color: #dbe6f3; font: inherit; }
 .shortcut kbd { color: #9fd6ff; }
-.status-context { padding: 5px 12px; border-bottom: 1px solid #213247; color: #afc5df; }
-.status-context.cell-error { color: #ffb5a2; }
 
 #webFileUpload {
 	display: none;
@@ -133,5 +110,5 @@ kbd { color: #dbe6f3; font: inherit; }
 #cancelButton {
 	margin-left: 5px;
 }
-@media (max-width: 600px) { .sheet-help { display: none; } .command-status { gap: 8px; } #shortcutBar { gap: 6px 14px; font-size: 11px; } }
+@media (max-width: 600px) { .command-status { gap: 8px; } #shortcutBar { gap: 6px 14px; font-size: 11px; } }
 </style>

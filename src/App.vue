@@ -1,8 +1,6 @@
 <template>
 	<div :inert="recovery.state.dialog || recovery.state.locked ? true : undefined">
 	<FirstLaunchScreen v-if="launchManager.displayed" />
-	<FormulaBar v-if="check.windows.active.content === 'sheet'" />
-	<div v-else id="topBar" class="rules-topbar">Conditional formatting · {{ check.windows.active.sheet.name }}<span>Ctrl-w h/j/k/l · Switch window</span></div>
 	<CommandLine />
 	<RightClickMenu />
 	<main id="windows" aria-label="Workspace windows"><WindowNode :node="check.windows.state.root" /></main>
@@ -12,10 +10,9 @@
 
 <script setup>
 	import "./styling/syntaxHighlighting.css";
-	import { ref, onMounted, onUnmounted } from 'vue';
+	import { ref, watch, onMounted, onUnmounted } from 'vue';
 	import SheetManager from './classes/SheetManager.js';
 	import WindowNode from './components/WindowNode.vue';
-	import FormulaBar from './components/FormulaBar.vue';
 	import CommandLine from './components/CommandLine.vue';
 	import FirstLaunchScreen from './components/FirstLaunchScreen.vue';
 	import RightClickMenu from './components/RightClickMenu.vue';
@@ -36,6 +33,7 @@
 	recovery.focus = () => check.focus();
 	recovery.report = text => check.setPhMessage(text);
 	recovery.onOpen = async () => { new LaunchManager().hide(); await check.newSheet(false); };
+	watch(() => recovery.state.error, error => { if (error) check.setPhMessage(error); });
 	onMounted(() => { recovery.start().catch(error => { recovery.state.error = error.message || String(error); }); });
 	onUnmounted(() => { recovery.close().catch(() => {}); });
 
@@ -83,9 +81,7 @@ table {
 	z-index: 10;
 }
 
-#windows { position: fixed; inset: var(--formula-bar-height, 24px) 0 var(--status-bar-height, 64px); display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); min-width: 0; min-height: 0; }
-.rules-topbar { position: fixed; inset: 0 0 auto; display: flex; box-sizing: border-box; padding: 4px 10px; gap: 20px; font: 12px/20px ui-monospace, monospace; color: #dbe6f3; background: #15202e; }
-.rules-topbar span { color: #9aaec3; margin-left: auto; }
+#windows { position: fixed; inset: 0 0 var(--status-bar-height, 64px); display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); min-width: 0; min-height: 0; }
 .reference-outline, .spill-outline { position: absolute; box-sizing: border-box; border: 2px solid var(--reference-color); pointer-events: none; }
 .reference-outline { background: color-mix(in srgb, var(--reference-color) 9%, transparent); }
 .spill-outline { border-style: dashed; }
@@ -102,7 +98,7 @@ table {
 
 .colLabels {
 	position: sticky;
-	top: var(--formula-bar-height, 24px);
+	top: 0;
 	z-index: 30;
 }
 
@@ -120,7 +116,7 @@ table {
 
 .rowLabelType {
 	z-index: 40;
-	top: var(--formula-bar-height, 24px);
+	top: 0;
 	background-color: #091119;
 }
 </style>
