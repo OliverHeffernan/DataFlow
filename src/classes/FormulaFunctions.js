@@ -226,6 +226,47 @@ function stack(name, arrays) {
 	return arrays[0].map((_, i) => arrays.flatMap(array => array[i]));
 }
 
+// Record keys deliberately differ from spreadsheet comparisons: blanks never match, booleans
+// are distinct from numbers, and decimals compare exactly rather than with mathjs's tolerance.
+function recordKeys(array, name, argument) {
+	return array.map((row, r) => {
+		let blank = false;
+		const parts = row.map((value, c) => {
+			if (typeof value === "number") value = math.bignumber(String(value));
+			if (math.isBigNumber(value) && value.isFinite()) return ["number", value.toString()];
+			if (typeof value === "boolean") return ["boolean", value];
+			if (typeof value === "string") {
+				if (value === "") blank = true;
+				return ["text", value];
+			}
+			throw new FormulaError("#VALUE!", `${name} ${argument} key at row ${r}, column ${c} must be text, a boolean, or a finite real number`);
+		});
+		// JSON preserves component boundaries and escaping; decimal strings preserve precision.
+		return blank ? null : JSON.stringify(parts);
+	});
+}
+
+function matchingRows(name, queryKeys, sourceKeys) {
+	if (queryKeys[0].length !== sourceKeys[0].length) {
+		throw new FormulaError("#VALUE!", `${name} key arrays must have the same number of columns (got ${shapeText(queryKeys)} and ${shapeText(sourceKeys)})`);
+	}
+	const queries = recordKeys(queryKeys, name, "query");
+	const sources = recordKeys(sourceKeys, name, "source");
+	const index = new Map();
+	sources.forEach((key, row) => {
+		if (key === null) return;
+		if (!index.has(key)) index.set(key, []);
+		index.get(key).push(row);
+	});
+	return queries.map(key => index.get(key) ?? []);
+}
+
+function checkMatchSize(name, rows, cols) {
+	if (rows * cols > 1_000_000) {
+		throw new FormulaError("#CALC!", `${name} result ${rows}×${cols} exceeds the limit of 1,000,000 cells`);
+	}
+}
+
 // Spreadsheet functions receive unevaluated argument nodes, so IF/IFERROR/FILTER can be lazy.
 const FUNCTIONS = {
 	SUM: (args, evaluate) => { arity("SUM", args, 1, Infinity); return sumOf(args.map(evaluate)); },
@@ -263,6 +304,51 @@ const FUNCTIONS = {
 		if (rows.length) return rows.map(row => [...row]);
 		if (args.length === 3) return evaluate(args[2]);
 		throw new FormulaError("#CALC!", "FILTER found no matching rows");
+	},
+	LOOKUP(args, evaluate) {
+		arity("LOOKUP", args, 3, 4);
+		const [queries, keys, values] = args.slice(0, 3).map(arg => to2D(evaluate(arg)));
+		if (keys.length !== values.length) {
+			throw new FormulaError("#VALUE!", `LOOKUP sourceKeys and values must have the same number of rows (got ${shapeText(keys)} and ${shapeText(values)})`);
+		}
+		const matches = matchingRows("LOOKUP", queries, keys);
+		const duplicate = matches.findIndex(rows => rows.length > 1);
+		if (duplicate >= 0) {
+			throw new FormulaError("#VALUE!", `LOOKUP query row ${duplicate} matches multiple source rows ${matches[duplicate].join(", ")}; use JOIN for all matches`);
+		}
+		const width = values[0].length;
+		checkMatchSize("LOOKUP", queries.length, width);
+		const missing = matches.findIndex(rows => !rows.length);
+		let fallback;
+		if (missing >= 0) {
+			if (args.length < 4) throw new FormulaError("#N/A", `LOOKUP query row ${missing} has no match`);
+			const value = unwrap(evaluate(args[3]));
+			if (isArray(value) && (value.length !== 1 || value[0].length !== width)) {
+				throw new FormulaError("#VALUE!", `LOOKUP ifMissing must be a scalar or 1×${width} row (got ${shapeText(value)})`);
+			}
+			fallback = isArray(value) ? value[0] : Array(width).fill(value);
+		}
+		return matches.map(rows => [...(rows.length ? values[rows[0]] : fallback)]);
+	},
+	JOIN(args, evaluate) {
+		arity("JOIN", args, 4, 5);
+		const [left, leftKeys, right, rightKeys] = args.slice(0, 4).map(arg => to2D(evaluate(arg)));
+		const kind = args.length === 5 ? unwrap(evaluate(args[4])) : "left";
+		if (kind !== "left" && kind !== "inner") throw new FormulaError("#VALUE!", 'JOIN kind must be "left" or "inner"');
+		if (left.length !== leftKeys.length || right.length !== rightKeys.length) {
+			throw new FormulaError("#VALUE!", `JOIN each data array and its keys must have the same number of rows (left ${shapeText(left)}, keys ${shapeText(leftKeys)}; right ${shapeText(right)}, keys ${shapeText(rightKeys)})`);
+		}
+		const matches = matchingRows("JOIN", leftKeys, rightKeys);
+		const rows = matches.reduce((total, match) => total + (match.length || (kind === "left" ? 1 : 0)), 0);
+		checkMatchSize("JOIN", rows, left[0].length + right[0].length);
+		if (!rows) throw new FormulaError("#CALC!", "JOIN found no matching rows");
+		const padding = Array(right[0].length).fill("");
+		const result = [];
+		left.forEach((row, i) => {
+			if (matches[i].length) matches[i].forEach(j => result.push([...row, ...right[j]]));
+			else if (kind === "left") result.push([...row, ...padding]);
+		});
+		return result;
 	},
 	VSTACK: (args, evaluate) => { arity("VSTACK", args, 1, Infinity); return stack("VSTACK", args.map(arg => to2D(evaluate(arg)))); },
 	HSTACK: (args, evaluate) => { arity("HSTACK", args, 1, Infinity); return stack("HSTACK", args.map(arg => to2D(evaluate(arg)))); },

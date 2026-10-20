@@ -60,6 +60,22 @@ test('completion and signatures respect nested calls, relative calculations and 
 	assert.equal(keyboard.context, 'sheet');
 });
 
+test('lookup and join completion exposes signatures through nested arrays and quoted sheet names', () => {
+	const assist = text => formulaAssist(text, Array.from(text).length);
+	assert.deepEqual(assist('=loo').suggestions, ['LOOKUP']);
+	assert.deepEqual(assist('=JO').suggestions, ['JOIN']);
+	assert.equal(assist('=LOOKUP(HSTACK("a,b", "NZ"), \'Prices, 2026\'!A0:B4, C0:C4, ').signature.argument, 3);
+	assert.deepEqual(assist('=JOIN(A0:B2, A0:A2, HSTACK(C0:C2,D0:D2), E0:E2, ').signature,
+		{ name: 'JOIN', args: ['left', 'leftKeys', 'right', 'rightKeys', '[kind = "left"]'], argument: 4 });
+	const { keyboard } = setup('');
+	keyboard.feed('i=LO<Tab>"x","x",7<End><CR>');
+	assert.equal(keyboard.formula, '=LOOKUP("x","x",7)');
+	assert.equal(keyboard.sheet.getValue(5, 3), 7);
+	keyboard.feed('cic=JO<Tab>7,1,8,1<End><CR>');
+	assert.equal(keyboard.formula, '=JOIN(7,1,8,1)');
+	assert.deepEqual(keyboard.sheet.getValue(5, 3), [[7, 8]]);
+});
+
 test('CHART builder completion and signatures follow chains without leaking into ordinary formulas or strings', () => {
 	const assist = text => formulaAssist(text, Array.from(text).length);
 	assert.deepEqual(assist('=CHART().').suggestions, ['.line', '.bar', '.scatter', '.pie', '.x', '.series']);

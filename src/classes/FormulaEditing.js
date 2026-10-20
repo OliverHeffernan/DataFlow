@@ -5,6 +5,8 @@ export const functionHelp = {
 	IF: ['condition', 'whenTrue', '[whenFalse]'],
 	IFERROR: ['value', 'fallback'],
 	FILTER: ['array', 'include', '[ifEmpty]'],
+	LOOKUP: ['queryKeys', 'sourceKeys', 'values', '[ifMissing]'],
+	JOIN: ['left', 'leftKeys', 'right', 'rightKeys', '[kind = "left"]'],
 	VSTACK: ['array', '…'], HSTACK: ['array', '…'],
 	SORT: ['array', '[columnIndex = 0]', '[sortOrder = 1]'], UNIQUE: ['array'],
 	AND: ['condition', '…'], OR: ['condition', '…'], NOT: ['condition'],
