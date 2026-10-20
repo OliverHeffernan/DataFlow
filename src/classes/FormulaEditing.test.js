@@ -113,7 +113,9 @@ test('cell formula and value objects copy distinct text, and value delete/change
 	sheet.rows[0][1] = '=0'; sheet.rows[0][2] = '=FALSE';
 	sheet.rows[0][4] = '=VSTACK(8,13)';
 	sheet.recalculate(); keyboard.escape();
-	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'yiv'));
+	keyboard.feed('yi');
+	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'v' && hint.description === 'Cell value'));
+	keyboard.feed('<Esc>');
 	keyboard.feed('yicjp'); assert.equal(sheet.rows[1][0], '=2+3*4');
 	keyboard.feed('kyiv2jp'); assert.equal(sheet.rows[2][0], '14');
 	keyboard.feed('gg0y5iv');
@@ -144,10 +146,29 @@ test('visual value selections retain their meaning through corner swaps and gv w
 test('shortcut hints follow modes and Lua descriptions, prefixes and disabled defaults', () => {
 	const { keyboard } = setup('');
 	keyboard.mappings = compileConfig(`vim.keymap.set('f', 'h', '<Nop>')
-vim.keymap.set('f', ' z', 'gk', {desc='Previous formula line'})`);
+vim.g.mapleader = ' '
+vim.keymap.set('f', '<Leader>z', 'gk', {desc='Previous formula line'})
+vim.keymap.set({'n', 'f'}, '<Leader>sn', ':sheetnew<CR>', {desc='New sheet'})
+vim.keymap.set('f', '<Leader>so', ':o<CR>', {desc='Open sheet'})
+vim.keymap.set('f', '<Leader>w', ':w<CR>', {desc='Save'})
+vim.keymap.set('f', '<Leader>xx', '<Nop>')
+vim.keymap.set('n', 'Q', 'G', {desc='Last row'})
+vim.keymap.set('f', 'gq', 'gk', {desc='Previous line'})
+vim.keymap.set('f', '<F6>', 'gk', {desc='Previous line'})
+vim.keymap.set('f', '<F6>x', 'gj', {desc='Next line'})`);
+	assert.deepEqual(keyboardHints(keyboard).filter(hint => hint.key === 'Space'), [{ key: 'Space', description: '…' }]);
+	assert.deepEqual(keyboardHints(keyboard).filter(hint => hint.key === 'g'), [{ key: 'g', description: '…' }]);
+	assert.ok(!keyboardHints(keyboard).some(hint => ['New sheet', 'Open sheet', 'Last row'].includes(hint.description)));
+	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'F6' && hint.description === 'Previous line …'));
 	assert.ok(!keyboardHints(keyboard).some(hint => hint.description === 'Text motion' && hint.key.split(' ').includes('h')));
 	keyboard.feed(' ');
-	assert.deepEqual(keyboardHints(keyboard), [{ key: 'z', description: 'Previous formula line' }]);
+	assert.deepEqual(keyboardHints(keyboard), [
+		{ key: 'z', description: 'Previous formula line' }, { key: 's', description: '…' }, { key: 'w', description: 'Save' },
+	]);
+	keyboard.feed('s');
+	assert.deepEqual(keyboardHints(keyboard), [{ key: 'n', description: 'New sheet' }, { key: 'o', description: 'Open sheet' }]);
+	keyboard.feed('<Esc><F6>');
+	assert.deepEqual(keyboardHints(keyboard), [{ key: 'x', description: 'Next line' }]);
 	keyboard.feed('<Esc>i');
 	assert.ok(keyboardHints(keyboard).some(hint => hint.description === 'Relative cell'));
 	assert.ok(!keyboardHints(keyboard).some(hint => hint.description === 'Extend range'));
@@ -155,4 +176,30 @@ vim.keymap.set('f', ' z', 'gk', {desc='Previous formula line'})`);
 	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'Shift H J K L' && hint.description === 'Extend range'));
 	keyboard.feed('+');
 	assert.ok(!keyboardHints(keyboard).some(hint => hint.description === 'Extend range'));
+});
+
+test('built-in shortcut hints expose only the next key through operators and text objects', () => {
+	const { keyboard } = setup('=2+3', 0, 0);
+	keyboard.escape();
+	assert.ok(!keyboardHints(keyboard).some(hint => ['yic', 'yiv'].includes(hint.key)));
+	for (const operator of ['y', '2d3', 'c', 'v']) {
+		keyboard.feed(operator);
+		assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'i a' && hint.description === 'Text object…'), operator);
+		assert.ok(!keyboardHints(keyboard).some(hint => ['ic', 'iv'].includes(hint.key) || ['Cell formula', 'Cell value'].includes(hint.description)), operator);
+		keyboard.feed('i');
+		assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'c' && hint.description === 'Cell formula'), operator);
+		assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'v' && hint.description === 'Cell value'), operator);
+		assert.ok(!keyboardHints(keyboard).some(hint => ['i a', 'h j k l', 'ic', 'iv'].includes(hint.key)), operator);
+		keyboard.feed('<Esc>');
+	}
+	keyboard.feed('ya');
+	assert.ok(!keyboardHints(keyboard).some(hint => ['Cell formula', 'Cell value'].includes(hint.description)));
+	keyboard.feed('<Esc>yg');
+	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'g' && hint.description === 'First row / line'));
+	assert.ok(!keyboardHints(keyboard).some(hint => hint.description === 'Whole row / line'));
+	keyboard.feed('<Esc>yf');
+	assert.ok(keyboardHints(keyboard).some(hint => hint.description === 'Type target'));
+	keyboard.feed('<Esc><CR>yi');
+	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'w W' && hint.description === 'Word'));
+	assert.ok(!keyboardHints(keyboard).some(hint => ['Cell formula', 'Cell value', 'Whole row / line'].includes(hint.description)));
 });

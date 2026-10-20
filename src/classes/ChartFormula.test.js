@@ -156,10 +156,10 @@ test("value objects reject chart cells and chart-containing selections without e
 	const keyboard = new VimKeyboard(sheet);
 	keyboard.move({ row: 6, col: 4 });
 	assert.ok(!keyboardHints(keyboard).some(hint => hint.key === 'yiv'));
-	keyboard.feed('y');
-	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'ic'));
-	assert.ok(!keyboardHints(keyboard).some(hint => hint.key === 'iv'));
-	keyboard.feed('ic'); assert.equal(keyboard.register.text, builder);
+	keyboard.feed('yi');
+	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'c' && hint.description === 'Cell formula'));
+	assert.ok(!keyboardHints(keyboard).some(hint => hint.key === 'v'));
+	keyboard.feed('c'); assert.equal(keyboard.register.text, builder);
 	for (const keys of ['yiv', 'div', 'civ', 'viv']) {
 		keyboard.feed(keys);
 		assert.equal(keyboard.register.text, builder, keys);

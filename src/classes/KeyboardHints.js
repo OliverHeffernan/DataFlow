@@ -1,6 +1,6 @@
 const normal = [
 	[['h', 'j', 'k', 'l'], 'Move'], [['i', 'a'], 'Edit'], [['<CR>'], 'Formula'],
-	[['v'], 'Select'], [['d', 'c', 'y'], 'Operator…'], [['yic'], 'Yank formula'], [['yiv'], 'Yank value'], [['g'], 'Go…'], [['u'], 'Undo'], [['<C-r>'], 'Redo'], [[':'], 'Command'],
+	[['v'], 'Select'], [['d', 'c', 'y'], 'Operator…'], [['g'], 'Go…'], [['u'], 'Undo'], [['<C-r>'], 'Redo'], [[':'], 'Command'],
 ];
 const formula = [
 	[['h', 'l', 'w', 'b'], 'Text motion'], [['j', 'k'], 'Leave + move cell'], [['i', 'a'], 'Insert'],
@@ -14,6 +14,10 @@ const insert = [
 const motions = [
 	[['h', 'j', 'k', 'l'], 'Motion'], [['w', 'b', 'e'], 'Word'], [['$', '0'], 'Line edge'],
 	[['i', 'a'], 'Text object…'], [['<Esc>'], 'Cancel'],
+];
+const objects = [[['w', 'W'], 'Word'], [['s'], 'Sentence'], [['p'], 'Paragraph']];
+const formulaObjects = [
+	[['"', "'", '`'], 'Quoted text'], [['(', ')', 'b', '[', ']', '{', '}', 'B', '<', '>'], 'Block'], [['t'], 'Tag'],
 ];
 const prefixes = {
 	g: [[['g'], 'First row / line'], [['e', 'E'], 'Previous word end'], [['j', 'k'], 'Text line'], [['0', '$'], 'Visible edges'], [['v'], 'Previous selection'], [[';', ','], 'Changes']],
@@ -32,27 +36,37 @@ const label = keys => {
 export function keyboardHints(keyboard) {
 	const prefix = keyboard.mappingKeys;
 	const maps = keyboard.mappings.filter(map => map.mode === keyboard.mappingMode && prefix.every((key, i) => map.lhs[i] === key));
-	const custom = maps.filter(map => map.rhs.join('') !== '<Nop>').map(map => ({
-		key: label(map.lhs.slice(prefix.length)), description: map.desc || `→ ${label(map.rhs)}`,
-	}));
+	const enabled = maps.filter(map => map.rhs.join('') !== '<Nop>' && map.lhs.length > prefix.length);
+	const custom = [...new Set(enabled.map(map => map.lhs[prefix.length]))].map(key => {
+		const children = enabled.filter(map => map.lhs[prefix.length] === key);
+		const leaf = children.find(map => map.lhs.length === prefix.length + 1);
+		const more = children.some(map => map.lhs.length > prefix.length + 1);
+		const description = leaf ? leaf.desc || `→ ${label(leaf.rhs)}` : '';
+		return { key: label([key]), description: description + (more ? `${description ? ' ' : ''}…` : '') };
+	});
 	if (prefix.length) return custom;
 	let defaults;
 	if (keyboard.command !== null) defaults = [[['<CR>'], 'Run'], [['<BS>'], 'Backspace'], [['<Esc>'], 'Cancel']];
 	else if (keyboard.mode === 'i') defaults = insert.filter(([keys]) => keys[0] !== 'H' || keyboard.reference);
-	else if (['v', 'V', 'b'].includes(keyboard.mode)) defaults = [[['h', 'j', 'k', 'l'], 'Extend selection'], [['d'], 'Delete'], [['c'], 'Change'], [['y'], 'Yank'], [['o'], 'Swap corner'], [['<Esc>'], 'Cancel']];
 	else {
+		const visual = ['v', 'V', 'b'].includes(keyboard.mode);
 		const pending = keyboard.pending.replace(/^\d+/, '');
-		if (/^[dcy]/.test(pending)) {
-			defaults = [[[pending[0]], 'Whole row / line'], ...motions];
-			if (keyboard.context === 'sheet') {
-				defaults = [[['ic'], 'Cell formula'], ...defaults];
-				if (keyboard.canUseValueObject()) defaults = [[['iv'], 'Cell value'], ...defaults];
+		const operator = !visual && /^[dcy]/.test(pending) ? pending[0] : '';
+		const action = operator ? pending.slice(1).replace(/^\d+/, '').replace(/^(v|V|<C-v>)/, '') : pending;
+		if ((operator || visual) && /^[ia]$/.test(action)) {
+			defaults = [...objects, [['<Esc>'], 'Cancel']];
+			if (keyboard.context === 'formula') defaults = [...formulaObjects, ...defaults];
+			else if (action === 'i') {
+				defaults = [[['c'], 'Cell formula'], ...defaults];
+				if (keyboard.canUseValueObject()) defaults = [[['v'], 'Cell value'], ...defaults];
 			}
 		}
-		else if (prefixes[pending]) defaults = prefixes[pending];
-		else if (/^[fFtTm'`q@r]$/.test(pending)) defaults = [[['character'], 'Type target'], [['<Esc>'], 'Cancel']];
-		else defaults = keyboard.context === 'formula' ? formula : normal.filter(([keys]) => keys[0] !== 'yiv' || keyboard.canUseValueObject());
+		else if (prefixes[action]) defaults = prefixes[action];
+		else if (/^(?:[fFtTm'`q@r]|g['`])$/.test(action)) defaults = [[['character'], 'Type target'], [['<Esc>'], 'Cancel']];
+		else if (operator) defaults = [[[operator], 'Whole row / line'], ...motions];
+		else if (visual) defaults = [[['h', 'j', 'k', 'l'], 'Extend selection'], [['d'], 'Delete'], [['c'], 'Change'], [['y'], 'Yank'], [['i', 'a'], 'Text object…'], [['o'], 'Swap corner'], [['<Esc>'], 'Cancel']];
+		else defaults = keyboard.context === 'formula' ? formula : normal;
 	}
-	const overridden = new Set(maps.filter(map => map.lhs.length === 1).map(map => map.lhs[0]));
+	const overridden = new Set(maps.map(map => map.lhs[0]));
 	return [...custom, ...defaults.map(([keys, description]) => ({ key: label(keys.filter(key => !overridden.has(key))), description })).filter(hint => hint.key)];
 }
