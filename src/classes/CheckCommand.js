@@ -333,7 +333,7 @@ export default class CheckCommand {
 			else if (command === ':w') return await files.saveFile();
 			else if (command === ':wa') return await files.saveFile(true);
 			else if (command === ':o') { await files.openFile(); new LaunchManager().hide(); return; }
-			else if (command === ':clear') { this.sheet.clearScreen(); await this.newSheet(); new LaunchManager().hide(); return; }
+			else if (command === ':clear') { this.sheet.clearScreen(); await this.newSheet(false); new LaunchManager().hide(); return; }
 			else if (command === ':forceloadstyles') this.sheet.loadStyles();
 			else if (command === ':resetallstyles') this.sheet.resetAllStyles();
 			else if (command.startsWith(':hi ')) this.sheet.setStyles(command, this.sheet.selRow, this.sheet.selCol);

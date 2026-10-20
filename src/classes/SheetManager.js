@@ -460,14 +460,13 @@ export default class SheetManager {
 		const styles = duplicate ? this.styles.map(row => row.map(style => ({ ...style }))) : rows.map(row => row.map(() => ({ ...this.defaultStyling })));
 		this.workbook.sheets = [...this.sheets, { name, rows, styles, selRow: 0, selCol: 0 }];
 		this.switchSheet(this.sheets.length);
-		historyManager.reset(this);
+		historyManager.do(this);
 	}
 
 	rewriteSheetReferences(oldName, newName) {
 		const transform = text => rewriteSheetReferences(text, oldName, newName);
 		for (const sheet of this.sheets) {
 			sheet.rows = sheet.rows.map(row => row.map(transform));
-			historyManager.rewrite(sheet, transform);
 		}
 	}
 
@@ -477,6 +476,7 @@ export default class SheetManager {
 		this.activeSheet.name = name;
 		this.workbook.sheets = [...this.sheets];
 		this.recalculate();
+		historyManager.do(this);
 	}
 
 	moveSheet(position) {
@@ -485,6 +485,7 @@ export default class SheetManager {
 		sheets.splice(index, 0, active);
 		this.workbook.sheets = sheets;
 		this.workbook.activeSheetIndex = index;
+		historyManager.do(this);
 	}
 
 	deleteSheet(target = this.workbook.activeSheetIndex + 1, force = false) {
@@ -498,14 +499,32 @@ export default class SheetManager {
 		this.rewriteSheetReferences(removed.name, null);
 		this.workbook.sheets = this.sheets.filter(sheet => sheet !== removed);
 		this.switchSheet(active === removed ? Math.min(index + 1, this.sheets.length) : this.sheets.indexOf(active) + 1);
+		historyManager.do(this);
 	}
 
 	serializeWorkbook() {
-		return { version: 2, activeSheet: this.workbook.activeSheetIndex, sheets: this.sheets.map(({ name, rows, styles }) => ({ name, rows, styles })) };
+		const { activeSheetIndex, ...data } = this.workbook;
+		return { ...data, version: 2, activeSheet: activeSheetIndex, sheets: this.sheets.map(({ selRow, selCol, ...sheet }) => sheet) };
+	}
+
+	restoreWorkbook(data) {
+		// History restores data, not navigation. Keep the visible sheet/cursors where possible.
+		const active = this.activeSheet.name;
+		const cursors = new Map(this.sheets.map(sheet => [sheet.name, { row: sheet.selRow, col: sheet.selCol }]));
+		const { version, activeSheet, sheets, ...metadata } = data;
+		for (const key of Object.keys(this.workbook)) delete this.workbook[key];
+		Object.assign(this.workbook, metadata, { sheets: sheets.map(sheet => {
+			const cursor = cursors.get(sheet.name) ?? { row: 0, col: 0 };
+			return { ...sheet, selRow: Math.min(cursor.row, sheet.rows.length - 1), selCol: Math.min(cursor.col, sheet.rows[0].length - 1) };
+		}), activeSheetIndex: Math.max(0, sheets.findIndex(sheet => sheet.name === active)) });
+		this.numOfRows.value = this.rows.length;
+		this.numOfCols.value = this.rows[0].length;
+		this.loadAllCells();
 	}
 
 	loadWorkbook(data, path = null) {
 		// Validate the whole file before replacing any existing work. Both legacy layouts remain readable.
+		if (data?.version !== undefined && ![1, 2].includes(data.version)) throw new Error(`Unsupported workbook version: ${data.version}`);
 		const source = Array.isArray(data) ? [{ rows: data }] : data?.sheets ?? [data];
 		if (!Array.isArray(source) || !source.length) throw new Error('Invalid workbook: at least one sheet is required');
 		const names = new Set();
@@ -516,14 +535,18 @@ export default class SheetManager {
 			if (!Array.isArray(rows) || !rows.length || !Array.isArray(rows[0]) || !rows[0].length || rows.some(row => !Array.isArray(row) || row.length !== rows[0].length || row.some(value => typeof value !== 'string' && typeof value !== 'number'))) throw new Error(`Invalid cell grid in ${name}`);
 			const styles = sheet.styles;
 			if (styles != null && (!Array.isArray(styles) || styles.length !== rows.length || styles.some((row, r) => !Array.isArray(row) || row.length !== rows[r].length || row.some(style => !style || typeof style !== 'object' || Array.isArray(style))))) throw new Error(`Invalid styles in ${name}`);
-			return { name: name.trim(), rows: rows.map(row => row.map(String)), styles: rows.map((row, r) => row.map((_, c) => ({ ...this.defaultStyling, ...styles?.[r]?.[c] }))), selRow: 0, selCol: 0 };
+			return { ...JSON.parse(JSON.stringify(sheet)), name: name.trim(), rows: rows.map(row => row.map(String)), styles: rows.map((row, r) => row.map((_, c) => ({ ...this.defaultStyling, ...styles?.[r]?.[c] }))), selRow: 0, selCol: 0 };
 		});
 		const active = data?.activeSheet ?? 0;
 		if (!Number.isInteger(active) || active < 0 || active >= sheets.length) throw new Error('Invalid active sheet');
+		const { version, activeSheet, sheets: ignored, ...metadata } = data?.sheets ? data : {};
+		for (const key of Object.keys(this.workbook)) delete this.workbook[key];
+		Object.assign(this.workbook, JSON.parse(JSON.stringify(metadata)));
 		this.workbook.sheets = sheets;
+		this.workbook.activeSheetIndex = active;
 		this.path = path;
 		this.switchSheet(active + 1);
-		for (const sheet of sheets) historyManager.reset(sheet);
+		historyManager.reset(this);
 	}
 
 	clearScreen() {
@@ -546,6 +569,7 @@ export default class SheetManager {
 
 		this.loadAllCells(this.numOfRows.value, this.numOfCols.value);
 		this.loadStyles();
+		historyManager.do(this);
 	}
 
 	loadStyles() {

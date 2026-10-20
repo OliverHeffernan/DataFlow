@@ -68,21 +68,26 @@ test('invalid files and sheet operations do not replace or partially mutate exis
 	assert.equal(JSON.stringify(sheet.serializeWorkbook()), before);
 });
 
-test('switching preserves per-sheet cursor and undo/redo, while duplication and reordering stay independent', () => {
+test('workbook undo is chronological across sheets, including topology, while preserving navigation', () => {
 	sheet.rows[0][0] = '19'; sheet.styles[0][0].fg = 'orange'; history.do(sheet);
 	sheet.selRow = 1; sheet.selCol = 2;
 	sheet.createSheet('Other'); sheet.rows[0][0] = '42'; history.do(sheet);
-	history.undo(sheet); assert.equal(sheet.rows[0][0], '');
 	sheet.switchSheet(1);
 	assert.deepEqual([sheet.selRow, sheet.selCol], [1, 2]);
-	history.undo(sheet); assert.equal(sheet.rows[0][0], '3');
-	assert.equal(sheet.styles[0][0].fg, 'white');
-	history.redo(sheet); assert.equal(sheet.rows[0][0], '19');
+	assert.equal(history.do(sheet), false);
+	history.undo(sheet); assert.equal(sheet.sheets[1].rows[0][0], '');
+	assert.equal(sheet.rows[0][0], '19');
+	history.undo(sheet); assert.equal(sheet.sheets.length, 1);
+	history.undo(sheet); assert.equal(sheet.rows[0][0], '3'); assert.equal(sheet.styles[0][0].fg, 'white');
+	history.redo(sheet, 3); assert.equal(sheet.sheets[1].rows[0][0], '42');
+	assert.deepEqual([sheet.selRow, sheet.selCol], [1, 2]);
 	sheet.createSheet('Copy', true); sheet.rows[0][0] = '99'; sheet.styles[0][0].fg = 'pink';
 	sheet.moveSheet(1); assert.equal(sheet.activeSheet.name, 'Copy');
+	history.undo(sheet); assert.deepEqual(sheet.sheets.map(item => item.name), ['Sheet1', 'Other', 'Copy']);
+	history.redo(sheet); assert.equal(sheet.activeSheet.name, 'Copy');
 	sheet.switchSheet('Sheet1');
 	assert.equal(sheet.rows[0][0], '19'); assert.equal(sheet.styles[0][0].fg, 'orange');
-	sheet.switchSheet('Other'); history.redo(sheet); assert.equal(sheet.rows[0][0], '42');
+	sheet.deleteSheet('Other', true); history.undo(sheet); assert.equal(sheet.sheets.find(item => item.name === 'Other').rows[0][0], '42');
 });
 
 test('cross-sheet scalars, ranges, relative coordinates, spills and charts use the target sheet', () => {
@@ -109,7 +114,7 @@ test('cross-sheet scalars, ranges, relative coordinates, spills and charts use t
 	assert.equal(sheet.cellValues.value[2][2], 56);
 });
 
-test('rename updates actual references, including undo/redo snapshots, but leaves text and chart titles alone', () => {
+test('rename and its cross-sheet rewrites undo together without changing text or chart titles', () => {
 	sheet.renameSheet('Inputs'); sheet.createSheet('Report');
 	sheet.rows[0][0] = '=Inputs!B0'; sheet.rows[0][1] = '=IF(TRUE,"Inputs!A0",Inputs!A0)';
 	sheet.rows[0][2] = '=CHART().line().series(Inputs!A0:A1).title("Inputs!A0")';
@@ -124,8 +129,22 @@ test('rename updates actual references, including undo/redo snapshots, but leave
 	assert.equal(sheet.getValue(1, 1), 3);
 	assert.equal(sheet.getValue(0, 2).title, 'Inputs!A0');
 	assert.deepEqual(sheet.getValue(0, 2).series[0].values, [3, 5]);
-	history.redo(sheet); assert.equal(sheet.rows[0][0], "='O''Brien, 2026'!A0");
-	history.undo(sheet); assert.equal(sheet.getValue(0, 0), 7);
+	history.undo(sheet); assert.equal(sheet.sheets[0].name, 'Inputs'); assert.equal(sheet.rows[0][0], '=Inputs!B0');
+	history.redo(sheet); assert.equal(sheet.sheets[0].name, "O'Brien, 2026"); assert.equal(sheet.getValue(0, 0), 7);
+});
+
+test('history and file round trips preserve workbook and nested sheet metadata without persisting history', () => {
+	sheet.loadWorkbook({ version: 2, metadata: { language: 'en-NZ' }, sheets: [{ name: 'Data', rows: [['5']], layout: { widths: [112] } }] });
+	sheet.workbook.metadata.language = 'mi'; sheet.activeSheet.layout.widths[0] = 180; sheet.rows[0][0] = '17'; history.do(sheet);
+	history.undo(sheet);
+	assert.equal(sheet.workbook.metadata.language, 'en-NZ'); assert.equal(sheet.activeSheet.layout.widths[0], 112);
+	history.redo(sheet);
+	const saved = JSON.parse(JSON.stringify(sheet.serializeWorkbook()));
+	sheet.loadWorkbook(saved);
+	assert.equal(sheet.workbook.metadata.language, 'mi'); assert.equal(sheet.activeSheet.layout.widths[0], 180);
+	history.undo(sheet); assert.equal(sheet.rows[0][0], '17');
+	assert.throws(() => sheet.loadWorkbook({ ...saved, version: 99 }), /version/);
+	assert.deepEqual(sheet.serializeWorkbook(), saved);
 });
 
 test('deletion protects data and references; forced deletion permanently invalidates references', () => {
