@@ -173,6 +173,7 @@ This is real Lua 5.3, executed by Fengari in a worker, not a line-based Lua pars
 ```lua
 vim.g.mapleader = " "
 vim.g.maplocalleader = ","
+vim.opt.timeoutlen = 1000 -- milliseconds to wait for the next mapping key (default: 500)
 
 vim.keymap.set({ "n", "f", "x" }, "<Leader>h", "0")
 vim.keymap.set({ "n", "f", "x" }, "<Leader>l", "$")
@@ -196,9 +197,11 @@ vim.keymap.set({ "n", "f" }, "<Leader>sn", ":sheetnew<CR>", { desc = "New sheet"
 
 With a Space leader, the helper shows `Space Actions …`, then `s Sheets …` after Space, then `n New sheet` after Space s. Labels follow the same modes and leader/localleader expansion as mappings; define the leader first. Labels are display-only: they do not bind keys, change prefix timeouts or fallback, or create branches without enabled child mappings. Unlabelled branches still show `…`. If a prefix also runs a command, that command's description takes precedence. Repeating a group declaration replaces its label; remove the declaration and reload to clear it.
 
-Key notation: `<Esc>`, `<CR>` / `<Enter>`, `<S-CR>`, `<BS>`, `<Del>`, `<Tab>`, `<Space>`, `<lt>`, `<Nop>`, `<F4>`, arrows, Home/End, PageUp/PageDown, `<C-x>`, `<C-S-x>` and Shift-arrows. Use the shown capitalization; Ctrl-letter names use lowercase. Leader/localleader expand when a mapping is defined. Prefixes wait 500 ms for more keys; an unmatched prefix falls back to a complete shorter mapping or the original keys. Escape always cancels and cannot be remapped. Mapping `desc` values appear in the shortcut bar, and `<Nop>` mappings hide their disabled default shortcuts.
+Key notation: `<Esc>`, `<CR>` / `<Enter>`, `<S-CR>`, `<BS>`, `<Del>`, `<Tab>`, `<Space>`, `<lt>`, `<Nop>`, `<F4>`, arrows, Home/End, PageUp/PageDown, `<C-x>`, `<C-S-x>` and Shift-arrows. Use the shown capitalization; Ctrl-letter names use lowercase. Leader/localleader expand when a mapping is defined. Escape always cancels and cannot be remapped. Mapping `desc` values appear in the shortcut bar, and `<Nop>` mappings hide their disabled default shortcuts.
 
-Reload is atomic: syntax/runtime/API errors keep the previous mappings and group labels active and report an error in the command field. Configurations cannot access OS, filesystem, package loading, JavaScript, debug, coroutines, dynamic Lua loading, or protected calls. Limits: 128 KiB source, 1,000 mappings and group labels combined, 128-character LHS, 4,096-character RHS, an instruction budget and a 2-second worker timeout. Use this as a keymap configuration API, not a general-purpose Lua automation environment.
+**Mapping timeout:** `vim.opt.timeoutlen` sets the wait after each mapping-prefix key in milliseconds (default **500**). It accepts an integer from 0 to 2147483647; 0 cancels without waiting for another key. On timeout, the whole buffered sequence is discarded: no shorter mapping runs, no buffered characters become standalone commands or inserted text, and any pending count/operator is cancelled. For example, `<Leader>s` waiting for `<Leader>sn` does nothing when it times out. This also applies in insert mode (a timed-out `j` from a `jk` mapping is not inserted). Typing a mismatching key before the timeout still falls back to a complete shorter mapping or the original keys. Built-in commands such as `g` and `d` do not time out unless waiting on a custom mapping.
+
+Reload is atomic: syntax/runtime/API errors keep the previous mappings, group labels and timeout active and report an error in the command field. Omitting `vim.opt.timeoutlen` restores the 500 ms default on reload. Configurations cannot access OS, filesystem, package loading, JavaScript, debug, coroutines, dynamic Lua loading, or protected calls. Limits: 128 KiB source, 1,000 mappings and group labels combined, 128-character LHS, 4,096-character RHS, an instruction budget and a 2-second worker timeout. Use this as a keymap configuration API, not a general-purpose Lua automation environment.
 
 ## Migration and explicit exclusions
 

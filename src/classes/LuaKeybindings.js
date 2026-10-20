@@ -1,6 +1,9 @@
+export const defaultTimeoutlen = 500;
+
 export const configTemplate = `-- DataFlow init.lua (Lua 5.3). Reload with :source.
 -- n = sheet normal, f = formula normal, i = insert, x = visual, o = operator-pending.
 vim.g.mapleader = " "
+vim.opt.timeoutlen = ${defaultTimeoutlen} -- milliseconds before discarding an incomplete mapping
 vim.keymap.set({ "n", "f", "x" }, "<Leader>h", "0")
 vim.keymap.set({ "n", "f", "x" }, "<Leader>l", "$")
 vim.keymap.set("i", "jk", "<Esc>")

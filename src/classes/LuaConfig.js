@@ -1,5 +1,5 @@
 import fengari from 'fengari';
-import { tokenize } from './LuaKeybindings.js';
+import { defaultTimeoutlen, tokenize } from './LuaKeybindings.js';
 const { lua, lauxlib, lualib, to_luastring, to_jsstring } = fengari;
 
 // Compile in a fresh VM. Nothing is installed until the entire file succeeds.
@@ -16,7 +16,7 @@ export function compileConfig(source) {
 			lua.lua_pushnil(L); lua.lua_setglobal(L, to_luastring(name));
 		}
 		const prelude = `
-vim = { g = { mapleader = "\\\\", maplocalleader = "\\\\" }, keymap = {} }
+vim = { g = { mapleader = "\\\\", maplocalleader = "\\\\" }, keymap = {}, opt = { timeoutlen = ${defaultTimeoutlen} } }
 local function setKeymap(modes, lhs, rhs, opts, group)
   assert(type(lhs) == "string" and #lhs > 0, "lhs must be a non-empty string")
   assert(type(rhs) == "string", "rhs must be a key sequence, not a callback")
@@ -68,11 +68,13 @@ end
 		lua.lua_setglobal(L, to_luastring('_map'));
 		let budget = 200;
 		lua.lua_sethook(L, state => { if (--budget <= 0) lauxlib.luaL_error(state, to_luastring('init.lua instruction limit exceeded')); }, lua.LUA_MASKCOUNT, 1000);
-		for (const code of [prelude, source]) {
-			if (lauxlib.luaL_loadbuffer(L, to_luastring(code), null, to_luastring('init.lua')) !== lua.LUA_OK || lua.lua_pcall(L, 0, 0, 0) !== lua.LUA_OK) {
+		const options = `assert(type(vim.opt.timeoutlen) == "number" and vim.opt.timeoutlen >= 0 and vim.opt.timeoutlen <= 2147483647 and vim.opt.timeoutlen % 1 == 0, "vim.opt.timeoutlen must be an integer from 0 to 2147483647 milliseconds")
+return vim.opt.timeoutlen`;
+		for (const code of [prelude, source, options]) {
+			if (lauxlib.luaL_loadbuffer(L, to_luastring(code), null, to_luastring('init.lua')) !== lua.LUA_OK || lua.lua_pcall(L, 0, code === options ? 1 : 0, 0) !== lua.LUA_OK) {
 				throw new Error(to_jsstring(lua.lua_tostring(L, -1)));
 			}
 		}
-		return [...mappings.values()];
+		return { mappings: [...mappings.values()], timeoutlen: lua.lua_tonumber(L, -1) };
 	} finally { lua.lua_close(L); }
 }

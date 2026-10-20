@@ -198,34 +198,57 @@ test('Lua mappings support mode lists, leader, computed sequences and deletion',
 for _, mode in ipairs({'n', 'f'}) do vim.keymap.set(mode, '<Leader>j', tostring(3) .. 'j') end
 vim.keymap.set('n', 'Q', 'G')
 vim.keymap.del('n', 'Q')
-vim.keymap.set('i', 'jk', '<Esc>')`);
+vim.keymap.set('i', 'jk', '<Esc>')`).mappings;
 	v.feed(' j'); assert.equal(v.point.row, 3);
 	v.feed('ihello jk'); assert.equal(v.mode, 'n'); assert.equal(v.formula, 'hello ');
 	v.feed('<Esc>Q'); assert.equal(v.point.row, 3);
 });
 
-test('mapping prefixes flush on timeout or mismatch and RHS is nonrecursive', () => {
+test('timed-out leader commands do not edit cells or affect the next command', () => {
+	const v = keyboard([['keep', 'next', 'last'], ['below', 'tail', 'end']]);
+	v.mappings = compileConfig(`vim.g.mapleader = ' '
+vim.keymap.set({'n', 'f', 'o'}, '<Leader>sn', 'G')`).mappings;
+	for (const prefix of [' s', '2 s', 'd s']) {
+		v.feed(prefix); v.flushMappings();
+		assert.deepEqual([v.context, v.mode, v.formula, v.point], ['sheet', 'n', 'keep', { row: 0, col: 0 }]);
+		v.feed('l'); assert.equal(v.formula, 'next');
+		v.feed('h');
+	}
+	v.feed('<CR> s'); v.flushMappings();
+	assert.deepEqual([v.context, v.mode, v.formula, v.formulaCursor], ['formula', 'n', 'keep', 0]);
+});
+
+test('mapping prefixes cancel on timeout, fall back on mismatch, and RHS is nonrecursive', () => {
 	const v = formula('');
 	v.mappings = compileConfig(`vim.keymap.group('i', 'j', 'Leave insert')
 vim.keymap.group('i', 'x', 'Unused label')
 vim.keymap.group('f', 'h', 'Move')
 vim.keymap.set('i', 'jk', '<Esc>')
 vim.keymap.set('f', 'h', 'l')
-vim.keymap.set('f', 'l', 'h')`);
+vim.keymap.set('f', 'l', 'h')`).mappings;
 	v.feed('ij'); assert.equal(v.formula, '');
-	v.flushMappings(); assert.equal(v.formula, 'j');
-	v.feed('jx'); assert.equal(v.formula, 'jjx');
+	v.flushMappings(); assert.equal(v.formula, '');
+	v.feed('jx'); assert.equal(v.formula, 'jx');
 	v.feed('<Esc>0h'); assert.equal(v.formulaCursor, 1);
 });
 
 test('operator-pending mappings apply after the operator and its count', () => {
 	const v = formula('one two three four');
-	v.mappings = compileConfig(`vim.keymap.set('o', 'q', '2w')`);
+	v.mappings = compileConfig(`vim.keymap.set('o', 'q', '2w')`).mappings;
 	v.feed('dq'); assert.equal(v.formula, 'three four');
 });
 
+test('Lua timeoutlen defaults, computed values and bounds', () => {
+	assert.equal(compileConfig('').timeoutlen, 500);
+	assert.equal(compileConfig('vim.opt.timeoutlen = 3 * 400').timeoutlen, 1200);
+	for (const value of [0, 2147483647]) assert.equal(compileConfig(`vim.opt.timeoutlen = ${value}`).timeoutlen, value);
+	for (const value of ['-1', '0.5', '2147483648.0', '"500"', 'false', 'nil', '{}', 'math.huge', '0/0']) {
+		assert.throws(() => compileConfig(`vim.opt.timeoutlen = ${value}`), /vim.opt.timeoutlen must be an integer/);
+	}
+});
+
 test('invalid Lua, unsupported APIs and runaway scripts do not install partial maps', () => {
-	assert.ok(compileConfig(configTemplate).length > 0);
+	assert.ok(compileConfig(configTemplate).mappings.length > 0);
 	for (const source of ['vim.keymap.set(', 'os.execute("whoami")', 'while true do end', 'vim.keymap.set("n", "x", function() end)', 'vim.keymap.set("n", "x", "j", {expr=true})']) assert.throws(() => compileConfig(source));
 	for (const source of ['vim.keymap.group("n", "", "Sheets")', 'vim.keymap.group("bad", "s", "Sheets")', 'vim.keymap.group("n", "s", {})', 'vim.keymap.group("n", "s", "")']) assert.throws(() => compileConfig(source));
 });
@@ -303,20 +326,22 @@ test('formula marks belong to their cells and sheet marks follow inserted rows',
 	v.feed('<Esc>jmbggO<Esc><Esc>`b'); assert.equal(v.point.row, 2);
 });
 
-test('ambiguous mappings use the longest complete prefix and preserve remaining keys', () => {
+test('ambiguous mappings fall back only on mismatch, never on timeout', () => {
 	const v = keyboard(Array.from({ length: 8 }, () => ['a']));
 	v.mappings = compileConfig(`vim.keymap.set('n', 'x', '3j')
-vim.keymap.set('n', 'xx', 'G')`);
+vim.keymap.set('n', 'xx', 'G')`).mappings;
 	v.feed('xk'); assert.equal(v.point.row, 2);
-	v.feed('x'); v.flushMappings(); assert.equal(v.point.row, 5);
-	v.mappings = compileConfig(`vim.keymap.set('n', 'x', 'j')
-vim.keymap.set('n', 'xkk', 'G')`);
-	v.feed('xk'); v.flushMappings(); assert.equal(v.point.row, 5);
+	v.feed('x'); v.flushMappings(); assert.equal(v.point.row, 2);
+	v.feed('xx'); assert.equal(v.point.row, 7);
+	v.mappings = compileConfig(`vim.keymap.set('n', 'x', '3j')
+vim.keymap.set('n', 'xkk', 'G')`).mappings;
+	v.feed('ggxk'); v.flushMappings(); assert.equal(v.point.row, 0);
+	v.feed('d'); v.flushMappings(); v.feed('d'); assert.equal(v.sheet.rows.length, 7);
 	v.mappings = compileConfig(`vim.g.maplocalleader = ','
 vim.keymap.set('n', '<Space>', 'G')
 vim.keymap.set('n', ' ', 'gg')
 vim.keymap.set('n', '<LocalLeader>x', 'G')
-vim.keymap.del('n', '<LocalLeader>x')`);
+vim.keymap.del('n', '<LocalLeader>x')`).mappings;
 	v.feed(' '); assert.equal(v.point.row, 0);
 	assert.equal(v.mappings.length, 1);
 });

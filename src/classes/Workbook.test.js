@@ -162,7 +162,7 @@ test('Lua shortcuts run sheet commands and leave rename/switch prompts ready for
 	command.keyboard.mappings = compileConfig(`vim.keymap.set({'n','f'}, ']s', ':sheetnext<CR>')
 vim.keymap.set('n', 'N', ':sheetnew Sales 2026<CR>')
 vim.keymap.set('n', 'R', ':sheetrename ')
-vim.keymap.set('n', 'S', ':sheet ')`);
+vim.keymap.set('n', 'S', ':sheet ')`).mappings;
 	const feed = async keys => { command.keyboard.feed(keys); await Promise.all(pending.splice(0)); };
 	await feed('N'); assert.equal(sheet.activeSheet.name, 'Sales 2026');
 	await feed('RBudget<CR>'); assert.equal(sheet.activeSheet.name, 'Budget');

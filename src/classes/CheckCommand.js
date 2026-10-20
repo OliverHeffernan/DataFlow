@@ -8,7 +8,7 @@ import FileManager from './FileManager.js';
 import LaunchManager from './LaunchManager.js';
 import VimKeyboard from './VimKeyboard.js';
 import { compare, offset } from './VimMotions.js';
-import { configTemplate } from './LuaKeybindings.js';
+import { configTemplate, defaultTimeoutlen } from './LuaKeybindings.js';
 import { formulaAssist, formulaReferences } from './FormulaEditing.js';
 import { keyboardHints } from './KeyboardHints.js';
 import SyntaxHighlighting from './SyntaxHighlighting.js';
@@ -31,7 +31,7 @@ export default class CheckCommand {
 				if (register.cells) this.sheet.yank(register.cells);
 				navigator.clipboard?.writeText(register.text).catch(() => {});
 			},
-			pending: () => { clearTimeout(this.mappingTimer); this.mappingTimer = setTimeout(() => this.keyboard.flushMappings(), 500); },
+			pending: () => { clearTimeout(this.mappingTimer); this.mappingTimer = setTimeout(() => this.keyboard.flushMappings(), this.keyboard.timeoutlen); },
 			viewport: keyboard => this.viewport(keyboard),
 			scroll: (action, count, explicit) => this.scroll(action, count, explicit),
 		});
@@ -253,15 +253,16 @@ export default class CheckCommand {
 	}
 
 	async compile(source) {
-		const mappings = await new Promise((resolve, reject) => {
+		const config = await new Promise((resolve, reject) => {
 			const worker = new Worker(new URL('./LuaConfigWorker.js', import.meta.url), { type: 'module' });
 			const finish = (error, value) => { clearTimeout(timer); worker.terminate(); error ? reject(new Error(error)) : resolve(value); };
 			const timer = setTimeout(() => finish('init.lua execution timed out'), 2000);
-			worker.onmessage = ({ data }) => finish(data.error, data.mappings);
+			worker.onmessage = ({ data }) => finish(data.error, data.config);
 			worker.onerror = event => finish(event.message);
 			worker.postMessage(source);
 		});
-		this.keyboard.mappingKeys = []; this.keyboard.mappings = mappings;
+		clearTimeout(this.mappingTimer);
+		this.keyboard.mappingKeys = []; Object.assign(this.keyboard, config);
 	}
 	async loadConfig() {
 		let source;
@@ -269,7 +270,10 @@ export default class CheckCommand {
 			const config = await invoke('keybinding_config', { create: false, template: null });
 			this.configPath = config.path; source = config.content;
 		} else source = localStorage.getItem('dataflow.init.lua');
-		if (source === null) { this.keyboard.mappings = []; this.keyboard.mappingKeys = []; }
+		if (source === null) {
+			clearTimeout(this.mappingTimer);
+			this.keyboard.mappings = []; this.keyboard.mappingKeys = []; this.keyboard.timeoutlen = defaultTimeoutlen;
+		}
 		else await this.compile(source);
 	}
 	async configCommand(command) {

@@ -155,7 +155,7 @@ vim.keymap.set('f', '<Leader>xx', '<Nop>')
 vim.keymap.set('n', 'Q', 'G', {desc='Last row'})
 vim.keymap.set('f', 'gq', 'gk', {desc='Previous line'})
 vim.keymap.set('f', '<F6>', 'gk', {desc='Previous line'})
-vim.keymap.set('f', '<F6>x', 'gj', {desc='Next line'})`);
+vim.keymap.set('f', '<F6>x', 'gj', {desc='Next line'})`).mappings;
 	assert.deepEqual(keyboardHints(keyboard).filter(hint => hint.key === 'Space'), [{ key: 'Space', description: '…' }]);
 	assert.deepEqual(keyboardHints(keyboard).filter(hint => hint.key === 'g'), [{ key: 'g', description: '…' }]);
 	assert.ok(!keyboardHints(keyboard).some(hint => ['New sheet', 'Open sheet', 'Last row'].includes(hint.description)));
@@ -196,7 +196,7 @@ vim.keymap.group('f', '<LocalLeader>', 'Local')
 vim.keymap.set('f', '<LocalLeader>j', 'gj', {desc='Next line'})
 vim.keymap.group('f', '<F7>', 'Branch label')
 vim.keymap.set('f', '<F7>', 'gk', {desc='Previous line'})
-vim.keymap.set('f', '<F7>x', 'gj', {desc='Next line'})`);
+vim.keymap.set('f', '<F7>x', 'gj', {desc='Next line'})`).mappings;
 	assert.deepEqual(keyboardHints(keyboard).filter(hint => hint.key === 'Space'), [{ key: 'Space', description: 'Actions …' }]);
 	assert.ok(!keyboardHints(keyboard).some(hint => hint.key === 'F6'));
 	assert.ok(keyboardHints(keyboard).some(hint => hint.key === ',' && hint.description === 'Local …'));

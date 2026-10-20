@@ -1,5 +1,5 @@
 import { clamp, compare, offset, pointAt, resolveMotion, textObject, wordSpans } from './VimMotions.js';
-import { tokenize } from './LuaKeybindings.js';
+import { defaultTimeoutlen, tokenize } from './LuaKeybindings.js';
 import { formulaAssist, toggleReference } from './FormulaEditing.js';
 
 const aliases = { '<Left>': 'h', '<Right>': 'l', '<Up>': 'k', '<Down>': 'j', '<Home>': '0', '<End>': '$', '<BS>': 'h', '<C-h>': 'h', '<C-j>': 'j', '<C-n>': 'j', '<C-p>': 'k', '<C-Right>': 'W', '<C-Left>': 'B', '<S-Right>': 'w', '<S-Left>': 'b', '<C-Home>': 'gg' };
@@ -29,6 +29,7 @@ export default class VimKeyboard {
 		this.formulaCursor = 0;
 		this.mappingKeys = [];
 		this.mappings = [];
+		this.timeoutlen = defaultTimeoutlen;
 		this.states = { sheet: { marks: {} } }; this.formulaStates = new Map();
 		this.jumps = []; this.jumpIndex = 0;
 		this.changes = []; this.changeIndex = 0;
@@ -98,10 +99,10 @@ export default class VimKeyboard {
 	}
 
 	flushMappings() {
-		const keys = this.mappingKeys; this.mappingKeys = [];
-		const prefix = this.mappings.filter(map => !map.group && map.mode === this.mappingMode && map.lhs.every((key, i) => keys[i] === key)).sort((a, b) => b.lhs.length - a.lhs.length)[0];
-		if (prefix) { keys.splice(0, prefix.lhs.length); for (const key of prefix.rhs) this.key(key, false); }
-		for (const key of keys) this.key(key, false);
+		if (!this.mappingKeys.length) return;
+		this.mappingKeys = [];
+		this.done();
+		this.render();
 	}
 
 	escape() {
