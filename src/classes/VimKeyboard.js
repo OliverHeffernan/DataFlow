@@ -1,6 +1,8 @@
 import { clamp, compare, offset, pointAt, resolveMotion, textObject, wordSpans } from './VimMotions.js';
 import { defaultTimeoutlen, tokenize } from './LuaKeybindings.js';
 import { formulaAssist, toggleReference } from './FormulaEditing.js';
+import FormatSession from './FormatSession.js';
+import { effectiveFormatBindings, formatAction } from './FormatKeymaps.js';
 
 const aliases = { '<Left>': 'h', '<Right>': 'l', '<Up>': 'k', '<Down>': 'j', '<Home>': '0', '<End>': '$', '<BS>': 'h', '<C-h>': 'h', '<C-j>': 'j', '<C-n>': 'j', '<C-p>': 'k', '<C-Right>': 'W', '<C-Left>': 'B', '<S-Right>': 'w', '<S-Left>': 'b', '<C-Home>': 'gg' };
 const prefixes = ['g', "g'", 'g`', 'z', '[', ']', 'f', 'F', 't', 'T', 'm', "'", '`', 'q', '@', 'r'];
@@ -59,13 +61,70 @@ export default class VimKeyboard {
 		if (!this.formulaStates.has(key)) this.formulaStates.set(key, { marks: {} });
 		return this.formulaStates.get(key);
 	}
-	get mappingMode() { return this.command !== null ? 'c' : this.mode === 'i' ? 'i' : isVisual(this.mode) ? 'x' : /^\d*[dcy]/.test(this.pending) ? 'o' : this.context === 'sheet' ? 'n' : 'f'; }
+	get mappingMode() { return this.formatSession ? 'format' : this.command !== null ? 'c' : this.mode === 'i' ? 'i' : isVisual(this.mode) ? 'x' : /^\d*[dcy]/.test(this.pending) ? 'o' : this.context === 'sheet' ? 'n' : 'f'; }
+	get formatRange() {
+		const a = this.context === 'sheet' ? this.anchor ?? this.point : { row: this.sheet.selRow, col: this.sheet.selCol };
+		const b = { row: this.sheet.selRow, col: this.sheet.selCol };
+		return { r0: Math.min(a.row, b.row), c0: this.mode === 'V' && this.context === 'sheet' ? 0 : Math.min(a.col, b.col), r1: Math.max(a.row, b.row), c1: this.mode === 'V' && this.context === 'sheet' ? this.sheet.rows[0].length - 1 : Math.max(a.col, b.col) };
+	}
+	openFormat() {
+		if (this.formatSession || this.mode === 'i' || this.command !== null || (this.context === 'formula' && isVisual(this.mode))) return;
+		const range = this.formatRange;
+		if (this.sheet.calculated?.sheet !== this.sheet.activeSheet) this.sheet.recalculate();
+		if (this.anchor) this.saveVisual();
+		this.formatSession = new FormatSession(this.sheet, range);
+		this.context = 'sheet'; this.mode = 'n'; this.anchor = null; this.visualValueObject = false;
+		this.pending = ''; this.mappingKeys = []; this.changeKeys = [];
+		this.render();
+	}
+	finishFormat() {
+		if (!this.formatSession) return;
+		const changed = this.formatSession.finish();
+		this.formatSession = null; this.mappingKeys = []; this.pending = ''; this.mode = 'n';
+		if (changed) this.hooks.formatChange?.();
+		this.render();
+	}
+	formatKey(key, mapped) {
+		const input = this.formatSession.input;
+		const allowed = action => !input || ['Select', 'Done', 'Backspace'].includes(action);
+		if (mapped) {
+			// A one-key Done binding also exits an unfinished mapping/menu/input, without fallback keys leaking.
+			if (effectiveFormatBindings(this.mappings).some(map => map.lhs.length === 1 && map.lhs[0] === key && formatAction(map.rhs) === 'Done')) this.mappingKeys = [];
+			this.mappingKeys.push(key);
+			const candidates = effectiveFormatBindings(this.mappings).filter(map => (!input || allowed(formatAction(map.rhs))) && this.mappingKeys.every((k, i) => map.lhs[i] === k));
+			const exact = candidates.find(map => map.lhs.length === this.mappingKeys.length);
+			if (exact && candidates.length === 1) {
+				this.mappingKeys = [];
+				for (const rhs of exact.rhs) { if (this.formatSession) this.formatKey(rhs, false); }
+			} else if (candidates.length) this.hooks.pending?.();
+			else {
+				const keys = this.mappingKeys; this.mappingKeys = [];
+				if (input) for (const k of keys) {
+					if (Array.from(k).length !== 1) continue;
+					if (this.recording && !this.playing) this.macros.get(this.recording).push(k);
+					this.formatSession.text(k);
+				}
+			}
+		} else {
+			if (this.recording && !this.playing && key !== '<Nop>') this.macros.get(this.recording).push(key);
+			const action = formatAction([key]);
+			if (action === 'Done') this.finishFormat();
+			else if (action && allowed(action)) this.formatSession.action(action);
+			else if (input) this.formatSession.text(key);
+		}
+		this.render();
+	}
 
 	feed(keys, mapped = true) { for (const key of tokenize(keys)) this.key(key, mapped); }
 	key(key, mapped = true) {
 		if (key === '<Space>') key = ' ';
 		if (key === '<C-[>') key = '<Esc>';
 		if (key === '<C-m>') key = '<CR>';
+		if (this.formatSession) { this.formatKey(key, mapped); return; }
+		if (key === '<FormatOpen>') {
+			if (this.recording && !this.playing) this.macros.get(this.recording).push(key);
+			this.openFormat(); return;
+		}
 		if (mapped && key !== '<Esc>') {
 			this.mappingKeys.push(key);
 			const candidates = this.mappings.filter(map => !map.group && map.mode === this.mappingMode && this.mappingKeys.every((k, i) => map.lhs[i] === k));
@@ -120,6 +179,7 @@ export default class VimKeyboard {
 	}
 
 	escape() {
+		if (this.formatSession) { this.finishFormat(); return; }
 		const cancelling = this.pending || this.command !== null || this.mappingKeys.length;
 		this.mappingKeys = []; this.pending = ''; this.command = null; this.reference = null;
 		if (this.mode === 'i') {
@@ -241,6 +301,7 @@ export default class VimKeyboard {
 			this.done(); return;
 		}
 		if (action === 'q' && this.recording && !operator) { this.recording = null; this.done(); return; }
+		if (action === 'gF' && !operator) { this.openFormat(); this.done(); return; }
 		if (prefixes.includes(action) || ((operator || isVisual(this.mode)) && ['i', 'a'].includes(action))) return;
 		if (action === ':' || action === '/' || action === '?') {
 			this.command = action; this.searchOperator = operator; this.searchCount = count; this.done(); return;

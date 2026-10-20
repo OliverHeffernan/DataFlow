@@ -13,6 +13,8 @@ import { formulaAssist, formulaReferences } from './FormulaEditing.js';
 import { keyboardHints } from './KeyboardHints.js';
 import SyntaxHighlighting from './SyntaxHighlighting.js';
 import { cellLabel, referenceSpans, resolveReference } from './FormulaFunctions.js';
+import { summarizeFormats } from './CellFormatting.js';
+import { formatShortcut } from './FormatKeymaps.js';
 
 export default class CheckCommand {
 	constructor() {
@@ -27,6 +29,7 @@ export default class CheckCommand {
 			message: text => this.setPhMessage(text),
 			ex: command => this.handleEnterFromCom(command),
 			change: () => { this.syncSize(); this.history.do(this.sheet); nextTick(() => this.sheet.loadAllCells()); },
+			formatChange: () => this.history.do(this.sheet),
 			sheetChanged: () => { this.renderedRow = null; nextTick(() => this.sheet.loadStyles()); },
 			undo: (redo, count) => { this.history[redo ? 'redo' : 'undo'](this.sheet, count); this.keyboard.move(this.keyboard.point); },
 			copy: register => {
@@ -76,16 +79,31 @@ export default class CheckCommand {
 			this.visual.setVisual(row, col, 0, this.sheet.rows[0].length);
 		}
 		const names = { n: 'NORMAL', i: 'INSERT', v: 'VISUAL', V: 'VISUAL-LINE', b: 'VISUAL-BLOCK' };
-		document.getElementById('modeDisplay').innerText = `-- ${keyboard.context === 'formula' ? 'FORMULA ' : ''}${names[keyboard.mode]} --`;
+		document.getElementById('modeDisplay').innerText = keyboard.formatSession ? '-- FORMAT --' : `-- ${keyboard.context === 'formula' ? 'FORMULA ' : ''}${names[keyboard.mode]} --`;
 		const display = document.getElementById('commandLine');
 		display.textContent = keyboard.command ?? keyboard.pending + keyboard.mappingKeys.join('');
 		display.classList.toggle('typing-command', keyboard.command !== null);
 		const owner = this.sheet.spillCells.get(`${row}:${col}`);
+		const session = keyboard.formatSession, range = session?.range ?? keyboard.formatRange;
+		const styles = [], warnings = [];
+		for (let r = range.r0; r <= range.r1; r++) for (let c = range.c0; c <= range.c1; c++) {
+			styles.push(this.sheet.styles[r][c]);
+			const warning = this.sheet.cellPresentation.value[r]?.[c]?.warning;
+			if (warning) warnings.push(`${cellLabel(r, c)}: ${warning}`);
+		}
+		const shortcut = (action, mode) => session?.input && !['Select', 'Done', 'Backspace'].includes(action) ? '' : formatShortcut(keyboard.mappings, action, mode);
+		const panelLeft = window.innerWidth >= 900 && this.sheet.getCell(row, col)?.getBoundingClientRect().left > window.innerWidth - 440;
+		const formatHints = session ? [
+			['Previous', 'Move up'], ['Next', 'Move down'], ['Select', session.input ? 'Confirm' : 'Choose / edit'],
+			...(session.input ? [['Backspace', 'Erase']] : session.menu ? [] : session.rows.map(item => [item.action, item.label])),
+			['Revert', 'Revert session'], ['Done', 'Done'],
+		].map(([action, description]) => ({ key: shortcut(action), description })).filter(hint => hint.key) : null;
 		this.ui.value = {
-			hints: keyboardHints(keyboard),
+			hints: formatHints ?? keyboardHints(keyboard),
 			assist: keyboard.context === 'formula' ? { ...formulaAssist(keyboard.formula, keyboard.formulaCursor, this.sheet), inserting: keyboard.mode === 'i', selected: keyboard.completionIndex } : { suggestions: [], signature: null },
-			error: this.sheet.cellErrors.get(`${row}:${col}`) || '',
+			error: this.sheet.cellErrors.get(`${row}:${col}`) || this.sheet.cellPresentation.value[row]?.[col]?.warning || '',
 			spill: owner ? `Spill ${this.sheet.columnLabel(owner.col)}${owner.row} · ${owner.rows} × ${owner.cols}${owner.row !== row || owner.col !== col ? ' · Edit source with i / Enter' : ''}` : '',
+			format: { session, summary: session?.summary ?? summarizeFormats(styles), warnings, shortcut, panelLeft, openKey: shortcut('Open', keyboard.mappingMode), enabled: keyboard.mode !== 'i' && keyboard.command === null && !(keyboard.context === 'formula' && keyboard.anchor) },
 		};
 		await nextTick();
 		// Apply the new assistance/footer sizes before ensuring the selection is visible. Waiting for a
@@ -114,6 +132,7 @@ export default class CheckCommand {
 			layer.append(box);
 		};
 		if (owner) outline({ r0: owner.row, c0: owner.col, r1: owner.row + owner.rows - 1, c1: owner.col + owner.cols - 1 }, '#8ba5c6', true);
+		if (this.keyboard.formatSession) outline(this.keyboard.formatSession.range, '#75e2bc');
 		const seen = new Set();
 		for (const ref of references) {
 			const key = JSON.stringify(ref.region);
@@ -173,6 +192,7 @@ export default class CheckCommand {
 
 	// Native controls and dialogs own their input. The spreadsheet receives keys regardless of which cell is focused.
 	acceptsInput(event) {
+		if (this.keyboard.formatSession && event.target?.closest?.('[data-format-panel]')) return !event.defaultPrevented;
 		return !event.defaultPrevented && !event.target?.closest?.('input, textarea, select, [contenteditable="true"], [role="dialog"], [data-keyboard-ignore]');
 	}
 	connectInput() {
@@ -180,10 +200,14 @@ export default class CheckCommand {
 		root.tabIndex = 0; root.setAttribute('aria-label', 'Spreadsheet workspace'); root.setAttribute('role', 'region');
 		const keydown = event => this.handleKeydown(event);
 		const paste = event => {
+			if (this.keyboard.formatSession?.input && this.acceptsInput(event)) {
+				event.preventDefault(); for (const key of event.clipboardData.getData('text/plain')) this.keyboard.formatSession.text(key); this.render(); return;
+			}
 			if (!this.acceptsInput(event) || !(this.keyboard.mode === 'i' || this.keyboard.command !== null)) return;
 			event.preventDefault(); this.insertText(event.clipboardData.getData('text/plain'));
 		};
 		const composition = event => {
+			if (this.keyboard.formatSession?.input && this.acceptsInput(event)) { for (const key of event.data) this.keyboard.formatSession.text(key); this.render(); return; }
 			if (this.acceptsInput(event) && (this.keyboard.mode === 'i' || this.keyboard.command !== null)) this.insertText(event.data);
 		};
 		window.addEventListener('keydown', keydown); window.addEventListener('paste', paste); window.addEventListener('compositionend', composition);
@@ -277,6 +301,7 @@ export default class CheckCommand {
 			this.keyboard.mappings = []; this.keyboard.mappingKeys = []; this.keyboard.timeoutlen = defaultTimeoutlen;
 		}
 		else await this.compile(source);
+		if (document.getElementById('formText')) await this.render();
 	}
 	async configCommand(command) {
 		if (command === ':source' || command === ':configreload') { await this.loadConfig(); this.setPhMessage('Keybindings reloaded'); return; }
@@ -297,6 +322,7 @@ export default class CheckCommand {
 			if (file.size > 128 * 1024) throw new Error('init.lua exceeds 128 KiB');
 			const source = await file.text(); await this.compile(source);
 			localStorage.setItem('dataflow.init.lua', source); this.setPhMessage(`Loaded ${file.name}; saved for this browser`);
+			await this.render();
 		} catch (error) { this.setPhMessage(`init.lua: ${error.message}`); }
 	}
 
