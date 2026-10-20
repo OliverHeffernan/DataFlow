@@ -16,6 +16,7 @@
 		</div>
 	</div>
 	<input id="luaConfigInput" type="file" accept=".lua" hidden @change="checkCommand.importConfig($event.target.files[0])" />
+	<ScriptDialog />
 	<div id="webFileUpload" role="dialog" aria-label="Open spreadsheet">
 		<input id="fileInput" type="file" accept=".dflo,.heff,.json" />
 		<button id="readFileBtn" @click="openFileWeb()">Read File</button>
@@ -25,6 +26,7 @@
 
 <script setup>
 	import { onMounted, onUnmounted } from 'vue';
+	import ScriptDialog from './ScriptDialog.vue';
 	import SheetManager from '../classes/SheetManager.js';
 	const sheetManager = new SheetManager();
 

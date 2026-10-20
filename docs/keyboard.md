@@ -395,6 +395,50 @@ Key notation: `<Esc>`, `<CR>` / `<Enter>`, `<S-CR>`, `<BS>`, `<Del>`, `<Tab>`, `
 
 Reload is atomic: syntax/runtime/API errors keep the previous mappings, group labels and timeout active and report an error in the command field. Omitting `vim.opt.timeoutlen` restores the 500 ms default on reload. Configurations cannot access OS, filesystem, package loading, JavaScript, debug, coroutines, dynamic Lua loading, or protected calls. Limits: 128 KiB source, 1,000 mappings and group labels combined, 128-character LHS, 4,096-character RHS, an instruction budget and a 2-second worker timeout. Use this as a keymap configuration API, not a general-purpose Lua automation environment.
 
+## Deliberately run workbook scripts
+
+In sheet context, type **`:luarun`**, choose a local `.lua` file, inspect its source, then press **Run script**. Escape/Cancel closes the dialog and terminates an in-flight worker without publishing its draft. The dialog owns keyboard/mouse input. Config loading never runs workbook scripts: `init.lua` has no `df` API, and scripts have no `vim` API. A keymap may open `:luarun`, but recording/playback of macros cannot launch it; scripts are not recorded as repeat edits. Workbook files never contain executable scripts. Choosing a script reads only that explicitly selected file; the script itself receives no file capability.
+
+The invoking sheet and selection are captured **before** choosing a file, not from focus when the worker finishes. The data snapshot is captured when Run is pressed. Edits to workbook content/metadata during execution reject the result; changing the visible sheet/cursor does not redirect writes. A successful changed run makes one chronological workbook undo step. No-op, failed, stale, timed-out and cancelled runs preserve content, metadata, undo and redo. Saving remains an explicit `:w` operation.
+
+### A small range API
+
+Rows follow DataFlow's **zero-based** addresses (`A0`, not `A1` for the first cell). Lua tables and `df.sheets()` are one-based. Sheet and mark names match case-insensitively. Handles capture their target rectangle; editing their Lua metadata does not redirect them.
+
+| Lua API | Result |
+| --- | --- |
+| `df.sheets()` / `df.sheet("Inputs")` / `df.active_sheet()` | Sheet handles with `name`, `rows`, `cols`; active means the invoking sheet |
+| `sheet:range("A0:C2")` | Bounded absolute ascending rectangle; no implicit grid expansion |
+| `df.selection()` | Captured selection, including full-row visual selections |
+| `df.named("sales")` / `df.named("sales.amount")` | Existing persistent mark, dataset body or dataset column; optional leading backtick; empty bodies reject materialization |
+| `range:read_raw()` / `range:write_raw(matrix)` | Stored strings, including leading `=` formulas; exact shape required |
+| `range:read_values()` / `range:write_values(matrix)` | Tagged computed cells; exact shape required |
+| `df.log("message")` | Bounded diagnostics, shown after a successful run |
+
+Ranges expose `rows`, `cols`, `sheet`, `address`. Raw formula copying does **not** shift references. Typed cells are `{kind="number", decimal="9007199254740993.125"}`, `{kind="text", text="=literal text"}`, `{kind="boolean", value=false}`, or `{kind="blank"}`. Numbers cross the boundary as exact decimal strings, before UI rounding. Text writes quote their contents as a formula string so numeric-looking text and leading `=` remain text. Native Lua arithmetic is not decimal-exact: write a DataFlow formula for decimal calculations instead of converting the decimal string with `tonumber`.
+
+Errors read as `{kind="error", message="…"}`, charts as `{kind="chart"}`, and non-scalar/Complex/Unit/nonfinite results as `{kind="unsupported", type="…"}`. These tags cannot be written through `write_values`; copy raw formula strings instead. An array source is unsupported as a computed scalar, while each spill child reads its scalar element. Existing valid rich values elsewhere in the workbook remain valid and keep their MathJS types.
+
+```lua
+-- Freeze selected computed values on a second sheet without losing decimal precision.
+local selected = df.selection()
+df.sheet("Report"):range("A0:B1"):write_values(selected:read_values())
+
+-- Formula staging uses existing references/functions, not Lua floating-point arithmetic.
+df.sheet("Report"):range("C0"):write_raw({{"=SUM(Inputs!A0:B1)"}})
+df.log(df.sheet("Report"):range("C0"):read_values()[1][1].decimal)
+```
+
+Writes/readbacks run in order on a detached workbook and see earlier staged writes. Each range uses the accepted fill range mutator: reject duplicate/out-of-bounds destinations, spill owners/children and dataset header changes; preserve dataset contiguous-growth policy. A later failure discards **all** earlier writes, including cross-sheet writes and inferred dataset growth. Use one matrix for a contiguous batch, rather than one API call per cell. Recalculation batches a range's writes, occurs before each spill-sensitive write and computed read, and validates all sheets at the end, including disconnected inactive sheets. Any final formula/cycle/spill error blocks publication (even a pre-existing error); a script can repair errors in its draft before the final check. The API does not resize sheets, rename/create definitions, edit styles, sort/filter in place, invoke arbitrary Ex commands or save files.
+
+Worker results contain ordered raw write batches, not live calculation objects. Main-thread detached replay rechecks the same mutation rules, then validates every sheet in one verified calculation session and installs the visible sheet's final cache with the workbook. Undo/redo and later normal recalculations still evaluate normally. Volatile functions such as `random()` can differ between reads, worker validation and final replay; copied computed values freeze the worker sample, not a promised future random value. A changed volatile spill shape may cause the final replay to reject safely. There is no deterministic replay guarantee.
+
+### Limits reduce accidents, not hostile-code resource exhaustion
+
+Source ≤128 KiB; individual transferred cell ≤16 KiB; aggregate reads/writes ≤100,000 cells and 8 MiB; ≤1,000 API calls; ≤10,000 distinct changed destinations; ≤100 diagnostics / 8 KiB; one million Lua instructions; five-second worker watchdog. The input/final serialized workbook (including styles/metadata) must fit 100,000 cells / 8 MiB. Every run gets a fresh VM/worker. Only selected base/math functions and bounded `string.len/sub/lower/upper` exist. No OS, filesystem, network, shell, Tauri, clipboard, JavaScript, packages, dynamic loading, coroutines or protected-call bridges are exposed.
+
+**Trusted local scripts only.** Fengari has no enforceable heap quota. Lua table growth/concatenation and formula-native allocations can exhaust memory before a watchdog can act; instruction hooks do not count native library work. Main-thread validation/replay checks a separate five-second budget between batches and before publication, but cannot be interrupted inside a native formula call and can freeze the UI. Cancel/watchdog apply to the worker, not a currently executing synchronous publication validation. These are existing-runtime constraints, not a secure untrusted-code execution service. Never run a downloaded script without understanding it. No new dependencies or extra filesystem/network permissions are required.
+
 ## Migration and explicit exclusions
 
 | Old shortcut | Replacement / reason |
