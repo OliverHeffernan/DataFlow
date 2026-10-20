@@ -140,6 +140,35 @@ Use `[count]d/c/y[count]{motion}`. Counts multiply (`2d3w` covers six words); do
 
 `ma` sets a session mark. Formula marks are local to their cell, separate from sheet marks; their text coordinates do not track text insertions/deletions. Sheet marks follow inserted/deleted rows and columns; marks in deleted rows/columns are removed. Marks are coordinates, not persistent spreadsheet references, and undo does not restore mark history. Ctrl-o / Ctrl-i (Tab) traverse jumps, including across sheet/formula contexts. `g;` / `g,` traverse changes. Opening or clearing a sheet resets marks, selections, jumps and undo history. Registers/macros/mappings remain available in the session.
 
+### Fill and numeric series
+
+These commands operate only in the **sheet**, not formula normal or insert. They overwrite targeted contents, including occupied cells, without copying styles or changing registers/clipboard. A blank fill seed clears destinations. They never insert rows/columns or grow the sheet.
+
+| Keys / command | Action |
+| --- | --- |
+| `[count]gJ`, `gL`, `gK`, `gH` | Fill down, right, up, left |
+| `:fill <down\|right\|up\|left> [count]` | Same fill using an Ex command |
+| `:series <down\|right\|up\|left> [count] [step <number>]` | Generate numeric literals; default step is +1 |
+
+**Normal:** the current cell is the source; count is the number of additional destinations (default one, maximum 10,000). From B0, `4gJ` copies B0 into B1:B4. `:series down 4 step 2` from seed `10` writes `12, 14, 16, 18` below it. A positive step increases values in travel order even when going up/left; use a negative step to decrease.
+
+**Visual:** select the complete source-plus-destination rectangle, then omit count. Down uses its top row as sources, up its bottom row, right its left column, and left its right column. Other rows/columns are destinations, each lane independent. `v4jgJ` fills five selected cells from the top one; `vl4j:series down step 0.1<CR>` generates two independent columns from their top seeds. Reversing the selection or swapping corners with `o` does not change the source edge. Ctrl-v works identically; `V` includes every allocated column, without inserting rows. Additional command counts are rejected. A selection with no destination does nothing.
+
+**Formula text stays literal**, exactly as for put. `=A0` still reads A0 after fill. `=[-1]{}` reads one column left of each destination, and `=A{}` keeps column A but follows the destination row. Calculated coordinates remain expressions: `[1]` is absolute column index 1, whereas `[+1]` is an offset. `=Inputs!A0` keeps its target; `=Inputs![-1]{}` uses each destination's coordinates as origin on Inputs. Fill does not rewrite references or quoted text. F4 explicitly changes reference notation. To repeat an evaluated result instead of a formula, `yiv`, put that literal value, then fill it.
+
+Numeric series accept finite literal numeric seeds and decimal/scientific steps, using the formula engine's 64-digit decimal arithmetic. They reject formula, blank, date-like and other text seeds; there is no two-seed pattern inference or date series. Generated numbers are stored as numeric text; destination styling stays in place.
+
+The entire operation is rejected if any target is outside the allocated sheet or any source/target belongs to a live array spill, **including its owner**. There is no `!` bypass, clipping, or partial write. Copied formulas may calculate new arrays; normal spill rules apply, so blockers are never overwritten and edge/overlap errors display `#SPILL!`. Formula errors are calculation results, not command rollback.
+
+Each changed invocation is **one `u` / Ctrl-r undo/redo step on the active sheet**. Failed or unchanged commands preserve history, selection, cursor, and the previous repeat. Success exits visual mode; the cursor ends at the far destination in the first lane (bottom-left for down, top-right for right, top-left for up/left). `gv` restores the original visual selection. `.` repeats the direction, shape, and step from the new cursor, reading fresh seeds on the active sheet rather than retaining copied data. `3.` performs three invocations, not one combined undo step. Macros record selection motions and commands through the same path; a macro is not an atomic transaction.
+
+Lua mappings can use the native keys or Ex forms without additional APIs:
+
+```lua
+vim.keymap.set({ "n", "x" }, "<Leader>fd", "gJ", { desc = "Fill down" })
+vim.keymap.set("n", "<Leader>sn", ":series down 9<CR>", { desc = "Next nine numbers" })
+```
+
 ### Scrolling
 
 - Ctrl-e/y scroll a row/line, keeping the cursor visible.

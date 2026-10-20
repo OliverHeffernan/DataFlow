@@ -1,6 +1,6 @@
 const normal = [
 	[['h', 'j', 'k', 'l'], 'Move'], [['i', 'a'], 'Edit'], [['<CR>'], 'Formula'],
-	[['v'], 'Select'], [['d', 'c', 'y'], 'Operator…'], [['g'], 'Go…'], [['u'], 'Undo'], [['<C-r>'], 'Redo'], [[':'], 'Command'],
+	[['v'], 'Select'], [['d', 'c', 'y'], 'Operator…'], [['g'], 'Go / fill…'], [['u'], 'Undo'], [['<C-r>'], 'Redo'], [[':'], 'Command'],
 ];
 const formula = [
 	[['h', 'l', 'w', 'b'], 'Text motion'], [['j', 'k'], 'Leave + move cell'], [['i', 'a'], 'Insert'],
@@ -63,10 +63,13 @@ export function keyboardHints(keyboard) {
 				if (keyboard.canUseValueObject()) defaults = [[['v'], 'Cell value'], ...defaults];
 			}
 		}
-		else if (prefixes[action]) defaults = prefixes[action];
+		else if (prefixes[action]) {
+			defaults = prefixes[action];
+			if (action === 'g' && !operator && keyboard.context === 'sheet') defaults = [...defaults, [['H'], 'Fill left'], [['J'], 'Fill down'], [['K'], 'Fill up'], [['L'], 'Fill right']];
+		}
 		else if (/^(?:[fFtTm'`q@r]|g['`])$/.test(action)) defaults = [[['character'], 'Type target'], [['<Esc>'], 'Cancel']];
 		else if (operator) defaults = [[[operator], 'Whole row / line'], ...motions];
-		else if (visual) defaults = [[['h', 'j', 'k', 'l'], 'Extend selection'], [['d'], 'Delete'], [['c'], 'Change'], [['y'], 'Yank'], [['i', 'a'], 'Text object…'], [['o'], 'Swap corner'], [['<Esc>'], 'Cancel']];
+		else if (visual) defaults = [...(keyboard.context === 'sheet' ? [[['g'], 'Go / fill…']] : []), [['h', 'j', 'k', 'l'], 'Extend selection'], [['d'], 'Delete'], [['c'], 'Change'], [['y'], 'Yank'], [['i', 'a'], 'Text object…'], [['o'], 'Swap corner'], [['<Esc>'], 'Cancel']];
 		else defaults = keyboard.context === 'formula' ? formula : normal;
 	}
 	const overridden = new Set(maps.map(map => map.lhs[0]));
