@@ -218,7 +218,26 @@ vim.keymap.set({'n', 'f', 'o'}, '<Leader>sn', 'G')`).mappings;
 	assert.deepEqual([v.context, v.mode, v.formula, v.formulaCursor], ['formula', 'n', 'keep', 0]);
 });
 
-test('mapping prefixes cancel on timeout, fall back on mismatch, and RHS is nonrecursive', () => {
+test('invalid shortcut sequences are discarded with an error, without editing or leaking into the next command', () => {
+	const mappings = compileConfig(`vim.g.mapleader = ' '
+vim.keymap.set({'n', 'f', 'o', 'x'}, '<Leader>sn', 'G')`).mappings;
+	for (const [setup, attempt] of [['', ' s>'], ['2', ' s>'], ['2d3', ' sl'], ['<CR>2l', ' s>'], ['<CR>d', ' si'], ['vl', ' sx']]) {
+		const messages = [];
+		const v = keyboard([['keep', 'next', 'last'], ['below', 'tail', 'end']], { message: text => messages.push(text) });
+		v.mappings = mappings;
+		v.feed(setup);
+		const before = [v.context, v.mode, v.formulaCursor, v.point, v.anchor];
+		v.feed(attempt);
+		assert.deepEqual(v.sheet.rows, [['keep', 'next', 'last'], ['below', 'tail', 'end']], setup + attempt);
+		assert.deepEqual([v.context, v.mode, v.formulaCursor, v.point, v.anchor], before, setup + attempt);
+		assert.match(messages.at(-1), /^Invalid shortcut: .*<Space>s/, setup + attempt);
+		v.feed('l');
+		assert.equal(v.point.col, before[3].col + 1, setup + attempt);
+		assert.deepEqual(v.sheet.rows, [['keep', 'next', 'last'], ['below', 'tail', 'end']]);
+	}
+});
+
+test('insert mapping prefixes cancel on timeout, preserve text on mismatch, and RHS is nonrecursive', () => {
 	const v = formula('');
 	v.mappings = compileConfig(`vim.keymap.group('i', 'j', 'Leave insert')
 vim.keymap.group('i', 'x', 'Unused label')
@@ -326,12 +345,12 @@ test('formula marks belong to their cells and sheet marks follow inserted rows',
 	v.feed('<Esc>jmbggO<Esc><Esc>`b'); assert.equal(v.point.row, 2);
 });
 
-test('ambiguous mappings fall back only on mismatch, never on timeout', () => {
+test('ambiguous shortcut mappings cancel on mismatch and timeout, without running a shorter mapping', () => {
 	const v = keyboard(Array.from({ length: 8 }, () => ['a']));
 	v.mappings = compileConfig(`vim.keymap.set('n', 'x', '3j')
 vim.keymap.set('n', 'xx', 'G')`).mappings;
-	v.feed('xk'); assert.equal(v.point.row, 2);
-	v.feed('x'); v.flushMappings(); assert.equal(v.point.row, 2);
+	v.feed('xj'); assert.equal(v.point.row, 0);
+	v.feed('x'); v.flushMappings(); assert.equal(v.point.row, 0);
 	v.feed('xx'); assert.equal(v.point.row, 7);
 	v.mappings = compileConfig(`vim.keymap.set('n', 'x', '3j')
 vim.keymap.set('n', 'xkk', 'G')`).mappings;

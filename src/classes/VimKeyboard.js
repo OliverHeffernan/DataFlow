@@ -68,6 +68,10 @@ export default class VimKeyboard {
 			}
 			if (candidates.length) { this.hooks.pending?.(); this.render(); return; }
 			const keys = this.mappingKeys; this.mappingKeys = [];
+			if (keys.length > 1 && this.mode !== 'i' && this.command === null) {
+				this.message(`Invalid shortcut: ${this.pending}${keys.map(key => key === ' ' ? '<Space>' : key).join('')}`);
+				this.done(); this.render(); return;
+			}
 			const prefix = this.mappings.filter(map => !map.group && map.mode === this.mappingMode && map.lhs.every((k, i) => keys[i] === k)).sort((a, b) => b.lhs.length - a.lhs.length)[0];
 			if (prefix) { keys.splice(0, prefix.lhs.length); for (const rhs of prefix.rhs) this.key(rhs, false); }
 			else this.key(keys.shift(), false);
