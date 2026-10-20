@@ -114,6 +114,101 @@ test('cross-sheet scalars, ranges, relative coordinates, spills and charts use t
 	assert.equal(sheet.cellValues.value[2][2], 56);
 });
 
+test('lookups and joins consume cross-sheet spill arrays, survive history and reopen, and track renamed references', () => {
+	const rows = () => Array.from({ length: 8 }, () => Array(14).fill(''));
+	const prices = rows(), sales = rows(), report = rows();
+	prices[0][0] = '=VSTACK("b","a")'; prices[0][1] = '=VSTACK(0.2,0.1)'; prices[0][2] = '=VSTACK("Bolt","Screw")';
+	sales[0][0] = '=VSTACK("a","none","b","a")'; sales[0][1] = '=VSTACK(2,5,3,4)';
+	report[0][0] = '=LOOKUP(Sales!A0, \'Prices 2026\'!A0, \'Prices 2026\'!B0, 0)';
+	report[0][3] = '=JOIN(Sales!A0:B3, Sales!A0, \'Prices 2026\'!B0:C1, \'Prices 2026\'!A0)';
+	report[0][10] = '=LOOKUP("b", \'Prices 2026\'!A0:A0, \'Prices 2026\'!B0:B0)';
+	report[1][10] = '=LOOKUP("b", \'Prices 2026\'!A0, \'Prices 2026\'!B0, Missing!A0)';
+	report[4][10] = '=LOOKUP("a", \'Prices 2026\'![-10]{-4}:[-10]{-3}, \'Prices 2026\'![-9]{-4}:[-9]{-3})';
+	sheet.loadWorkbook({ sheets: [{ name: 'Prices 2026', rows: prices }, { name: 'Sales', rows: sales }, { name: 'Report', rows: report }], activeSheet: 2 });
+	const stored = JSON.stringify(sheet.serializeWorkbook());
+	assert.deepEqual(sheet.getValue(0, 0), [[0.1], [0], [0.2], [0.1]]);
+	assert.deepEqual(sheet.getValue(0, 3), [['a', 2, 0.1, 'Screw'], ['none', 5, '', ''], ['b', 3, 0.2, 'Bolt'], ['a', 4, 0.1, 'Screw']]);
+	assert.deepEqual([sheet.getValue(0, 10), sheet.getValue(1, 10), sheet.getValue(4, 10)], [0.2, 0.2, 0.1]);
+	assert.equal(JSON.stringify(sheet.serializeWorkbook()), stored);
+
+	sheet.rows[0][0] = '=LOOKUP("b", \'Prices 2026\'!A0, \'Prices 2026\'!B0)'; history.do(sheet);
+	assert.equal(sheet.getValue(0, 0), 0.2);
+	history.undo(sheet); assert.deepEqual(sheet.getValue(0, 0), [[0.1], [0], [0.2], [0.1]]);
+	history.redo(sheet); assert.equal(sheet.getValue(0, 0), 0.2);
+	history.undo(sheet);
+	sheet.sheets[0].rows[0][1] = '=VSTACK(0.25,0.125)';
+	assert.deepEqual(sheet.getValue(0, 0), [[0.125], [0], [0.25], [0.125]]);
+	sheet.switchSheet('Prices 2026'); sheet.renameSheet("O'Brien 2026"); sheet.switchSheet('Report');
+	assert.ok(sheet.rows[0][0].includes("'O''Brien 2026'!"));
+	sheet.loadWorkbook(sheet.serializeWorkbook());
+	assert.deepEqual(sheet.getValue(0, 0), [[0.125], [0], [0.25], [0.125]]);
+	sheet.deleteSheet("O'Brien 2026", true);
+	assert.equal(sheet.getValue(0, 0), '#REF!');
+	assert.equal(sheet.getValue(0, 3), '#REF!');
+});
+
+test('named datasets preserve exact lookup/join keys through fill growth, workbook undo and reopen', () => {
+	const { keyboard } = rangeKeyboard([['']]);
+	const rows = () => Array.from({ length: 8 }, () => Array(6).fill(''));
+	const products = rows(), orders = rows(), report = rows();
+	products[0].splice(0, 2, 'key', 'amount'); orders[0].splice(0, 2, 'key', 'qty');
+	[['9007199254740991', '10'], ['9007199254740992', '20'], ['9007199254740993', '30']]
+		.forEach((row, i) => products[i + 1].splice(0, 2, ...row));
+	[['9007199254740993', '2'], ['9007199254740994', '9'], ['9007199254740992', '3'], ['9007199254740991', '4']]
+		.forEach((row, i) => orders[i + 1].splice(0, 2, ...row));
+	report[0][0] = '=LOOKUP(`orders.key,`products.key,`products.amount,-1)';
+	report[0][2] = '=JOIN(`orders.qty,`orders.key,`products.amount,`products.key)';
+	sheet.loadWorkbook({ sheets: [{ name: 'Products', rows: products }, { name: 'Orders', rows: orders }, { name: 'Report', rows: report }] });
+	sheet.setMark('products', { r0: 0, c0: 0, r1: 3, c1: 1 }, 'dataset');
+	sheet.setMark('orders', { r0: 0, c0: 0, r1: 4, c1: 1 }, 'dataset', 'Orders');
+	const expectResults = expanded => {
+		assert.deepEqual(sheet.getValue(0, 0), [[30], [expanded ? 31 : -1], [20], [10]]);
+		assert.deepEqual(sheet.getValue(0, 2), [[2, 30], [9, expanded ? 31 : ''], [3, 20], [4, 10]]);
+	};
+	sheet.switchSheet('Report'); expectResults(false);
+	sheet.switchSheet('Products'); keyboard.move({ row: 3, col: 0 });
+	keyboard.feed('vlj:series down step 1<CR>');
+	assert.deepEqual(sheet.rows[4].slice(0, 2), ['9007199254740994', '31']);
+	assert.equal(sheet.describeDataset('products').rowCount, 4);
+	sheet.switchSheet('Report'); expectResults(true);
+	keyboard.feed('u');
+	assert.equal(sheet.activeSheet.name, 'Report');
+	assert.equal(sheet.describeDataset('products').rowCount, 3); expectResults(false);
+	keyboard.feed('<C-r>'); expectResults(true);
+	sheet.loadWorkbook(JSON.parse(JSON.stringify(sheet.serializeWorkbook())));
+	assert.equal(sheet.describeDataset('products').rowCount, 4); expectResults(true);
+	sheet.renameMark('products', 'catalog');
+	sheet.renameDatasetColumn('catalog', 'amount', 'cost');
+	assert.ok(sheet.rows[0][0].includes('`catalog.cost')); expectResults(true);
+	history.undo(sheet, 2);
+	assert.ok(sheet.rows[0][0].includes('`products.amount')); expectResults(true);
+	history.redo(sheet, 2);
+	sheet.deleteMark('catalog', true);
+	assert.equal(sheet.getValue(0, 0), '#REF!'); assert.equal(sheet.getValue(0, 2), '#REF!');
+	history.undo(sheet); expectResults(true);
+});
+
+test('lookup and join cross-sheet cycles cannot be hidden by defaults or IFERROR', () => {
+	for (const formula of ['=IFERROR(LOOKUP(1,1,B!A0,0),0)', '=IFERROR(JOIN(7,1,B!A0,1),0)']) {
+		sheet.loadWorkbook({ sheets: [
+			{ name: 'A', rows: [[formula, ''], ['', '']] },
+			{ name: 'B', rows: [['=A!A0', ''], ['', '']] },
+		] });
+		for (const name of ['A', 'B']) {
+			sheet.switchSheet(name);
+			assert.match(sheet.getValue(0, 0), /circular/);
+			assert.match(sheet.recalculate()[0][0], /circular/);
+		}
+	}
+	// The join's right payload depends on its own second output row through the other sheet.
+	sheet.sheets[0].rows[0][0] = '=JOIN(VSTACK(1,2),VSTACK(1,2),VSTACK(3,B!A0),VSTACK(1,2))';
+	sheet.sheets[1].rows[0][0] = '=A!B1';
+	sheet.switchSheet('A');
+	assert.equal(sheet.getValue(0, 0), '#SPILL!');
+	assert.equal(sheet.recalculate()[0][0], '#SPILL!');
+	assert.match(sheet.cellErrors.get('0:0'), /spill cycle/);
+});
+
 test('rename and its cross-sheet rewrites undo together without changing text or chart titles', () => {
 	sheet.renameSheet('Inputs'); sheet.createSheet('Report');
 	sheet.rows[0][0] = '=Inputs!B0'; sheet.rows[0][1] = '=IF(TRUE,"Inputs!A0",Inputs!A0)';

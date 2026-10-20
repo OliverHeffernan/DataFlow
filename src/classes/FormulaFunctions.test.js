@@ -1,6 +1,7 @@
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import SheetManager from "./SheetManager.js";
+import { evaluateFormula } from "./FormulaFunctions.js";
 
 const sheet = new SheetManager();
 
@@ -154,6 +155,129 @@ test("SORT and UNIQUE work on rows", () => {
 	assert.equal(evaluate("=SORT(A0:B3, 2)"), "#VALUE!");
 	sheet.recalculate(); assert.match(error("Z0"), /column index 2 is outside 0\.\.1/);
 	assert.equal(evaluate("=SORT(A0:B3, 1, 2)"), "#VALUE!");
+});
+
+test("LOOKUP preserves query order and columns, with lazy scalar or row defaults", () => {
+	assert.deepEqual(evaluate('=LOOKUP(VSTACK("Apr", "Jan", "absent", "Apr"), A0:A4, B0:C4, HSTACK(0, "unknown"))'),
+		[[3, "Oslo"], [5, "New York"], [0, "unknown"], [3, "Oslo"]]);
+	assert.deepEqual(evaluate('=LOOKUP(VSTACK("absent", "Jan", "missing"), A0:A4, B0:C4, "none")'),
+		[["none", "none"], [5, "New York"], ["none", "none"]]);
+	assert.equal(evaluate('=LOOKUP("Jan", A0:A4, B0:B4, Z0)'), 5);
+	assert.equal(evaluate('=LOOKUP("Jan", A0:A4, B0:B4, [-999]{})'), 5);
+	assert.equal(evaluate('=LOOKUP("Jan", A0:A4, B0:B4, VSTACK(1, 2))'), 5);
+	assert.equal(evaluate('=LOOKUP("May", A0:A4, B0:B4, 99)'), "");
+	assert.equal(evaluate('=LOOKUP("absent", A0:A4, B0:B4)'), "#N/A");
+	sheet.recalculate(); assert.match(error("Z0"), /query row 0.*no match/i);
+	assert.equal(evaluate('=LOOKUP("absent", A0:A4, B0:B4, [-999]{})'), "#REF!");
+	assert.equal(evaluate('=IFERROR(LOOKUP("absent", A0:A4, B0:B4, Z0), 9)'), "circular logic detected");
+});
+
+test("LOOKUP rejects matched duplicates and required-input errors instead of treating them as misses", () => {
+	assert.equal(evaluate('=LOOKUP("Oslo", C0:C4, A0:A4)'), "Apr");
+	assert.equal(evaluate('=LOOKUP(VSTACK("missing", "Paris"), C0:C4, A0:A4, Z99)'), "#VALUE!");
+	sheet.recalculate(); assert.match(error("Z0"), /query row 1.*source rows 1, 4/i);
+	assert.equal(evaluate('=LOOKUP("x", VSTACK("x", "x"), VSTACK(7, 7), 0)'), "#VALUE!");
+	assert.equal(evaluate('=LOOKUP("Jan", A0:A4, VSTACK(5, 1/0, 9, 3, 0), 99)'), "#DIV/0!");
+	assert.equal(evaluate('=LOOKUP("missing", A0:A4, B0:B3, 99)'), "#VALUE!");
+	assert.equal(evaluate('=LOOKUP("Jan", HSTACK(A0:A1, B0:B1), C0:C1)'), "#VALUE!");
+	assert.equal(evaluate('=LOOKUP(HSTACK("Jan", "Feb"), A0:A1, B0:B1)'), "#VALUE!");
+	assert.equal(evaluate('=LOOKUP("missing", A0:A4, B0:C4, VSTACK(1, 2))'), "#VALUE!");
+	assert.equal(evaluate('=LOOKUP("missing", A0:A4, B0:C4, HSTACK(1, 2, 3))'), "#VALUE!");
+	assert.equal(evaluate('=IFERROR(LOOKUP("#N/A", "#N/A", "#VALUE!"), "caught")'), "#VALUE!");
+	assert.equal(evaluate('=LOOKUP(1, 1)'), "#N/A");
+});
+
+test("LOOKUP and JOIN use typed exact keys and never match blank key components", () => {
+	const keys = 'VSTACK("", 0, FALSE, "0", "A", "a", " A", " ")';
+	const values = 'VSTACK(10, 20, 30, 40, 50, 60, 70, 80)';
+	assert.deepEqual(evaluate(`=LOOKUP(${keys}, ${keys}, ${values}, -1)`),
+		[[-1], [20], [30], [40], [50], [60], [70], [80]]);
+	assert.deepEqual(evaluate(`=JOIN(${values}, ${keys}, ${values}, ${keys}, "inner")`),
+		[[20, 20], [30, 30], [40, 40], [50, 50], [60, 60], [70, 70], [80, 80]]);
+	assert.equal(evaluate('=LOOKUP("", "", 1)'), "#N/A");
+	set("D0", "001"); set("D1", '="001"');
+	assert.deepEqual(evaluate('=LOOKUP(VSTACK(1, "001"), D0:D1, VSTACK(11, 22))'), [[11], [22]]);
+	const composite = 'VSTACK(HSTACK("a|b", "c"), HSTACK("a", "b|c"), HSTACK("a", ""))';
+	assert.deepEqual(evaluate(`=LOOKUP(${composite}, ${composite}, VSTACK(1, 2, 3), 9)`), [[1], [2], [9]]);
+	assert.deepEqual(evaluate(`=JOIN(VSTACK(1, 2, 3), ${composite}, VSTACK(4, 5, 6), ${composite})`),
+		[[1, 4], [2, 5], [3, ""]]);
+	for (const key of ['Infinity', 'NaN', 'i', 'unit("2 m")']) {
+		assert.equal(evaluate(`=LOOKUP(1, VSTACK(1, ${key}), VSTACK(7, 8), 0)`), "#VALUE!", key);
+		assert.equal(evaluate(`=JOIN(7, ${key}, 8, 1)`), "#VALUE!", key);
+	}
+});
+
+test("lookup and join keys and values retain decimal precision through formulas and spills", () => {
+	set("D0", "9007199254740992"); set("D1", "9007199254740993");
+	assert.equal(evaluate('=LOOKUP(9007199254740993, D0:D1, VSTACK(7, 8))'), 8);
+	assert.equal(evaluate('=LOOKUP(0.1+0.2, 0.3, 1000000000000000.1)-1000000000000000'), 0.1);
+	assert.equal(evaluate('=LOOKUP(-0, 0.00, 7)'), 7);
+	set("D0", "1"); set("D1", `1.${"0".repeat(63)}1`);
+	assert.equal(evaluate('=LOOKUP(D1, D0:D1, VSTACK(7, 8))'), 8);
+	assert.deepEqual(evaluate('=JOIN(VSTACK(7, 8), D0:D1, VSTACK(9, 10), D0:D1)'), [[7, 9], [8, 10]]);
+	set("E0", '=LOOKUP(VSTACK(2, 1), VSTACK(1, 2), VSTACK(1000000000000000.1, 0.1+0.2))');
+	set("H0", '=JOIN(1000000000000000.1, 0.1+0.2, 1000000000000000.2, 0.3)');
+	assert.equal(evaluate('=E1-1000000000000000'), 0.1);
+	assert.equal(evaluate('=E0:E0-0.3'), 0);
+	assert.equal(evaluate('=I0-H0:H0'), 0.1);
+});
+
+test("JOIN emits all matching pairs in left then right order, and pads only left-join misses", () => {
+	const left = '["l0", 10; "l1", 20; "l2", 30; "l3", 40]';
+	const leftKeys = 'VSTACK("b", "a", "b", "missing")';
+	const right = '["r0", 8; "r1", 6; "r2", 4; "r3", 2]';
+	const rightKeys = 'VSTACK("b", "b", "a", "b")';
+	const pairs = [["l0", 10, "r0", 8], ["l0", 10, "r1", 6], ["l0", 10, "r3", 2],
+		["l1", 20, "r2", 4], ["l2", 30, "r0", 8], ["l2", 30, "r1", 6], ["l2", 30, "r3", 2]];
+	assert.deepEqual(evaluate(`=JOIN(${left}, ${leftKeys}, ${right}, ${rightKeys})`), [...pairs, ["l3", 40, "", ""]]);
+	assert.deepEqual(evaluate(`=JOIN(${left}, ${leftKeys}, ${right}, ${rightKeys}, "inner")`), pairs);
+	assert.deepEqual(evaluate('=JOIN(7, "missing", HSTACK(8, 9), "key")'), [[7, "", ""]]);
+	assert.equal(evaluate('=JOIN(7, "missing", 8, "key", "inner")'), "#CALC!");
+	assert.equal(evaluate('=JOIN(7, 1, 8, 1, "INNER")'), "#VALUE!");
+	assert.equal(evaluate('=JOIN(7, VSTACK(1, 2), 8, 1)'), "#VALUE!");
+	assert.equal(evaluate('=JOIN(7, 1, VSTACK(8, 9), 1)'), "#VALUE!");
+	assert.equal(evaluate('=JOIN(7, HSTACK(1, 2), 8, VSTACK(1, 2))'), "#VALUE!");
+	assert.equal(evaluate('=JOIN(7, 1, 8)'), "#N/A");
+});
+
+test("lookup and join reject oversized results before expanding matching rows", () => {
+	// A small source would otherwise expand past a million result cells.
+	const tables = [[[1]], Array.from({ length: 1001 }, () => [1]), [Array(1000).fill("value")]];
+	const ctx = { ref: (_, col) => tables[col] };
+	for (const formula of ['LOOKUP(B0, A0, C0)', 'JOIN(B0, B0, C0, A0)']) {
+		assert.throws(() => evaluateFormula(formula, 0, 3, ctx),
+			error => error.message === "#CALC!" && /1,000,000 cells/.test(error.explanation), formula);
+	}
+});
+
+test("lookup and join spills stay derived, shrink on edits, and protect occupied destinations", () => {
+	set("E0", '=LOOKUP(VSTACK("Jan", "Apr"), A0:A4, B0:C4)');
+	set("H0", '=JOIN(VSTACK(1, 2), VSTACK("Paris", "Oslo"), A0:B4, C0:C4)');
+	set("L0", '=E1+1'); set("L1", '=COUNT(H0)'); set("L2", '=SUM(E0)');
+	const stored = JSON.stringify(sheet.rows);
+	assertOrderIndependent();
+	assert.equal(JSON.stringify(sheet.rows), stored);
+	assert.deepEqual(value("E0"), [[5, "New York"], [3, "Oslo"]]);
+	assert.deepEqual(value("H0"), [[1, "Feb", 1], [1, "May", ""], [2, "Apr", 3]]);
+	assert.deepEqual([shown("L0"), shown("L1"), shown("L2")], [4, 9, 8]);
+	set("C4", "Rome"); set("E0", '=LOOKUP("Jan", A0:A4, B0:C4)');
+	assertOrderIndependent();
+	assert.equal(shown("E1"), ""); assert.equal(spill("E1"), undefined);
+	assert.equal(shown("H2"), ""); assert.equal(spill("H2"), undefined);
+	set("F0", "keep lookup"); set("I1", "keep join");
+	set("L3", '=LOOKUP("Jan", A0:A4, H0, 99)');
+	set("AC11", '=JOIN(1, 1, 2, 1)');
+	assertOrderIndependent();
+	assert.equal(shown("E0"), "#SPILL!"); assert.equal(shown("F0"), "keep lookup");
+	assert.equal(shown("H0"), "#SPILL!"); assert.equal(shown("I1"), "keep join");
+	assert.equal(shown("L3"), "#SPILL!");
+	assert.match(error("E0"), /blocked by non-empty cell F0/);
+	assert.match(error("H0"), /blocked by non-empty cell I1/);
+	assert.equal(shown("AC11"), 1);
+	set("AC11", ""); set("AD11", '=JOIN(1, 1, 2, 1)');
+	sheet.recalculate();
+	assert.equal(shown("AD11"), "#SPILL!");
+	assert.match(error("AD11"), /extends beyond the edge/);
 });
 
 test("IF is lazy and IFERROR catches real errors only", () => {
