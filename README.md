@@ -1,6 +1,8 @@
 # DataFlow
 DataFlow is a spreadsheet app with keyboard commands, similar to Vim/Neovim. This allows for fast manipulation of your spreadsheets.
 
+Use `:splitv` / `:splith` for independent sheet or conditional-rule windows, `Ctrl-w h/j/k/l` to navigate them, and `:cf` for a chart-style `=CF()` rule builder. Rules support value thresholds, duplicates and formula conditions without changing stored values or styles. See [split windows and conditional rules](docs/keyboard.md#split-windows-share-data-not-navigation).
+
 ## Installation
 ### MacOS:
 Once the first release is published, install the latest Intel or Apple Silicon build with:
@@ -261,6 +263,8 @@ Recovery writes **separate local copies, never the original workbook**, for save
 Snapshots preserve persistent marks/datasets and workbook/sheet metadata. Pending dataset growth is projected with the same preflight as committing the edit, without changing live bounds or history. Invalid headers or blocked growth defer checkpoints/saves with an error and retain the last readable generation; incomplete formula text remains recoverable.
 
 Only committed FORMAT styles are saved or recovered. Open FORMAT previews remain session-only and do not dirty or checkpoint the workbook; finish FORMAT with Done to include its styles.
+
+Applied conditional rules are recovered with sheet metadata; their colours are recalculated. Unapplied rule drafts and split-window state are session-only, not checkpoints. Apply or discard drafts before saving, opening, restoring recovery, or using a guarded native exit. Browser exit warnings also cover drafts, but a forced exit still loses them.
 
 | Command | Action |
 | --- | --- |

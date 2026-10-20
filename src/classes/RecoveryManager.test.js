@@ -5,6 +5,9 @@ import HistoryManager from './HistoryManager.js';
 import VimKeyboard from './VimKeyboard.js';
 import FileManager from './FileManager.js';
 import RecoveryManager from './RecoveryManager.js';
+import ConditionalSession from './ConditionalSession.js';
+import WindowManager from './WindowManager.js';
+import CheckCommand from './CheckCommand.js';
 
 const sheet = new SheetManager(), history = new HistoryManager();
 sheet.loadAllCells = () => sheet.recalculate();
@@ -33,7 +36,7 @@ function keyboard() {
 	return new VimKeyboard(sheet, { change: () => history.do(sheet), formatChange: () => history.do(sheet), undo: (redo, count) => history[redo ? 'redo' : 'undo'](sheet, count) });
 }
 function files(io) {
-	const file = new FileManager(undefined, io);
+	const file = new FileManager(undefined, undefined, io);
 	file.setPhMessage = text => { file.message = text; };
 	return file;
 }
@@ -339,4 +342,101 @@ test('FORMAT previews stay transient while committed flat styles survive save, c
 	assert.equal(JSON.stringify(sheet.sheets.map(sheet => sheet.rows)), raw);
 	assert.deepEqual(sheet.workbook.title, { keep: 'workbook metadata' });
 	assert.equal(sheet.describeDataset('sales').rowCount, 1);
+});
+
+test('CF drafts remain session-only and block exits/replacement; applied rules recover with styles, marks and chronological history', async () => {
+	dataset();
+	const windows = new WindowManager(sheet.activeSheet), pane = windows.split('vertical');
+	pane.content = 'cf';
+	const draft = new ConditionalSession(sheet, pane, {});
+	pane.rules = draft;
+	manager.beforeLeave = () => { for (const window of windows.windows) window.rules?.guard(); };
+	const saved = manager.capture().workbook;
+	records.set('cf-copy', { id: 'cf-copy', active: false, generations: [{ snapshotVersion: 1,
+		id: 'cf-copy', revision: 1, updatedAt: 10, name: 'Rules.dflo', workbook: saved }] });
+	draft.begin(null, { r0: 1, c0: 1, r1: 2, c1: 1 });
+	const source = '=CF().range(B1:B2).when(AND(isNumeric([]{}), []{}>0)).bg("#40381c")';
+	draft.editor.setFormula(source);
+	draft.editor.feed('A <Esc>'); // Real text editing, not a sheet mutation (also with datasets).
+	await settle(); await manager.flush();
+	assert.equal(manager.state.dirty, false);
+	assert.deepEqual(manager.capture().workbook, saved);
+	assert.equal(await manager.guard('quit DataFlow'), false);
+	assert.match(manager.state.error, /Unapplied rule draft/);
+	await manager.refreshList(); await manager.restore(0);
+	assert.equal(sheet.path, '/data.dflo');
+	assert.equal(draft.dirty, true);
+	assert.equal(resolved.has('cf-copy'), false);
+	assert.equal(draft.owner, sheet.activeSheet, 'failed replacement must preserve the live draft owner');
+
+	draft.apply(); await settle(); await manager.flush();
+	assert.equal(manager.state.dirty, true);
+	const applied = manager.capture().workbook;
+	assert.equal(applied.sheets[0].conditionalRules[0].source, source + ' ');
+	assert.equal(sheet.sheetResults.value.get(sheet.activeSheet).colors.get('1:1').bg, '#40381c');
+	for (const key of ['windows', 'sheetResults', 'formatPreview']) assert.equal(Object.hasOwn(applied, key), false);
+	assert.deepEqual(applied.marks, saved.marks);
+	history.undo(sheet); await manager.flush();
+	assert.equal(manager.state.dirty, false);
+	history.redo(sheet); await manager.flush();
+	assert.deepEqual(manager.capture().workbook, applied);
+	await manager.saved(manager.capture(), '/rules.dflo');
+	records.get('cf-copy').generations[0].workbook = applied;
+	await manager.refreshList(); await manager.restore(0);
+	assert.equal(sheet.path, null);
+	assert.equal(manager.state.dirty, true);
+	assert.equal(sheet.activeSheet.conditionalRules[0].source, source + ' ');
+	assert.equal(sheet.sheetResults.value.get(sheet.activeSheet).colors.get('1:1').bg, '#40381c');
+	assert.deepEqual(sheet.workbook.title, saved.title);
+	assert.deepEqual(sheet.marks, saved.marks);
+});
+
+test('pane focus settles pending dataset INSERT before capture while preserving caret, repeat and separate workbook undo', async t => {
+	dataset();
+	const document = globalThis.document;
+	globalThis.document = { getElementById: () => null, getElementsByClassName: () => [] };
+	t.after(() => { globalThis.document = document; });
+	const check = Object.create(CheckCommand.prototype);
+	Object.assign(check, { sheet, history, visual: { exitVisual() {} }, render: async () => {}, focus() {} });
+	check.windows = new WindowManager(sheet.activeSheet);
+	const left = check.windows.active, right = check.windows.split('vertical');
+	right.sheet = sheet.sheets[1]; check.windows.focus(left.id); check.currentWindow = left;
+	check.keyboard = left.keyboard = check.createKeyboard();
+	check.keyboard.feed('2jitwo');
+	const caret = check.keyboard.formulaCursor;
+	await check.activateWindow(left.id); // Same-pane focus never commits.
+	assert.equal(sheet.marks[0].bounds.r1, 1);
+	await check.activateWindow(right.id); await manager.flush();
+	const checkpoint = (await manager.store.list())[0].generations[0].workbook;
+	assert.equal(checkpoint.sheets[0].rows[2][0], 'two');
+	assert.equal(checkpoint.marks[0].bounds.r1, 2);
+	check.keyboard.feed('A8<Esc><Esc>u');
+	assert.equal(sheet.rows[0][0], '=SUM(`sales.amount)', 'other-sheet edit undoes separately');
+	assert.equal(sheet.sheets[0].rows[2][0], 'two');
+	await check.activateWindow(left.id);
+	assert.equal(check.keyboard.mode, 'i'); assert.equal(check.keyboard.formulaCursor, caret);
+	check.keyboard.feed('!<Esc><Esc>');
+	assert.equal(sheet.rows[2][0], 'two!');
+	check.keyboard.move({ row: 4, col: 2 }); check.keyboard.feed('.');
+	assert.equal(sheet.rows[4][2], 'two!', 'dot replay retains its INSERT entry command after a focus checkpoint');
+
+	// A same-sheet pane switch is also a commit boundary, but unchanged
+	// content never consumes another undo step.
+	right.sheet = left.sheet;
+	check.keyboard.move({ row: 1, col: 1 }); check.keyboard.feed('A8');
+	await check.activateWindow(right.id);
+	check.keyboard.feed('u');
+	assert.equal(sheet.rows[1][1], '13');
+	await check.activateWindow(left.id); check.keyboard.feed('<Esc><Esc>');
+	await check.activateWindow(right.id); check.keyboard.feed('u');
+	assert.equal(sheet.rows[4][2], '', 'no-op focus/INSERT exit must not add history');
+
+	dataset(true); check.windows.reconcile(sheet.sheets); check.currentWindow.sheet = sheet.activeSheet;
+	check.keyboard.resetNavigation(); check.keyboard.feed('2jitwo');
+	const id = check.currentWindow.id;
+	await check.activateWindow(left.id);
+	assert.equal(check.currentWindow.id, id, 'rejected growth aborts focus change');
+	assert.equal(check.currentWindow.sheet, sheet.activeSheet, 'rollback rebinds panes to restored sheet records');
+	assert.equal(sheet.rows[2][0], ''); assert.equal(sheet.marks[0].bounds.r1, 1);
+	await manager.flush(); assert.equal(manager.state.dirty, false);
 });

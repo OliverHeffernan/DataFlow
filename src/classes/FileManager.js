@@ -6,9 +6,10 @@ import { readTextFile } from "@tauri-apps/plugin-fs";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 export default class FileManager {
-	constructor(onOpen, io = {}) {
+	constructor(onOpen, beforeOpen, io = {}) {
 		this.onOpen = onOpen;
 		this.io = { native: isTauri(), save, open, readTextFile, invoke, ...io };
+		this.beforeOpen = beforeOpen;
 		FileManager.instance = this;
 	}
 
@@ -94,6 +95,7 @@ export default class FileManager {
 		const data = JSON.parse(content);
 		sheetManager.validateWorkbook(data);
 		if (sheetManager.saving) await sheetManager.saving;
+		this.beforeOpen?.();
 		if (sheetManager.recovery && !await sheetManager.recovery.guard()) return false;
 		sheetManager.loadWorkbook(data, path);
 		await this.onOpen?.();

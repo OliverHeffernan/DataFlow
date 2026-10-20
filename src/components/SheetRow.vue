@@ -1,24 +1,23 @@
 <template>
 	<tr class="sheetRow">
 		<td class="labels rowLabels">{{ rowNo }}</td>
-		<td class="labels relRow">{{ rowNo }}</td>
+		<td class="labels relRow">{{ Math.abs(rowNo - pane.row) }}</td>
 		<SheetCell 
 			v-for="(cell, index) in row"
 			:key="index"
 			:rowNo="rowNo"
 			:colNo="index"
-			:numOfRows="sheetManager.numOfRows.value"
-			:numOfCols="sheetManager.numOfCols.value"
+			:pane="pane"
+			:active="active"
 		/>
 	</tr>
 </template>
 <script setup>
 	import SheetCell from './SheetCell.vue';
-	import SheetManager from '../classes/SheetManager.js';
-
-	const sheetManager = new SheetManager();
 
 	defineProps({
+		pane: { type: Object, required: true },
+		active: Boolean,
 		rowNo: {
 			type: Number,
 			required: true,

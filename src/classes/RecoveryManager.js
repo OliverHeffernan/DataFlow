@@ -185,6 +185,9 @@ export default class RecoveryManager {
 		if (this.state.locked) return false;
 		this.state.locked = true;
 		try {
+			// Session-only rule drafts are not recoverable workbook content. Never
+			// let a clean baseline or Keep recovery silently discard them on exit.
+			this.beforeLeave?.();
 			await this.tail;
 			this.refresh();
 			if (!this.state.dirty) { await this.flush(); await this.store.release(this.id); return true; }
@@ -275,8 +278,8 @@ export default class RecoveryManager {
 			this.disposers.push(await listen('lifecycle-resume', () => { this.state.locked = false; }));
 			await invoke('lifecycle_ready');
 		} else {
-			// Add the browser's generic warning only while content is modified.
-			this.disposers.push(watch(() => this.state.dirty, dirty => {
+			// Drafts remain session-only, but still need the browser's exit warning.
+			this.disposers.push(watch(() => this.state.dirty || this.hasDrafts?.(), dirty => {
 				window[dirty ? 'addEventListener' : 'removeEventListener']('beforeunload', beforeUnload);
 			}, { immediate: true }));
 			this.disposers.push(() => window.removeEventListener('beforeunload', beforeUnload));

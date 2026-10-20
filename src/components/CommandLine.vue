@@ -59,7 +59,7 @@
 
 		reader.onload = async function(e) {
 			try {
-				const loaded = await new FileManager(async () => { await checkCommand.newSheet(false); new LaunchManager().hide(); }).loadFile(e.target.result);
+				const loaded = await new FileManager(async () => { await checkCommand.newSheet(false); new LaunchManager().hide(); }, () => checkCommand.guardDrafts()).loadFile(e.target.result);
 				if (loaded && recovery) recovery.state.name = file.name;
 			} catch (error) { checkCommand.setPhMessage(`Open: ${error.message}`); }
 		}
