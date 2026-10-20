@@ -434,6 +434,7 @@ function stringEnd(text, start) {
 	const quote = text[start];
 	for (let i = start + 1; i < text.length; i++) {
 		if (text[i] === "\\") i++;
+		else if (quote === "'" && text[i] === "'" && text[i + 1] === "'") i++;
 		else if (text[i] === quote) return i + 1;
 	}
 	return text.length;
@@ -481,19 +482,51 @@ function endpointEnd(text, at) {
 export function referenceSpans(text) {
 	const spans = [];
 	for (let i = 0; i < text.length;) {
-		if (text[i] === '"' || text[i] === "'") { i = stringEnd(text, i); continue; }
+		const prefix = text.slice(i).match(/^(?:'((?:[^'\\]|\\.|'')*)'|([A-Za-z_][A-Za-z0-9_]*|#REF))!/);
+		if (!prefix && (text[i] === '"' || text[i] === "'")) { i = stringEnd(text, i); continue; }
 		if (/[\w.]/u.test(text[i - 1] ?? '')) { i++; continue; }
-		let end = endpointEnd(text, i);
+		const at = i + (prefix?.[0].length ?? 0);
+		let end = endpointEnd(text, at);
 		if (end < 0 || /\w/u.test(text[end] ?? '')) { i++; continue; }
 		const colon = text.slice(end).match(/^\s*:\s*/);
 		if (colon) {
 			const rangeEnd = endpointEnd(text, end + colon[0].length);
 			if (rangeEnd > end && !/\w/u.test(text[rangeEnd] ?? '')) end = rangeEnd;
 		}
-		spans.push({ start: i, end, source: text.slice(i, end) });
+		spans.push({ start: i, end, source: text.slice(i, end), reference: text.slice(at, end),
+			...(prefix ? { sheetName: prefix[2] ?? prefix[1].replace(/''/g, "'").replace(/\\(.)/g, '$1'), prefix: prefix[0] } : {}) });
 		i = end;
 	}
 	return spans;
+}
+
+export const sheetPrefix = name => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? `${name}!` : `'${name.replaceAll("'", "''").replaceAll('\\', '\\\\')}'!`;
+
+// Only actual references change: text cells and quoted formula/chart labels remain literal.
+export function rewriteSheetReferences(text, oldName, newName) {
+	if (typeof text !== 'string' || !text.startsWith('=')) return text;
+	for (const span of referenceSpans(text).reverse()) {
+		let reference = '';
+		for (let i = 0; i < span.reference.length;) {
+			const char = span.reference[i];
+			if (char === '[' || char === '{') {
+				const end = matching(span.reference, i);
+				reference += char + rewriteSheetReferences('=' + span.reference.slice(i + 1, end), oldName, newName).slice(1) + span.reference[end];
+				i = end + 1;
+			} else reference += span.reference[i++];
+		}
+		const prefix = span.prefix !== '#REF!' && span.sheetName?.toLowerCase() === oldName.toLowerCase()
+			? newName === null ? '#REF!' : sheetPrefix(newName) : span.prefix ?? '';
+		text = text.slice(0, span.start) + prefix + reference + text.slice(span.end);
+	}
+	return text;
+}
+
+export function resolveReference(source, row, col, ctx) {
+	const resolved = normaliseFormula(source, row, col, ctx);
+	const match = resolved.match(/^(?:RANGE__)?([A-Z]+)(\d+)(?:__([A-Z]+)(\d+))?$/);
+	if (!match) throw new FormulaError('#REF!', `Invalid reference: ${source}`);
+	return { r0: Number(match[2]), c0: columnIndex(match[1]), r1: Number(match[4] ?? match[2]), c1: columnIndex(match[3] ?? match[1]) };
 }
 
 // [start, end) spans of comma separated top-level arguments between from and to.
@@ -596,17 +629,24 @@ function evaluateExpression(source, row, col, ctx, depth) {
 	source = quoteCriteria(String(source));
 	const spans = new Map(referenceSpans(source).map(span => [span.start, span]));
 	while (at < source.length) {
-		if (source[at] === '"' || source[at] === "'") {
+		const span = spans.get(at);
+		if (!span && (source[at] === '"' || source[at] === "'")) {
 			const end = stringEnd(source, at); deferred += source.slice(at, end); at = end; continue;
 		}
-		const span = spans.get(at);
 		const bracket = !span && '[{'.includes(source[at]) ? matching(source, at) : -1;
 		const end = span?.end ?? (bracket < 0 ? at + 1 : bracket + 1);
 		const token = source.slice(at, end);
 		// Matrix literals must keep their ArrayNode; defer only actual reference/calculation syntax.
 		const matrix = token[0] === '[' && !span && splitTopLevel(token, 1, token.length - 1, ',;').length > 1;
 		if (matrix) { deferred += '['; at++; continue; }
-		if (!matrix && /[\[{}]/.test(token) && (span || bracket >= 0)) {
+		if (span?.sheetName !== undefined) {
+			const name = `DFREF__${references.size}`;
+			references.set(name, () => {
+				if (span.prefix === '#REF!' || !ctx.sheet) throw new FormulaError('#REF!', `Unknown sheet: ${span.sheetName}`);
+				return evaluateExpression(span.reference, row, col, ctx.sheet(span.sheetName), depth + 1);
+			});
+			deferred += name;
+		} else if (!matrix && /[\[{}]/.test(token) && (span || bracket >= 0)) {
 			const name = `DFREF__${references.size}`;
 			references.set(name, () => evaluateExpression(normaliseFormula(token, row, col, ctx, depth + 1), row, col, ctx, depth + 1));
 			deferred += name;

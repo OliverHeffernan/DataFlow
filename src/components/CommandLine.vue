@@ -1,5 +1,11 @@
 <template>
 	<div id="statusBar" @click="checkCommand.focus()">
+		<div class="sheet-strip">
+			<ol class="sheet-list" aria-label="Workbook sheets">
+				<li v-for="(sheet, index) in sheetManager.sheets" :key="sheet.name" :aria-current="index === sheetManager.workbook.activeSheetIndex ? 'true' : undefined"><span class="sheet-number">{{ index + 1 }}</span>{{ sheet.name }}</li>
+			</ol>
+			<span class="sheet-help"><kbd>:sheet</kbd> switch · <kbd>:sheetnew</kbd> create</span>
+		</div>
 		<div class="status-context" v-if="ui.error || ui.spill" :class="{ 'cell-error': ui.error }" role="status">{{ ui.error || ui.spill }}</div>
 		<div class="command-status">
 			<div id="modeDisplay">-- NORMAL --</div>
@@ -11,7 +17,7 @@
 	</div>
 	<input id="luaConfigInput" type="file" accept=".lua" hidden @change="checkCommand.importConfig($event.target.files[0])" />
 	<div id="webFileUpload" role="dialog" aria-label="Open spreadsheet">
-		<input id="fileInput" type="file" />
+		<input id="fileInput" type="file" accept=".dflo,.heff,.json" />
 		<button id="readFileBtn" @click="openFileWeb()">Read File</button>
 		<button id="cancelButton" @click="closeWebFilePick()">Cancel</button>
 	</div>
@@ -23,6 +29,7 @@
 	const sheetManager = new SheetManager();
 
 	import CheckCommand from '../classes/CheckCommand.js';
+	import FileManager from '../classes/FileManager.js';
 	const checkCommand = new CheckCommand();
 	const ui = checkCommand.ui;
 	let disconnect;
@@ -45,15 +52,9 @@
 
 		const reader = new FileReader();
 
-		reader.onload = function(e) {
+		reader.onload = async function(e) {
 			try {
-				const data = JSON.parse(e.target.result);
-				sheetManager.rows = Array.isArray(data) ? data : data.rows;
-				sheetManager.styles = data.styles || sheetManager.rows.map(row => row.map(() => ({ ...sheetManager.defaultStyling })));
-				sheetManager.numOfRows.value = sheetManager.rows.length;
-				sheetManager.numOfCols.value = sheetManager.rows[0].length;
-				sheetManager.loadAllCells();
-				checkCommand.newSheet();
+				await new FileManager(() => checkCommand.newSheet()).loadFile(e.target.result);
 			} catch (error) { checkCommand.setPhMessage(`Open: ${error.message}`); }
 		}
 
@@ -74,6 +75,13 @@
 	border-top: 1px solid #2a3d51;
 	font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
+
+.sheet-strip { display: flex; align-items: center; gap: 20px; padding: 0 12px; border-bottom: 1px solid #2a3d51; }
+.sheet-list { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; list-style: none; margin: 0; padding: 0; }
+.sheet-list li { display: flex; gap: 8px; align-items: center; padding: 6px 10px; white-space: nowrap; color: #9aaec3; border-bottom: 2px solid transparent; }
+.sheet-list li[aria-current="true"] { color: #75e2bc; background: #192c3a; border-bottom-color: #75e2bc; }
+.sheet-number { color: #9aaec3; font-size: 10px; }
+.sheet-help { color: #9aaec3; flex-shrink: 0; }
 
 .command-status { display: flex; align-items: center; min-height: 28px; padding: 0 12px; gap: 16px; }
 #commandLine {
@@ -113,5 +121,5 @@ kbd { color: #dbe6f3; font: inherit; }
 #cancelButton {
 	margin-left: 5px;
 }
-@media (max-width: 600px) { .command-status { gap: 8px; } #shortcutBar { gap: 6px 14px; font-size: 11px; } }
+@media (max-width: 600px) { .sheet-help { display: none; } .command-status { gap: 8px; } #shortcutBar { gap: 6px 14px; font-size: 11px; } }
 </style>

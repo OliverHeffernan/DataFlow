@@ -1,4 +1,4 @@
-import { cellLabel, cellToValue, normaliseFormula, referenceSpans } from './FormulaFunctions.js';
+import { cellLabel, referenceSpans, resolveReference } from './FormulaFunctions.js';
 
 export const referenceColors = ['#73c9ff', '#ffa182', '#d7b5ff', '#75e2bc', '#f4d779', '#ff9bc5'];
 export const functionHelp = {
@@ -23,6 +23,7 @@ export function quotedEnd(text, at) {
 	const quote = text[at];
 	for (let i = at + 1; i < text.length; i++) {
 		if (text[i] === '\\') i++;
+		else if (quote === "'" && text[i] === "'" && text[i + 1] === "'") i++;
 		else if (text[i] === quote) return i + 1;
 	}
 	return text.length;
@@ -33,25 +34,20 @@ export function quotedEnd(text, at) {
 export function formulaReferences(text, row, col, sheet) {
 	if (!text.startsWith('=')) return [];
 	const refs = [], colors = new Map();
-	for (const { start, end, source } of referenceSpans(text)) {
-		let region = null;
+	for (const { start, end, source, reference, sheetName, prefix = '' } of referenceSpans(text)) {
+		let region = null, coordinates = null;
 		try {
-			const resolved = normaliseFormula(source, row, col, {
-				ref: (r, c) => cellToValue(sheet.getElementValue(r, c)),
-				range: () => { throw new Error('A reference coordinate must be scalar'); },
-			});
-			const match = resolved.match(/^(?:RANGE__)?([A-Z]+)(\d+)(?:__([A-Z]+)(\d+))?$/);
-			if (match) {
-				const column = letters => [...letters].reduce((n, char) => n * 26 + char.charCodeAt(0) - 64, 0) - 1;
-				const r0 = Number(match[2]), c0 = column(match[1]), r1 = Number(match[4] ?? match[2]), c1 = column(match[3] ?? match[1]);
-				if (Math.max(r0, r1) < sheet.rows.length && Math.max(c0, c1) < sheet.rows[0].length) {
-					region = { r0: Math.min(r0, r1), c0: Math.min(c0, c1), r1: Math.max(r0, r1), c1: Math.max(c0, c1) };
-				}
+			const target = sheetName === undefined ? sheet.activeSheet : sheet.sheets.find(item => item.name.toLowerCase() === sheetName.toLowerCase());
+			const { r0, c0, r1, c1 } = sheet.runPass(pass => resolveReference(reference, row, col, sheetName === undefined ? pass.ctx : pass.ctx.sheet(sheetName)));
+			if (target && Math.max(r0, r1) < target.rows.length && Math.max(c0, c1) < target.rows[0].length) {
+				coordinates = { r0: Math.min(r0, r1), c0: Math.min(c0, c1), r1: Math.max(r0, r1), c1: Math.max(c0, c1) };
+				// A foreign sheet's coordinates must never outline unrelated cells on the visible sheet.
+				if (target === sheet.activeSheet) region = coordinates;
 			}
 		} catch { /* Incomplete or invalid references stay colored, without a misleading grid highlight. */ }
-		const key = region ? JSON.stringify(region) : source;
+		const key = coordinates ? `${sheetName?.toLowerCase() ?? sheet.activeSheet.name.toLowerCase()}:${JSON.stringify(coordinates)}` : source;
 		if (!colors.has(key)) colors.set(key, referenceColors[colors.size % referenceColors.length]);
-		refs.push({ start, end, source, region, color: colors.get(key) });
+		refs.push({ start, end, source, region, coordinates, prefix, color: colors.get(key) });
 	}
 	return refs;
 }
@@ -66,10 +62,11 @@ export function toggleReference(keyboard) {
 	const caret = Array.from(keyboard.formula).slice(0, keyboard.formulaCursor).join('').length;
 	const ref = formulaReferences(keyboard.formula, sheet.selRow, sheet.selCol, sheet)
 		.find(ref => ref.start <= caret && caret <= ref.end);
-	if (!ref?.region) return false;
-	const { r0, c0, r1, c1 } = ref.region;
-	const format = /[\[{}]/.test(ref.source) ? cellLabel : (r, c) => relativeReference(r, c, sheet.selRow, sheet.selCol);
-	const replacement = ref.source.includes(':') ? `${format(r0, c0)}:${format(r1, c1)}` : format(r0, c0);
+	if (!ref?.coordinates) return false;
+	const { r0, c0, r1, c1 } = ref.coordinates;
+	const reference = ref.source.slice(ref.prefix.length);
+	const format = /[\[{}]/.test(reference) ? cellLabel : (r, c) => relativeReference(r, c, sheet.selRow, sheet.selCol);
+	const replacement = ref.prefix + (reference.includes(':') ? `${format(r0, c0)}:${format(r1, c1)}` : format(r0, c0));
 	keyboard.setFormula(keyboard.formula.slice(0, ref.start) + replacement + keyboard.formula.slice(ref.end));
 	keyboard.formulaCursor = Array.from(keyboard.formula.slice(0, ref.start) + replacement).length;
 	keyboard.reference = null;

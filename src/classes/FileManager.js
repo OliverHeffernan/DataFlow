@@ -3,7 +3,7 @@ const sheetManager = new SheetManager();
 
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "@tauri-apps/plugin-fs";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 
 export default class FileManager {
 	constructor(onOpen) {
@@ -12,33 +12,33 @@ export default class FileManager {
 	}
 
 	async saveFile(saveAs = false) {
+		if (!isTauri()) {
+			this.downloadFile(JSON.stringify(sheetManager.serializeWorkbook()), "sheet.dflo");
+			this.setPhMessage('Downloaded workbook as sheet.dflo');
+			return;
+		}
 		try {
 			let path;
 			if (sheetManager.path == null || saveAs) {
 				path = await save({
 					filters: [
 						{
-							name: "My Filter",
-							extensions: [".dflo"],
+							name: "DataFlow workbook",
+							extensions: ["dflo"],
 						},
 					],
 				});
-				sheetManager.path = path;
 			} else {
 				path = sheetManager.path;
 			}
 
-			let object = {
-				rows: sheetManager.rows,
-				styles: sheetManager.styles,
-			};
-
-			let content = JSON.stringify(object);
+			if (!path) return;
+			let content = JSON.stringify(sheetManager.serializeWorkbook());
 			await invoke("write_file", { path: path, content: content });
+			sheetManager.path = path;
 			this.setPhMessage("Saved file to " + path + " successfully");
 		} catch (e) {
-			console.log(e.message);
-			this.downloadFile(JSON.stringify(sheetManager.rows), "sheet.dflo");
+			this.setPhMessage(`Save: ${e.message || String(e)}`);
 		}
 	}
 
@@ -60,51 +60,31 @@ export default class FileManager {
 	}
 
 	async openFile() {
+		if (!isTauri()) {
+			document.getElementById("webFileUpload").style.display = "block";
+			return;
+		}
 		try {
 			const path = await open({
 				filters: [
 					{
-						name: "My Filter",
-						extensions: [".dflo"],
+						name: "DataFlow workbook (including legacy files)",
+						extensions: ["dflo", "heff"],
 					},
 				],
 			});
 
-			const file = await readTextFile(path);
-
-			if (path.split(".").pop() == "dflo") {
-				const object = JSON.parse(file);
-				sheetManager.rows = object.rows;
-				sheetManager.styles = object.styles;
-				//sheetManager.loadStyles();
-				let prevNumOfRows = sheetManager.numOfRows.value;
-				let prevNumOfCols = sheetManager.numOfRows.value;
-				sheetManager.numOfRows.value = sheetManager.rows.length;
-				sheetManager.numOfCols.value = sheetManager.rows[0].length;
-				sheetManager.loadAllCells(prevNumOfRows, prevNumOfCols);
-				sheetManager.path = path;
-
-				this.onOpen?.();
-				this.setPhMessage("Opened file from " + path + " successfully");
-			} else if (path.split(".").pop() == "heff") {
-				sheetManager.rows = JSON.parse(file);
-				sheetManager.numOfRows.value = sheetManager.rows.length;
-				sheetManager.numOfCols.value = sheetManager.rows[0].length;
-				sheetManager.loadAllCells();
-
-				sheetManager.path = path;
-
-				this.onOpen?.();
-				this.setPhMessage("Opened file from " + path + " successfully");
-			} else {
-				this.setPhMessage("Invalid file type");
-			}
-			//await file.close();
-			//const file = await open(path)
+			if (!path) return;
+			await this.loadFile(await readTextFile(path), path);
 		} catch (e) {
-			console.log(e.message);
-			document.getElementById("webFileUpload").style.display = "block";
+			this.setPhMessage(`Open: ${e.message || String(e)}`);
 		}
+	}
+
+	async loadFile(content, path = null) {
+		sheetManager.loadWorkbook(JSON.parse(content), path);
+		await this.onOpen?.();
+		this.setPhMessage(path ? `Opened file from ${path} successfully` : 'Opened workbook successfully');
 	}
 
 	setPhMessage(mg) {

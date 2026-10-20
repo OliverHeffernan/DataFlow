@@ -1,6 +1,6 @@
-import { ref, shallowRef } from "vue";
+import { ref, shallowRef, shallowReactive } from "vue";
 //import { reactive } from "vue";
-import { FormulaError, cellLabel, cellToValue, evaluateFormula, toCellValue } from "./FormulaFunctions.js";
+import { FormulaError, cellLabel, cellToValue, evaluateFormula, toCellValue, rewriteSheetReferences } from "./FormulaFunctions.js";
 import SyntaxHighlighting from "./SyntaxHighlighting.js";
 import { evaluateChart } from "./ChartFormula.js";
 
@@ -47,16 +47,16 @@ const intersects = (row, col, rows, cols, region) => row <= region.r1 && col <= 
  * spill depends on its own output; the owner is blocked (#SPILL!) and the pass is rerun.
  */
 class CalcPass {
-	constructor(sheet, blocked) {
-		this.sheet = sheet;
-		this.rows = sheet.rows;
+	constructor(sheet, blocked, session, record = sheet.activeSheet) {
+		this.rows = record.rows;
+		this.id = sheet.sheets.indexOf(record);
+		session.passes.set(record, this);
 		this.blocked = blocked;
 		this.results = new Map();
 		this.spills = new Map();
 		this.empties = new Map();
-		this.stack = new Map();
-		this.depth = 0;
-		this.probes = [];
+		this.stack = session.stack;
+		this.probes = session.probes;
 		this.assumptions = [];
 		this.aborts = new Map();
 		this.formulaCells = [];
@@ -64,7 +64,19 @@ class CalcPass {
 			if (isFormula(raw)) this.formulaCells.push([r, c]);
 		}));
 		this.ctx = {
+			sheet: name => {
+				const target = sheet.sheets.find(item => item.name.toLowerCase() === name.toLowerCase());
+				if (!target) throw new FormulaError('#REF!', `Unknown sheet: ${name}`);
+				return (session.passes.get(target) ?? new CalcPass(sheet, blocked, session, target)).ctx;
+			},
 			ref: (row, col) => this.formulaRead(row, col, false),
+			// Charts keep literal text (including numeric labels), but read the element at spill sources.
+			element: (row, col) => {
+				if (!this.inSheet(row, col)) throw new FormulaError('#REF!');
+				const value = this.cellValue(row, col);
+				if (value?.kind === 'chart') throw new Error('A chart cannot be used as chart data');
+				return Array.isArray(value) ? value[0][0] : value;
+			},
 			range: (r0, c0, r1, c1) => {
 				for (const [row, col] of [[r0, c0], [r1, c1]]) {
 					if (!this.inSheet(row, col)) throw new FormulaError("#REF!", `Range ${cellLabel(r0, c0)}:${cellLabel(r1, c1)} extends outside the sheet`);
@@ -79,6 +91,8 @@ class CalcPass {
 			},
 		};
 	}
+
+	key(row, col) { return `${this.id}:${keyOf(row, col)}`; }
 
 	raw(row, col) {
 		return this.rows[row]?.[col] ?? "";
@@ -96,16 +110,15 @@ class CalcPass {
 			if (base !== undefined && index < base) throw new ProbeAbort(base, key);
 			throw new CircularError();
 		}
-		this.stack.set(key, this.depth++);
+		this.stack.set(key, this.stack.size);
 	}
 
 	leave(key) {
 		this.stack.delete(key);
-		this.depth--;
 	}
 
 	probe(fn) {
-		const base = this.depth;
+		const base = this.stack.size;
 		this.probes.push(base);
 		try {
 			return { value: fn() };
@@ -131,7 +144,7 @@ class CalcPass {
 
 	// Raw formula result (scalar or 2D array); throws formula errors.
 	result(row, col) {
-		const key = keyOf(row, col);
+		const key = this.key(row, col);
 		const cached = this.results.get(key);
 		if (cached) {
 			if ("error" in cached) throw cached.error;
@@ -159,7 +172,7 @@ class CalcPass {
 		const raw = this.raw(row, col);
 		if (/^=\s*CHART\b/.test(raw)) {
 			try {
-				return evaluateChart(raw, row, col, this.sheet);
+				return evaluateChart(raw, row, col, this.ctx);
 			} catch (error) {
 				if (error instanceof ProbeAbort) throw error;
 				if (error instanceof CircularError) throw new CircularError(`Chart: ${error.message}`);
@@ -204,7 +217,7 @@ class CalcPass {
 
 	// Array result of a formula cell if it can be known now; otherwise records an assumption.
 	peek(row, col, region) {
-		const key = keyOf(row, col);
+		const key = this.key(row, col);
 		if (this.blocked.has(key)) return null;
 		const cached = this.results.get(key);
 		if (cached) return "error" in cached || !Array.isArray(cached.value) ? null : cached.value;
@@ -224,7 +237,7 @@ class CalcPass {
 
 	// Value of an empty cell: the element of the valid spill covering it, or "".
 	covered(row, col) {
-		const key = keyOf(row, col);
+		const key = this.key(row, col);
 		if (this.empties.has(key)) return this.empties.get(key);
 		const region = { r0: row, c0: col, r1: row, c1: col };
 		let found = "";
@@ -233,8 +246,8 @@ class CalcPass {
 			if (c > col) continue;
 			const value = this.peek(r, c, region);
 			if (!value || !intersects(r, c, value.length, value[0].length, region)) continue;
-			if (this.stack.has(`spill:${keyOf(r, c)}`)) {
-				this.inProgress(`spill:${keyOf(r, c)}`);
+			if (this.stack.has(`spill:${this.key(r, c)}`)) {
+				this.inProgress(`spill:${this.key(r, c)}`);
 				this.assume(r, c, region);
 				continue;
 			}
@@ -263,7 +276,7 @@ class CalcPass {
 	}
 
 	spillState(row, col) {
-		const key = keyOf(row, col);
+		const key = this.key(row, col);
 		if (this.spills.has(key)) return this.spills.get(key);
 		const value = this.result(row, col);
 		const rows = value.length;
@@ -305,7 +318,7 @@ class CalcPass {
 		const broken = new Set();
 		for (let i = 0; i < this.assumptions.length; i++) {
 			const { row, col, ...region } = this.assumptions[i];
-			const key = keyOf(row, col);
+			const key = this.key(row, col);
 			if (this.blocked.has(key) || broken.has(key)) continue;
 			let value;
 			try {
@@ -360,8 +373,7 @@ export default class SheetManager {
 			return SheetManager.instance;
 		}
 
-		this.rows = [];
-		this.styles = [];
+		this.workbook = shallowReactive({ sheets: [{ name: 'Sheet1', rows: [], styles: [], selRow: 0, selCol: 0 }], activeSheetIndex: 0 });
 		this.cellValues = shallowRef([]);
 		// derived by recalculate(): "row:col" -> { row, col, rows, cols } of the array formula spilling there
 		this.spillCells = new Map();
@@ -403,6 +415,115 @@ export default class SheetManager {
 		}
 		historyManager.do(this);
 		SheetManager.instance = this;
+	}
+
+	get sheets() { return this.workbook.sheets; }
+	get activeSheet() { return this.sheets[this.workbook.activeSheetIndex]; }
+	get rows() { return this.activeSheet.rows; }
+	set rows(rows) { this.activeSheet.rows = rows; }
+	get styles() { return this.activeSheet.styles; }
+	set styles(styles) { this.activeSheet.styles = styles; }
+	get selRow() { return this.activeSheet.selRow; }
+	set selRow(row) { this.activeSheet.selRow = row; }
+	get selCol() { return this.activeSheet.selCol; }
+	set selCol(col) { this.activeSheet.selCol = col; }
+
+	validateSheetName(name, except = null) {
+		if (typeof name !== 'string' || !name.trim() || /[\x00-\x1f\x7f]/.test(name)) throw new Error('A sheet name must be non-empty and on one line');
+		name = name.trim();
+		if (this.sheets.some(sheet => sheet !== except && sheet.name.toLowerCase() === name.toLowerCase())) throw new Error(`Sheet already exists: ${name}`);
+		return name;
+	}
+
+	unusedSheetName(base = 'Sheet') {
+		let n = 1;
+		while (this.sheets.some(sheet => sheet.name.toLowerCase() === `${base}${n}`.toLowerCase())) n++;
+		return `${base}${n}`;
+	}
+
+	sheetIndex(target) {
+		const index = /^\d+$/.test(String(target)) ? Number(target) - 1 : this.sheets.findIndex(sheet => sheet.name.toLowerCase() === String(target).toLowerCase());
+		if (!Number.isInteger(index) || index < 0 || index >= this.sheets.length) throw new Error(`Unknown sheet: ${target}`);
+		return index;
+	}
+
+	switchSheet(target) {
+		this.workbook.activeSheetIndex = this.sheetIndex(target);
+		this.numOfRows.value = this.rows.length;
+		this.numOfCols.value = this.rows[0].length;
+		this.recalculate();
+	}
+
+	createSheet(name = this.unusedSheetName(), duplicate = false) {
+		name = this.validateSheetName(name);
+		const rows = duplicate ? this.rows.map(row => [...row]) : Array.from({ length: 50 }, () => Array(50).fill(''));
+		const styles = duplicate ? this.styles.map(row => row.map(style => ({ ...style }))) : rows.map(row => row.map(() => ({ ...this.defaultStyling })));
+		this.workbook.sheets = [...this.sheets, { name, rows, styles, selRow: 0, selCol: 0 }];
+		this.switchSheet(this.sheets.length);
+		historyManager.reset(this);
+	}
+
+	rewriteSheetReferences(oldName, newName) {
+		const transform = text => rewriteSheetReferences(text, oldName, newName);
+		for (const sheet of this.sheets) {
+			sheet.rows = sheet.rows.map(row => row.map(transform));
+			historyManager.rewrite(sheet, transform);
+		}
+	}
+
+	renameSheet(name) {
+		name = this.validateSheetName(name, this.activeSheet);
+		this.rewriteSheetReferences(this.activeSheet.name, name);
+		this.activeSheet.name = name;
+		this.workbook.sheets = [...this.sheets];
+		this.recalculate();
+	}
+
+	moveSheet(position) {
+		const index = this.sheetIndex(position), sheets = [...this.sheets], active = this.activeSheet;
+		sheets.splice(this.workbook.activeSheetIndex, 1);
+		sheets.splice(index, 0, active);
+		this.workbook.sheets = sheets;
+		this.workbook.activeSheetIndex = index;
+	}
+
+	deleteSheet(target = this.workbook.activeSheetIndex + 1, force = false) {
+		if (this.sheets.length === 1) throw new Error('Cannot delete the last sheet');
+		const index = this.sheetIndex(target), removed = this.sheets[index], active = this.activeSheet;
+		const referenced = this.sheets.some(sheet => sheet !== removed && sheet.rows.some(row => row.some(text =>
+			rewriteSheetReferences(text, removed.name, null) !== text)));
+		const hasData = removed.rows.some(row => row.some(value => value !== '' && value != null));
+		const hasStyles = removed.styles.some(row => row.some(style => style.fg !== this.defaultStyling.fg || style.bg !== this.defaultStyling.bg));
+		if (!force && (hasData || hasStyles || referenced)) throw new Error('Sheet has data, styles, or references; use :sheetdelete! to delete it permanently');
+		this.rewriteSheetReferences(removed.name, null);
+		this.workbook.sheets = this.sheets.filter(sheet => sheet !== removed);
+		this.switchSheet(active === removed ? Math.min(index + 1, this.sheets.length) : this.sheets.indexOf(active) + 1);
+	}
+
+	serializeWorkbook() {
+		return { version: 2, activeSheet: this.workbook.activeSheetIndex, sheets: this.sheets.map(({ name, rows, styles }) => ({ name, rows, styles })) };
+	}
+
+	loadWorkbook(data, path = null) {
+		// Validate the whole file before replacing any existing work. Both legacy layouts remain readable.
+		const source = Array.isArray(data) ? [{ rows: data }] : data?.sheets ?? [data];
+		if (!Array.isArray(source) || !source.length) throw new Error('Invalid workbook: at least one sheet is required');
+		const names = new Set();
+		const sheets = source.map((sheet, index) => {
+			const name = sheet?.name ?? `Sheet${index + 1}`, rows = sheet?.rows;
+			if (typeof name !== 'string' || !name.trim() || /[\x00-\x1f\x7f]/.test(name) || names.has(name.trim().toLowerCase())) throw new Error('Invalid workbook: sheet names must be non-empty and unique');
+			names.add(name.trim().toLowerCase());
+			if (!Array.isArray(rows) || !rows.length || !Array.isArray(rows[0]) || !rows[0].length || rows.some(row => !Array.isArray(row) || row.length !== rows[0].length || row.some(value => typeof value !== 'string' && typeof value !== 'number'))) throw new Error(`Invalid cell grid in ${name}`);
+			const styles = sheet.styles;
+			if (styles != null && (!Array.isArray(styles) || styles.length !== rows.length || styles.some((row, r) => !Array.isArray(row) || row.length !== rows[r].length || row.some(style => !style || typeof style !== 'object' || Array.isArray(style))))) throw new Error(`Invalid styles in ${name}`);
+			return { name: name.trim(), rows: rows.map(row => row.map(String)), styles: rows.map((row, r) => row.map((_, c) => ({ ...this.defaultStyling, ...styles?.[r]?.[c] }))), selRow: 0, selCol: 0 };
+		});
+		const active = data?.activeSheet ?? 0;
+		if (!Number.isInteger(active) || active < 0 || active >= sheets.length) throw new Error('Invalid active sheet');
+		this.workbook.sheets = sheets;
+		this.path = path;
+		this.switchSheet(active + 1);
+		for (const sheet of sheets) historyManager.reset(sheet);
 	}
 
 	clearScreen() {
@@ -531,11 +652,14 @@ export default class SheetManager {
 		const blocked = new Set();
 		try {
 			for (let attempt = 0; ; attempt++) {
-				const pass = new CalcPass(this, blocked);
+				const session = { passes: new Map(), stack: new Map(), probes: [] };
+				const pass = new CalcPass(this, blocked, session);
 				this.pass = pass;
 				const result = fn(pass);
-				const broken = pass.verify();
-				if (!broken.length || attempt > pass.formulaCells.length) return result;
+				const broken = [];
+				for (const other of session.passes.values()) broken.push(...other.verify());
+				const count = [...session.passes.values()].reduce((n, other) => n + other.formulaCells.length, 0);
+				if (!broken.length || attempt > count) return result;
 				broken.forEach(key => blocked.add(key));
 			}
 		} finally {

@@ -1,23 +1,35 @@
 export default class HistoryManager {
 	constructor() {
 		if (HistoryManager.instance) return HistoryManager.instance;
-		this._undo = []; this._redo = []; this.maxLength = 50;
+		this.histories = new WeakMap(); this.maxLength = 50;
 		HistoryManager.instance = this;
 	}
-	reset(sheetManager) { this._undo = []; this._redo = []; this.do(sheetManager); }
+	historyFor(sheetManager) {
+		const sheet = sheetManager.activeSheet ?? sheetManager;
+		if (!this.histories.has(sheet)) this.histories.set(sheet, { undo: [], redo: [] });
+		return this.histories.get(sheet);
+	}
+	reset(sheetManager) { const history = this.historyFor(sheetManager); history.undo = []; history.redo = []; this.do(sheetManager); }
 	do(sheetManager) {
+		const history = this.historyFor(sheetManager);
 		const state = { rows: sheetManager.rows.map(row => [...row]), styles: sheetManager.styles.map(row => row.map(style => ({ ...style }))) };
-		if (JSON.stringify(this._undo.at(-1)) === JSON.stringify(state)) return;
-		this._undo.push(state); this._redo = [];
-		if (this._undo.length > this.maxLength) this._undo.shift();
+		if (JSON.stringify(history.undo.at(-1)) === JSON.stringify(state)) return;
+		history.undo.push(state); history.redo = [];
+		if (history.undo.length > this.maxLength) history.undo.shift();
 	}
 	undo(sheetManager, amount = 1) {
-		while (amount-- > 0 && this._undo.length > 1) this._redo.push(this._undo.pop());
-		if (this._undo.length) this.loadState(sheetManager, this._undo.at(-1));
+		const history = this.historyFor(sheetManager);
+		while (amount-- > 0 && history.undo.length > 1) history.redo.push(history.undo.pop());
+		if (history.undo.length) this.loadState(sheetManager, history.undo.at(-1));
 	}
 	redo(sheetManager, amount = 1) {
-		while (amount-- > 0 && this._redo.length) this._undo.push(this._redo.pop());
-		if (this._undo.length) this.loadState(sheetManager, this._undo.at(-1));
+		const history = this.historyFor(sheetManager);
+		while (amount-- > 0 && history.redo.length) history.undo.push(history.redo.pop());
+		if (history.undo.length) this.loadState(sheetManager, history.undo.at(-1));
+	}
+	rewrite(sheet, transform) {
+		const history = this.historyFor(sheet);
+		for (const state of [...history.undo, ...history.redo]) state.rows = state.rows.map(row => row.map(transform));
 	}
 	loadState(sheetManager, state) {
 		sheetManager.rows = state.rows.map(row => [...row]);

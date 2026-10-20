@@ -11,6 +11,54 @@ DataFlow translates Neovim's motion vocabulary into two contexts. It is not an e
 
 Type directly with the spreadsheet focused; there is no bottom input field. The read-only footer displays typed commands, pending keys and messages. It shows contextual shortcuts, including valid continuations after a prefix and Lua mapping descriptions. Click a cell or the footer to return focus to the workspace. Native inputs, file dialogs and editable controls receive their own keys. Uppercase keys mean Shift plus the letter. `<C-x>` below means Ctrl-x, and `<CR>` means Enter.
 
+### Multiple sheets in one file
+
+Each `.dflo` file is a workbook. The footer lists its numbered sheets and highlights the active one. Type a command followed by Enter:
+
+| Command | Action |
+| --- | --- |
+| `:sheetnew [name]` | Create and switch to a blank 50 × 50 sheet; omitted names use the next available Sheet1, Sheet2, … |
+| `:sheetrename name` | Rename the current sheet and update references throughout the workbook |
+| `:sheet name` / `:sheet 2` | Switch by name or one-based sheet number |
+| `:sheetnext` / `:sheetprev` | Switch to the next/previous sheet, wrapping at the ends |
+| `:sheets` / `:sheet` | List numbered sheets; `*` marks the active sheet |
+| `:sheetduplicate [name]` | Copy the current sheet's stored formulae and styles into a new sheet; explicit sheet references still point to their original targets |
+| `:sheetmove 2` | Move the current sheet to this one-based position |
+| `:sheetdelete [name or number]` | Delete the target (current sheet if omitted), only if it is empty, unstyled, and unreferenced |
+| `:sheetdelete! [name or number]` | Permanently delete even a populated/referenced sheet; references to it become `#REF!`. The last sheet cannot be deleted |
+
+Names are case-insensitively unique and may contain spaces: `:sheetnew Sales 2026`, then `:sheet Sales 2026`. Use the whole name without surrounding quotes in commands. All-digit switch/delete arguments mean sheet numbers. Invalid names, targets, and positions leave the workbook unchanged.
+
+Each sheet retains its cursor position, dimensions, data, styling, and separate undo/redo history while switching. Switching resets marks, jumps, searches, and visual selections so they cannot accidentally target another sheet. Registers, macros, mappings, and repeat edits remain session-wide; yanking on one sheet and putting on another works. Sheet creation, renaming, reordering, and deletion are not undone by `u`; rename/delete also update stored references in cell undo histories. `:clear` clears only the current sheet and resets its navigation and undo history.
+
+`:w` saves **all sheets**, their names, styles, and the active sheet; `:wa` saves the workbook as another file. Browser saves download the same workbook format as desktop saves. `:o` still reads old single-sheet `{rows, styles}` `.dflo` files and rows-only JSON arrays (including `.heff` files); each becomes Sheet1 with default styling where absent. Saving upgrades to the workbook format; older app versions do not understand new workbook files. Invalid files do not replace the current workbook.
+
+### Cross-sheet formula references
+
+Unqualified references still address the sheet containing the formula. Add a sheet name and `!` to read another sheet, using the existing zero-based row labels:
+
+```text
+=Sheet2!A0 + A0
+=SUM('Sales 2026'!B0:B5)
+=FILTER('Sales 2026'!A0:C5, 'Sales 2026'!C0:C5 > 0)
+=Sheet2![-1]{-2}
+=CHART().bar().series('Sales 2026'!B0:B5).x('Sales 2026'!A0:A5)
+```
+
+Bare sheet names use letters, digits, and underscores, starting with a letter or underscore. Single-quote other names; double an apostrophe inside a name (`'O''Brien'!A0`). Names match case-insensitively. A range's prefix applies to both endpoints (`Sheet2!A0:B5`); ranges spanning several sheets are not supported. Relative coordinates use the formula cell's row/column as origin on the target sheet; calculations inside those coordinates also read that target sheet.
+
+Cross-sheet references support arithmetic, functions, ranges, spill sources/children, and charts, and recalculate when their source changes. Missing sheets or out-of-bounds references produce `#REF!`; circular dependencies are detected across sheets, including chart/spill dependencies. Renaming a sheet rewrites its references without changing quoted text or chart titles. Deleting a sheet invalidates its references permanently, even if a new sheet later reuses its name. Formula references are colored; foreign references do not outline unrelated cells in the current grid. F4 preserves the sheet qualifier when toggling absolute/relative notation.
+
+Every sheet command can be mapped with the existing Lua API. Include `<CR>` to run immediately; omit it to leave a command ready for a name:
+
+```lua
+vim.keymap.set({ "n", "f" }, "]s", ":sheetnext<CR>", { desc = "Next sheet" })
+vim.keymap.set({ "n", "f" }, "[s", ":sheetprev<CR>", { desc = "Previous sheet" })
+vim.keymap.set("n", "<Leader>sn", ":sheetnew<CR>", { desc = "New sheet" })
+vim.keymap.set("n", "<Leader>sr", ":sheetrename ", { desc = "Rename sheet" })
+vim.keymap.set("n", "<Leader>ss", ":sheet ", { desc = "Switch sheet" })
+```
+
 ### Formula insert assistance
 
 - **Ctrl-h/j/k/l** starts a reference next to the edited cell, using DataFlow-relative notation (e.g. `[-1]{}`). Consecutive shortcuts adjust the same reference. Typing or moving the text caret ends that reference session.
@@ -158,6 +206,6 @@ Reload is atomic: syntax/runtime/API errors keep the previous mappings active an
 
 Coverage follows the families in [Neovim motion.txt](https://neovim.io/doc/user/motion.html), with the spreadsheet translations above. It does **not** claim byte-for-byte Neovim parity. Searches use JavaScript Unicode regular expressions, not Vim regex syntax or search offsets. Text motions count Unicode code points, not grapheme clusters or tab-expanded screen columns. Formula section/method/comment/tag/bracket navigation is lexical, without language parsing, nroff macros, configurable matchpairs, or matchit. Marks are session-local; uppercase marks do not open other files and numbered ShaDa marks are unavailable.
 
-Definition/declaration and tag motions (`gd/gD`, Ctrl-], `g]`, `g<C-]>`, Ctrl-t), file/include navigation (`gf`, `gF`, Ctrl-w variants, `[i/]i`), folds (`zj/zk`), diff (`[c/]c`), diagnostics (`[d/]d`), quickfix/location lists and window/buffer switching have no backing subsystem in this single-sheet app. They are not silently redirected to unrelated cells. Neovim Select mode, named/numbered registers, arbitrary operators (`gq`, `=`, shell filters, folds), Ex ranges/scripts and full insert/replace-mode command parity are outside this implementation.
+Definition/declaration and tag motions (`gd/gD`, Ctrl-], `g]`, `g<C-]>`, Ctrl-t), file/include navigation (`gf`, `gF`, Ctrl-w variants, `[i/]i`), folds (`zj/zk`), diff (`[c/]c`), diagnostics (`[d/]d`), quickfix/location lists and Neovim window/buffer switching have no backing subsystem. Use the sheet commands above to switch workbook sheets. Unsupported motions are not silently redirected to unrelated cells. Neovim Select mode, named/numbered registers, arbitrary operators (`gq`, `=`, shell filters, folds), Ex ranges/scripts and full insert/replace-mode command parity are outside this implementation.
 
 Run `npm test` for the keyboard/Lua contract tests, `npm run build` for the frontend, and `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib` for native config-file creation/reload tests.

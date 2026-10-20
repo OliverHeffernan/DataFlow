@@ -42,7 +42,15 @@ export default class CheckCommand {
 	focus() { document.getElementById('app').focus({ preventScroll: true }); }
 	get footerHeight() { return document.getElementById('statusBar')?.offsetHeight ?? 24; }
 	syncSize() { this.sheet.numOfRows.value = this.sheet.rows.length; this.sheet.numOfCols.value = this.sheet.rows[0].length; }
-	newSheet() { this.keyboard.resetNavigation(); this.history.reset(this.sheet); this.renderedRow = null; this.render(); }
+	async newSheet(resetHistory = true, keepCursor = false) {
+		const point = { row: this.sheet.selRow, col: this.sheet.selCol };
+		this.keyboard.resetNavigation();
+		if (keepCursor) this.keyboard.move(point);
+		if (resetHistory) this.history.reset(this.sheet);
+		this.sheet.recalculate(); this.renderedRow = null;
+		await this.render();
+		this.sheet.loadStyles();
+	}
 
 	async render() {
 		const keyboard = this.keyboard;
@@ -286,14 +294,42 @@ export default class CheckCommand {
 		} catch (error) { this.setPhMessage(`init.lua: ${error.message}`); }
 	}
 
+	async sheetCommand(action, argument, force) {
+		if (force && action !== 'sheetdelete') throw new Error('Only :sheetdelete accepts !');
+		if (['sheets', 'sheetnext', 'sheetprev'].includes(action) && argument) throw new Error(`:${action} takes no arguments`);
+		if (action === 'sheets' || (action === 'sheet' && !argument)) {
+			this.setPhMessage(this.sheet.sheets.map((sheet, i) => `${i === this.sheet.workbook.activeSheetIndex ? '*' : ''}${i + 1}: ${sheet.name}`).join(' · '));
+			return;
+		}
+		const before = this.sheet.activeSheet;
+		switch (action) {
+			case 'sheetnew': this.sheet.createSheet(argument || undefined); break;
+			case 'sheetduplicate': this.sheet.createSheet(argument || this.sheet.unusedSheetName(`${before.name} copy `), true); break;
+			case 'sheetrename': this.sheet.renameSheet(argument); break;
+			case 'sheet': this.sheet.switchSheet(argument); break;
+			case 'sheetnext': case 'sheetprev':
+				this.sheet.switchSheet((this.sheet.workbook.activeSheetIndex + (action === 'sheetnext' ? 1 : -1) + this.sheet.sheets.length) % this.sheet.sheets.length + 1); break;
+			case 'sheetmove':
+				if (!/^\d+$/.test(argument || '')) throw new Error('Usage: :sheetmove <one-based position>');
+				this.sheet.moveSheet(Number(argument)); break;
+			case 'sheetdelete': this.sheet.deleteSheet(argument || undefined, Boolean(force)); break;
+		}
+		new LaunchManager().hide();
+		if (before !== this.sheet.activeSheet) await this.newSheet(false, true);
+		else { this.sheet.recalculate(); await this.render(); this.sheet.loadStyles(); }
+		this.setPhMessage(`Sheet ${this.sheet.workbook.activeSheetIndex + 1}/${this.sheet.sheets.length}: ${this.sheet.activeSheet.name}`);
+	}
+
 	async handleEnterFromCom(command) {
 		try {
+			const sheetCommand = command.trim().match(/^:(sheets|sheetnew|sheetduplicate|sheetrename|sheetnext|sheetprev|sheetmove|sheetdelete|sheet)(!?)(?:\s+(.*))?$/);
+			if (sheetCommand) return await this.sheetCommand(sheetCommand[1], sheetCommand[3]?.trim(), sheetCommand[2]);
 			const files = new FileManager(() => this.newSheet());
 			if ([':config', ':configload', ':configcreate', ':source', ':configreload'].includes(command)) await this.configCommand(command);
-			else if (command === ':w') await files.saveFile();
-			else if (command === ':wa') await files.saveFile(true);
-			else if (command === ':o') { await files.openFile(); new LaunchManager().hide(); }
-			else if (command === ':clear') { this.sheet.clearScreen(); this.newSheet(); new LaunchManager().hide(); }
+			else if (command === ':w') return await files.saveFile();
+			else if (command === ':wa') return await files.saveFile(true);
+			else if (command === ':o') { await files.openFile(); new LaunchManager().hide(); return; }
+			else if (command === ':clear') { this.sheet.clearScreen(); await this.newSheet(); new LaunchManager().hide(); return; }
 			else if (command === ':forceloadstyles') this.sheet.loadStyles();
 			else if (command === ':resetallstyles') this.sheet.resetAllStyles();
 			else if (command.startsWith(':hi ')) this.sheet.setStyles(command, this.sheet.selRow, this.sheet.selCol);

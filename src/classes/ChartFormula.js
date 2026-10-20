@@ -1,6 +1,4 @@
-import Formulas from "./FormulaFunctions.js";
-
-const formulas = new Formulas();
+import { referenceSpans, resolveReference, toCellValue } from "./FormulaFunctions.js";
 
 // Read only builder calls and their arguments, never executable JavaScript.
 function calls(source) {
@@ -13,17 +11,18 @@ function calls(source) {
 		rest = rest.slice(method[0].length);
 		const args = [];
 		const stack = [];
-		let quoted = false;
+		let quoted = null;
 		let start = 0;
 		let end = -1;
 		for (let i = 0; i < rest.length; i++) {
 			const char = rest[i];
 			if (quoted) {
 				if (char === "\\") i++;
-				else if (char === '"') quoted = false;
+				else if (char === "'" && quoted === "'" && rest[i + 1] === "'") i++;
+				else if (char === quoted) quoted = null;
 				continue;
 			}
-			if (char === '"') quoted = true;
+			if (char === '"' || char === "'") quoted = char;
 			else if ("([{".includes(char)) stack.push(char);
 			else if (char === ")" && stack.length === 0) {
 				const arg = rest.slice(start, i).trim();
@@ -66,7 +65,7 @@ function number(value, label) {
 	return Number(value);
 }
 
-export function evaluateChart(source, row, col, sheet) {
+export function evaluateChart(source, row, col, ctx) {
 	const chart = {
 		kind: "chart", type: null, width: 320, height: 200,
 		position: { x: 0, y: 0 }, title: "", xLabel: "", yLabel: "", series: [],
@@ -104,29 +103,22 @@ export function evaluateChart(source, row, col, sheet) {
 
 	function range(arg) {
 		// Resolve references only in range arguments, never inside titles or names.
-		let ref = formulas.replaceVariables(arg, row, col);
-		ref = formulas.evaluateRefCalcs(ref, sheet);
-		ref = formulas.evaluateLetterRefCalcs(ref, sheet).replace(/\s/g, "");
-		const match = ref.match(/^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/);
-		if (!match) throw new Error(`Invalid range: ${arg}`);
-		const column = letters => [...letters].reduce((value, char) => value * 26 + char.charCodeAt(0) - 64, 0) - 1;
-		const c0 = column(match[1]);
-		const r0 = Number(match[2]);
-		const c1 = column(match[3] ?? match[1]);
-		const r1 = Number(match[4] ?? match[2]);
+		const span = referenceSpans(arg)[0];
+		if (!span || span.start !== 0 || span.end !== arg.length) throw new Error(`Invalid range: ${arg}`);
+		if (span.prefix === '#REF!') throw new Error('Referenced sheet was deleted');
+		const target = span.sheetName === undefined ? ctx : ctx.sheet(span.sheetName);
+		const { r0, c0, r1, c1 } = resolveReference(span.reference, row, col, target);
 		if (r1 < r0 || c1 < c0 || (r0 !== r1 && c0 !== c1)) {
 			throw new Error(`Use a single row or column in ascending order: ${arg}`);
 		}
-		if (r1 >= sheet.rows.length || c1 >= sheet.rows[0].length) throw new Error(`Range outside sheet: ${arg}`);
-		const values = [];
-		for (let r = r0; r <= r1; r++) {
-			for (let c = c0; c <= c1; c++) {
-				const value = sheet.getElementValue(r, c);
-				if (value?.kind === "chart") throw new Error("A chart cannot be used as chart data");
-				values.push(value);
-			}
+		try {
+			const values = [];
+			for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) values.push(toCellValue(target.element(r, c)));
+			return values;
+		} catch (error) {
+			if (error.message === '#REF!') throw new Error(`Range outside sheet: ${arg}`);
+			throw error;
 		}
-		return values;
 	}
 
 	for (const [i, series] of chart.series.entries()) {
