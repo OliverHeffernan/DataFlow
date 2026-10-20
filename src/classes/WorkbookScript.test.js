@@ -27,7 +27,8 @@ function run(source, request = capture()) {
 test('cross-sheet exact reads, read-your-writes and dataset growth publish as one chronological undo', () => {
 	sheet.workbook.acceptedMetadata = { preserve: ['workbook'] };
 	sheet.sheets[1].acceptedMetadata = { preserve: ['sheet'] };
-	sheet.sheets[1].styles[0][1] = { fg: 'orange', bg: 'navy' };
+	sheet.styles[0][0] = { fg: 'white', bg: 'transparent', formatKind: 'number', formatDigits: 3, formatGroup: true };
+	sheet.sheets[1].styles[0][1] = { fg: 'orange', bg: 'navy', formatKind: 'currency', formatDigits: 3, formatCurrency: 'USD' };
 	sheet.rows[2][0] = 'amount'; sheet.rows[3][0] = '';
 	sheet.setMark('sales', { r0: 2, c0: 0, r1: 2, c1: 0 }, 'dataset');
 	const before = content();
@@ -44,7 +45,9 @@ df.log(df.sheet('Report'):range('C2'):read_values()[1][1].decimal)
 	assert.equal(sheet.describeDataset('sales').rowCount, 1);
 	assert.deepEqual(sheet.workbook.acceptedMetadata, { preserve: ['workbook'] });
 	assert.deepEqual(sheet.sheets[1].acceptedMetadata, { preserve: ['sheet'] });
-	assert.deepEqual(sheet.sheets[1].styles[0][1], { fg: 'orange', bg: 'navy' });
+	assert.deepEqual(sheet.sheets[1].styles[0][1], { fg: 'orange', bg: 'navy', formatKind: 'currency', formatDigits: 3, formatCurrency: 'USD' });
+	assert.equal(sheet.cellPresentation.value[0][0].text, '9,007,199,254,740,993.125');
+	for (const field of ['cellPresentation', 'formatPreview', 'calculated', 'typed']) assert.equal(Object.hasOwn(sheet.serializeWorkbook(), field), false);
 	assert.equal(sheet.path, '/keep.dflo');
 	history.undo(sheet); assert.deepEqual(JSON.parse(content()), JSON.parse(before));
 	history.redo(sheet); assert.equal(sheet.describeDataset('sales').rowCount, 1);
@@ -96,6 +99,11 @@ test('navigation during a job preserves current sheet/cursor/cache; stale edits 
 	const aborted = new AbortController(); aborted.abort();
 	assert.throws(() => publishWorkbookScript(sheet, capture(), result, aborted.signal), { name: 'AbortError' });
 	assert.equal(content(), before);
+	const beforeFormat = capture();
+	sheet.styles[0][0].formatKind = 'number'; sheet.styles[0][0].formatDigits = 6;
+	const formatted = content();
+	assert.throws(() => publishWorkbookScript(sheet, beforeFormat, result), /Workbook changed/);
+	assert.equal(content(), formatted);
 });
 
 test('spill owners/children and dataset headers remain protected across ordered batches', () => {

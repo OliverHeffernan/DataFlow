@@ -1,7 +1,8 @@
-import { ref, shallowRef, shallowReactive } from "vue";
+import { ref, shallowRef, shallowReactive, toDisplayString } from "vue";
 //import { reactive } from "vue";
 import { FormulaError, cellLabel, cellToValue, evaluateFormula, toCellValue, rewriteSheetReferences, rewriteMarkReferences } from "./FormulaFunctions.js";
 import { markName, datasetColumns, validateMarks, structuralMarks } from './WorkbookMarks.js';
+import { presentCell } from './CellFormatting.js';
 import SyntaxHighlighting from "./SyntaxHighlighting.js";
 import { evaluateChart } from "./ChartFormula.js";
 
@@ -339,6 +340,7 @@ class CalcPass {
 
 	snapshot() {
 		const values = this.rows.map(row => (row ?? []).map(raw => raw ?? ""));
+		const typed = values.map(row => row.map(cellToValue));
 		const spills = new Map();
 		const errors = new Map();
 		for (const [row, col] of this.formulaCells) {
@@ -348,26 +350,30 @@ class CalcPass {
 				value = this.result(row, col);
 			} catch (error) {
 				values[row][col] = errorText(error);
+				typed[row][col] = null;
 				errors.set(key, explain(error));
 				continue;
 			}
 			if (!Array.isArray(value)) {
 				values[row][col] = toCellValue(value);
+				typed[row][col] = value;
 				continue;
 			}
 			const state = this.spillState(row, col);
 			if (!state.ok) {
 				values[row][col] = "#SPILL!";
+				typed[row][col] = null;
 				errors.set(key, state.reason);
 				continue;
 			}
 			const owner = { row, col, rows: state.rows, cols: state.cols };
 			value.forEach((line, i) => line.forEach((element, j) => {
 				values[row + i][col + j] = toCellValue(element);
+				typed[row + i][col + j] = element;
 				spills.set(keyOf(row + i, col + j), { ...owner });
 			}));
 		}
-		return { values, spills, errors };
+		return { values, typed, spills, errors };
 	}
 }
 
@@ -380,6 +386,8 @@ export default class SheetManager {
 
 		this.workbook = shallowReactive({ sheets: [{ name: 'Sheet1', rows: [], styles: [], selRow: 0, selCol: 0 }], activeSheetIndex: 0, marks: [] });
 		this.cellValues = shallowRef([]);
+		this.cellPresentation = shallowRef([]);
+		this.formatPreview = null;
 		// derived by recalculate(): "row:col" -> { row, col, rows, cols } of the array formula spilling there
 		this.spillCells = new Map();
 		// derived by recalculate(): "row:col" -> readable explanation of the error shown in that cell
@@ -648,7 +656,7 @@ export default class SheetManager {
 		const referenced = this.sheets.some(sheet => sheet !== removed && sheet.rows.some(row => row.some(text =>
 			rewriteSheetReferences(text, removed.name, null) !== text)));
 		const hasData = removed.rows.some(row => row.some(value => value !== '' && value != null));
-		const hasStyles = removed.styles.some(row => row.some(style => style.fg !== this.defaultStyling.fg || style.bg !== this.defaultStyling.bg));
+		const hasStyles = removed.styles.some(row => row.some(style => Object.entries(style).some(([key, value]) => value !== this.defaultStyling[key])));
 		const owned = this.marks.filter(mark => mark.sheetName === removed.name);
 		if (!force && (hasData || hasStyles || referenced || owned.length)) throw new Error('Sheet has data, styles, or references; use :sheetdelete! to delete it');
 		for (const mark of owned) this.rewriteMark(mark.name, null);
@@ -671,6 +679,8 @@ export default class SheetManager {
 		draft.workbook = { ...workbook, activeSheetIndex: activeSheet };
 		draft.pass = null;
 		draft.cellValues = { value: [] };
+		draft.cellPresentation = { value: [] };
+		draft.formatPreview = null;
 		draft.spillCells = new Map();
 		draft.cellErrors = new Map();
 		return draft;
@@ -810,30 +820,8 @@ export default class SheetManager {
 	}
 
 	resetAllStyles() {
-		const cols = this.numOfCols.value;
-		const rows = this.numOfRows.value;
-		//for (let x = 0; x < cols; x++) {
-		//for (let y = 0; y < rows; y++) {
-		//this.resetStyles(x, y);
-		//}
-		//}
-
-		let styleRow = [];
-		let styles = [];
-		for (let i = 0; i < cols; i++) {
-			//styleRow.push(this.defaultStyling);
-			styleRow.push({
-				fg: this.defaultStyling.fg,
-				bg: this.defaultStyling.bg,
-			});
-		}
-
-		for (let p = 0; p < rows; p++) {
-			styles.push(styleRow);
-		}
-
-		this.styles = styles;
-
+		// Existing highlight resets affect colours, not number formats or layout metadata.
+		this.styles = this.styles.map(row => row.map(style => ({ ...style, ...this.defaultStyling })));
 		this.loadStyles();
 		historyManager.do(this, 141);
 	}
@@ -930,13 +918,24 @@ export default class SheetManager {
 		return this.installCalculation(this.runPass(pass => pass.snapshot()));
 	}
 
-	installCalculation({ values, spills, errors }) {
+	installCalculation({ values, typed, spills, errors }) {
 		this.spillCells.clear();
 		spills.forEach((value, key) => this.spillCells.set(key, value));
 		this.cellErrors.clear();
 		errors.forEach((value, key) => this.cellErrors.set(key, value));
 		this.cellValues.value = values;
+		this.calculated = { sheet: this.activeSheet, typed };
+		this.refreshPresentation();
 		return values;
+	}
+
+	refreshPresentation() {
+		const preview = this.formatPreview?.sheet === this.activeSheet ? this.formatPreview.styles : null;
+		this.cellPresentation.value = this.cellValues.value.map((row, r) => row.map((legacy, c) => {
+			const value = this.calculated?.typed[r]?.[c];
+			const text = toDisplayString(legacy);
+			return { value, ...(this.cellErrors.has(keyOf(r, c)) ? { text, warning: '' } : presentCell(value, preview?.get(keyOf(r, c)) ?? this.styles[r]?.[c], text)) };
+		}));
 	}
 
 	// DOM-free, raw-content-atomic edit on the active sheet. Writes require raw string values
