@@ -70,6 +70,7 @@ function focusFormulaBar() {
 	color: white;
 	display: flex;
 	z-index: 40;
+	padding: 0;
 }
 
 .cell-picker {

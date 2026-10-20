@@ -84,9 +84,8 @@
 #commandLine:empty::before { content: attr(data-message); color: #9aaec3; }
 #commandLine.typing-command::after { content: '▏'; color: #75e2bc; }
 #modeDisplay { flex-shrink: 0; color: #75e2bc; font-size: 11px; white-space: nowrap; }
-#shortcutBar { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 7px 12px; border-top: 1px solid #213247; max-height: 25vh; overflow: auto; }
+#shortcutBar { display: flex; flex-wrap: nowrap; gap: 8px 20px; padding: 7px 12px; border-top: 1px solid #213247;  overflow: hidden; }
 .shortcut { display: inline-flex; align-items: center; gap: 7px; color: #9aaec3; white-space: nowrap; }
-kbd { color: #dbe6f3; font: inherit; }
 .shortcut kbd { color: #9fd6ff; }
 
 #webFileUpload {

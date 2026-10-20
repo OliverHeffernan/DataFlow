@@ -61,32 +61,32 @@ onUnmounted(() => window.removeEventListener('pointerdown', outside, true));
 .format-control { flex: 0 1 auto; align-self: flex-start; min-width: 0; max-width: 45%; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 button, input { color: inherit; font: inherit; }
 button { cursor: pointer; }
-.format-badge { display: flex; align-items: center; gap: 10px; max-width: min(340px, calc(100% - 12px)); min-height: 26px; margin: 3px 6px; padding: 3px 10px; border: 1px solid #38516b; border-radius: 7px; color: #dbe6f3; background: #1b3045; }
+.format-badge { display: flex; align-items: center; gap: 10px; height: 32px; margin: 0; padding: 3px 10px; border: 1px solid #38516b; border-radius: 0; color: #dbe6f3; background: #1b3045; }
 .format-badge > span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .format-badge.open, .format-badge:hover { border-color: #79a9ce; background: #223e57; }
 .format-badge:disabled { opacity: .45; cursor: default; }
 kbd { flex-shrink: 0; display: inline-block; border: 1px solid #3a526a; border-radius: 4px; padding: 0 5px; font: inherit; color: #b3cfe6; background: #21364b; white-space: nowrap; }
-.format-panel { position: absolute; top: calc(var(--pane-formula-height, 36px) + 6px); right: 6px; width: min(420px, calc(100% - 12px)); max-height: max(0px, calc(100% - var(--pane-formula-height, 36px) - 40px)); overflow-y: auto; box-sizing: border-box; padding: 16px; border: 1px solid #4c6c89; border-radius: 10px; color: #dbe6f3; background: #142233; box-shadow: 0 12px 32px #0008; }
+.format-panel { position: absolute; top: calc(var(--pane-formula-height, 36px) + 6px); right: 6px; width: min(420px, calc(100% - 12px)); max-height: max(0px, calc(100% - var(--pane-formula-height, 36px) - 40px)); overflow-y: auto; box-sizing: border-box; padding: 16px; border: 1px solid #4c6c89; color: #dbe6f3; background: #142233; box-shadow: 0 12px 32px #0008; }
 header { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid #2c4157; }
 header strong { font-size: 18px; font-weight: 500; }
 header span, .preview-note, .format-note { color: #97b5d0; }
 .format-rows { padding: 9px 0; }
-.format-row { border: 1px solid transparent; border-radius: 6px; margin: 4px -5px; padding: 3px; }
+.format-row { border: 1px solid transparent; margin: 4px -5px; padding: 3px; }
 .format-row.selected { border-color: #577f9f; background: #1a3044; }
 .format-setting { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px; background: none; border: 0; padding: 3px; text-align: left; }
 .setting-label { flex: 0 0 42%; }
-.setting-value { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: 1; min-width: 0; overflow-wrap: anywhere; padding: 6px 8px; border: 1px solid #3a526a; border-radius: 5px; background: #101d2b; }
+.setting-value { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: 1; min-width: 0; overflow-wrap: anywhere; padding: 6px 8px; border: 1px solid #3a526a; background: #101d2b; }
 .setting-value kbd { margin-left: auto; }
 .type-row { margin-bottom: 12px; }
 .digit-controls { display: flex; justify-content: flex-end; gap: 6px; margin: 3px; }
-.digit-controls button { background: #223a50; border: 1px solid #3a526a; border-radius: 4px; padding: 1px 7px; }
-.format-options { margin: 6px 3px 2px; border: 1px solid #486884; border-radius: 6px; overflow: hidden; }
+.digit-controls button { background: #223a50; border: 1px solid #3a526a; padding: 1px 7px; }
+.format-options { margin: 6px 3px 2px; border: 1px solid #486884; overflow: hidden; }
 .format-options button { width: 100%; display: flex; justify-content: space-between; border: 0; background: #101d2b; padding: 6px 10px; text-align: left; }
 .format-options button.chosen { background: #2b4c63; color: #90f0d0; }
 .format-input { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 3px; }
-.format-input input { width: 0; min-width: 90px; flex: 1; padding: 6px; border: 1px solid #75e2bc; border-radius: 4px; background: #0d1926; outline: none; caret-color: #75e2bc; }
+.format-input input { width: 0; min-width: 90px; flex: 1; padding: 6px; border: 1px solid #75e2bc; background: #0d1926; outline: none; caret-color: #75e2bc; }
 .format-input input.replacing { color: #90f0d0; }
-.format-input button { background: #223a50; border: 1px solid #3a526a; border-radius: 4px; }
+.format-input button { background: #223a50; border: 1px solid #3a526a; }
 .format-input small { flex-basis: 100%; color: #97b5d0; }
 .preview-note { margin: 10px 0; font-size: 11px; }
 .format-note { font-size: 11px; margin: 6px 0; }

@@ -49,13 +49,12 @@
 
 <style>
 #app {
-	font-family: Avenir, Helvetica, Arial, sans-serif;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
 	color: #2c3e50;
 	background-color: #091119;
 	outline: none;
-	scrollbar-color: red orange;
 }
 
 body {
@@ -74,6 +73,11 @@ body {
 	background: #1E2227;
 	border: 2px #28374A solid;
 	border-radius: 5px;
+}
+
+html {
+	scrollbar-color: #1E2227 #0A0C0F;
+	scrollbar-width: thin;
 }
 
 table {
@@ -119,4 +123,6 @@ table {
 	top: 0;
 	background-color: #091119;
 }
+
+kbd { flex-shrink: 0; display: inline-block; border: 1px solid #3a526a; border-radius: 4px; padding: 0 5px; font: inherit; color: #b3cfe6; background: #21364b; white-space: nowrap; }
 </style>

@@ -30,7 +30,7 @@ const names = { '<CR>': 'Enter', '<Esc>': 'Esc', '<Tab>': 'Tab', '<F4>': 'F4', '
 const label = keys => {
 	const group = keys.join('');
 	if (group === '<C-h><C-j><C-k><C-l>') return 'Ctrl H J K L';
-	if (group === 'HJKL') return 'Shift H J K L';
+	if (group === 'HJKL') return 'H J K L';
 	return keys.map(key => names[key] ?? (key === ' ' ? 'Space' : key.replace(/^<|>$/g, ''))).join(' ');
 };
 
@@ -66,7 +66,7 @@ export function keyboardHints(keyboard) {
 		}
 		else if (prefixes[action]) {
 			defaults = prefixes[action];
-			if (action === 'g' && !operator && keyboard.context === 'sheet') defaults = [...defaults, [['H'], 'Fill left'], [['J'], 'Fill down'], [['K'], 'Fill up'], [['L'], 'Fill right']];
+			if (action === 'g' && !operator && keyboard.context === 'sheet') defaults = [...defaults, [['H', 'J', 'K', 'L'], 'Fill']];
 		}
 		else if (/^(?:[fFtTm'`q@r]|g['`])$/.test(action)) defaults = [[['character'], 'Type target'], [['<Esc>'], 'Cancel']];
 		else if (operator) defaults = [[[operator], 'Whole row / line'], ...motions];

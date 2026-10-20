@@ -7,7 +7,7 @@
 				<li v-for="item in items" :key="item.id" class="cf-rule" :data-rule-id="item.id" :class="{ chosen: item.id === session.selected?.id }" :aria-current="item.id === session.selected?.id ? 'true' : undefined">
 					<div class="cf-rule-content">
 						<span class="cf-swatch" :style="{ color: item.colors.fg ?? '#dbe6f3', backgroundColor: item.colors.bg ?? '#091119' }">Aa</span>
-						<span class="cf-summary"><strong>{{ item.name || `Rule ${item.id}` }} <small>#{{ item.id }}</small></strong><span class="cf-range">{{ item.target }} <span>· {{ result?.ruleMatches.get(item.id) ?? 0 }} matched</span></span><code>{{ item.predicate }}</code></span>
+						<span class="cf-summary"><strong>{{ item.name || `Rule ${item.id}` }} <small>#{{ item.id }}</small></strong><span class="cf-range">{{ item.target }} <span>· {{ result?.ruleMatches.get(item.id) ?? 0 }} matched</span></span>·<code>{{ item.predicate }}</code></span>
 					</div>
 					<div v-if="result?.ruleErrors.has(item.id)" class="cf-diagnostic" role="status">{{ result.ruleErrors.get(item.id).count }} predicate error(s) · {{ result.ruleErrors.get(item.id).message }}</div>
 				</li>
@@ -52,17 +52,17 @@ watch(() => [session.state.editing, props.active], async ([editing, active]) => 
 </script>
 
 <style>
-.conditional-pane { color: #dbe6f3; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; flex: 1; min-height: 0; overflow: auto; padding: 18px; }
+.conditional-pane { color: #dbe6f3; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; flex: 1; min-height: 0; overflow: auto; padding: 10px; }
 .conditional-pane.editing-rule { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .cf-toolbar { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
 .cf-toolbar h2 { font: 500 18px/1.5 ui-monospace, monospace; margin: 0 0 2px; }
 .cf-toolbar span, .cf-empty { color: #9aaec3; }
 .cf-empty { padding: 18px; border: 1px dashed #334a62; }
-.cf-rules { list-style: none; padding: 0; margin: 0 0 18px; display: grid; gap: 10px; }
-.cf-rule { border: 1px solid #26394c; border-radius: 4px; background: #111d2a; overflow: hidden; }
-.cf-rule.chosen { border-color: #75e2bc; }
+.cf-rules { list-style: none; padding: 0; margin: 0; display: grid; gap: 0; }
+.cf-rule { border: 1px solid #26394c; border-left: none; border-right: none; overflow: hidden; margin: 0; }
+.cf-rule.chosen { border-color: #75e2bc; background: #0d1926; }
 .cf-rule-content { display: flex; gap: 12px; padding: 12px; }
-.cf-summary { display: grid; gap: 3px; min-width: 0; }
+.cf-summary { min-width: 0; display: flex; flex-direction: row; gap: 4px; overflow: hidden; }
 .cf-summary strong { font-weight: 500; }
 .cf-summary small { color: #688294; font-size: 10px; }
 .cf-summary code { color: #b9c9d8; overflow-wrap: anywhere; white-space: pre-wrap; }
