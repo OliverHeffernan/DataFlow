@@ -1,6 +1,8 @@
 # DataFlow
 DataFlow is a spreadsheet app with keyboard commands, similar to Vim/Neovim. This allows for fast manipulation of your spreadsheets.
 
+Use `:splitv` / `:splith` for independent sheet or conditional-rule windows, `Ctrl-w h/j/k/l` to navigate them, and `:cf` for a chart-style `=CF()` rule builder. Rules support value thresholds, duplicates and formula conditions without changing stored values or styles. See [split windows and conditional rules](docs/keyboard.md#split-windows-share-data-not-navigation).
+
 ## Installation
 ### MacOS:
 Once the first release is published, install the latest Intel or Apple Silicon build with:
