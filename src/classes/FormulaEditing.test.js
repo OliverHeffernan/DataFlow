@@ -189,7 +189,7 @@ vim.keymap.set('f', '<F6>x', 'gj', {desc='Next line'})`).mappings;
 	assert.ok(keyboardHints(keyboard).some(hint => hint.description === 'Relative cell'));
 	assert.ok(!keyboardHints(keyboard).some(hint => hint.description === 'Extend range'));
 	keyboard.feed('<C-h>');
-	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'Shift H J K L' && hint.description === 'Extend range'));
+	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'H J K L' && hint.description === 'Extend range'));
 	keyboard.feed('+');
 	assert.ok(!keyboardHints(keyboard).some(hint => hint.description === 'Extend range'));
 });
@@ -250,14 +250,15 @@ test('built-in shortcut hints expose only the next key through operators and tex
 	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'w W' && hint.description === 'Word'));
 	assert.ok(!keyboardHints(keyboard).some(hint => ['Cell formula', 'Cell value', 'Whole row / line'].includes(hint.description)));
 	keyboard.feed('<Esc>g');
-	assert.ok(!keyboardHints(keyboard).some(hint => hint.description.startsWith('Fill ')));
+	assert.ok(!keyboardHints(keyboard).some(hint => hint.description.startsWith('Fill')));
 	keyboard.feed('<Esc><Esc>g');
-	assert.deepEqual(keyboardHints(keyboard).filter(hint => hint.description.startsWith('Fill ')), [
-		{ key: 'H', description: 'Fill left' }, { key: 'J', description: 'Fill down' },
-		{ key: 'K', description: 'Fill up' }, { key: 'L', description: 'Fill right' },
+	assert.deepEqual(keyboardHints(keyboard).filter(hint => hint.description.startsWith('Fill')), [
+		{ key: 'H J K L', description: 'Fill' },
 	]);
 	keyboard.feed('<Esc>vg');
-	assert.ok(keyboardHints(keyboard).some(hint => hint.key === 'J' && hint.description === 'Fill down'));
+	assert.deepEqual(keyboardHints(keyboard).filter(hint => hint.description.startsWith('Fill')), [
+		{ key: 'H J K L', description: 'Fill' },
+	]);
 });
 
 test('marks and dataset columns complete without calls, share reference colors, and stay named under F4', () => {
