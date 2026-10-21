@@ -5,8 +5,10 @@ import SheetManager from './SheetManager.js';
 import HistoryManager from './HistoryManager.js';
 import VimKeyboard from './VimKeyboard.js';
 import ConditionalSession from './ConditionalSession.js';
+import CheckCommand from './CheckCommand.js';
 import { compileConditionalRule } from './ConditionalFormatting.js';
 import { formulaAssist } from './FormulaEditing.js';
+import { keyboardHints } from './KeyboardHints.js';
 
 const sheet = new SheetManager();
 sheet.loadAllCells = () => sheet.recalculate();
@@ -177,6 +179,84 @@ test('draft Vim edits and undo are isolated until apply; stale rule drafts canno
 	assert.match(sheet.activeSheet.conditionalRules[0].source, /Other/);
 	session.discard(); session.begin(id); pane.sheet = { ...sheet.activeSheet };
 	assert.throws(() => session.apply(), /sheet was replaced/);
+});
+
+test('CF insert uses line-local carets, vertical movement and newlines without applying the rule', async () => {
+	const check = Object.create(CheckCommand.prototype), pane = { sheet: sheet.activeSheet, content: 'cf', row: 0, col: 0 };
+	pane.keyboard = new VimKeyboard(sheet, { key: key => check.ruleKey(key) });
+	Object.assign(check, { sheet, currentWindow: pane, keyboard: pane.keyboard, render: async () => {}, focus() {}, setPhMessage() {} });
+	await check.cfCommand('new');
+	const session = check.rulesFor(), v = check.keyboard;
+	v.feed('A<CR>');
+	assert.equal(session.state.editing, true); assert.equal(session.rules.length, 0);
+	assert.match(session.state.draft, /^=CF\(\)\n\n  \.range/);
+	assert.deepEqual(v.point, { row: 1, col: 0 });
+	v.feed('<Esc>'); assert.deepEqual(v.point, { row: 1, col: 0 });
+	assert.ok(keyboardHints(v).some(hint => hint.key === 'Enter' && hint.description === 'Apply rule'));
+	v.feed('i');
+	assert.ok(keyboardHints(v).some(hint => hint.key === 'Enter' && hint.description === 'Newline'));
+	v.feed('<Esc><CR>');
+	assert.equal(session.state.editing, false); assert.equal(session.rules.length, 1);
+
+	await check.cfCommand('edit', '1');
+	v.feed('2jA<Up><Up>'); assert.deepEqual(v.point, { row: 0, col: 5 });
+	v.feed('<Down><Down>'); assert.deepEqual(v.point, { row: 2, col: 15 });
+	v.feed('<Home>'); assert.deepEqual(v.point, { row: 2, col: 0 });
+	v.feed('<End>'); assert.deepEqual(v.point, { row: 2, col: 15 });
+	v.feed('<C-h>'); assert.match(session.state.draft, /\.range\(A0:A0\n/);
+	v.feed('<C-u>'); assert.match(session.state.draft, /^=CF\(\)\n\n\n  \.when/);
+});
+
+test('CF completion still owns arrows and Tab while ordinary Insert navigation preserves Unicode columns', () => {
+	const session = new ConditionalSession(sheet, { sheet: sheet.activeSheet }, {});
+	session.begin(null, { r0: 0, c0: 0, r1: 0, c1: 0 });
+	session.editor.setFormula('=CF().\n123456789012345');
+	const v = session.editor;
+	v.feed('A<Down><Tab>'); assert.equal(session.state.draft, '=CF().when()\n123456789012345');
+	v.feed('<Down>'); assert.deepEqual(v.point, { row: 1, col: 11 });
+	session.editor.setFormula('😀abc\nx\n1234567'); v.formulaCursor = 0;
+	v.feed('<Esc>gg3li<Down><Down>!<Home><Up>');
+	assert.deepEqual(v.point, { row: 1, col: 0 });
+	assert.equal(session.state.draft, '😀abc\nx\n123!4567');
+	assert.equal(JSON.stringify(sheet.rows), JSON.stringify([['5', '4', '5', 'alpha'], ['8', '2', '5', 'alpha'], ['', '8', '3', 'beta'], ['bad', '4', '8', '']]));
+});
+
+test('CF joins and indentation compose with counts, motions, visual selections and repeat without yanking', () => {
+	const session = new ConditionalSession(sheet, { sheet: sheet.activeSheet }, {});
+	session.begin(null, { r0: 0, c0: 0, r1: 0, c1: 0 });
+	const v = session.editor;
+	v.setFormula('first\n  second\nthird\nfourth');
+	v.register = { text: 'keep' };
+	v.feed('2>>'); assert.equal(session.state.draft, '  first\n    second\nthird\nfourth');
+	v.feed('j.'); assert.equal(session.state.draft, '  first\n      second\n  third\nfourth');
+	v.feed('gg>2j'); assert.equal(session.state.draft, '    first\n        second\n    third\nfourth');
+	v.feed('ggV2j2<'); assert.equal(session.state.draft, 'first\n    second\nthird\nfourth');
+	assert.equal(v.mode, 'n'); assert.equal(v.register.text, 'keep');
+	v.feed('3J'); assert.equal(session.state.draft, 'first second third\nfourth');
+	v.feed('gJ'); assert.equal(session.state.draft, 'first second thirdfourth');
+	v.feed('J'); assert.equal(session.state.draft, 'first second thirdfourth');
+	v.setFormula('one\ntwo\nthree\nfour\nfive'); v.feed('ggVJ');
+	assert.equal(session.state.draft, 'one two\nthree\nfour\nfive'); assert.equal(v.mode, 'n');
+	v.feed('2jVkJgg.'); assert.equal(session.state.draft, 'one two three four\nfive');
+	v.setFormula('one\ntwo\nthree\nfour'); v.feed('ggVj2>j.');
+	assert.equal(session.state.draft, '    one\n        two\n    three\nfour');
+	assert.equal(v.register.text, 'keep');
+});
+
+test('CF undo and redo restore edit locations and a reopened draft cannot repeat the previous draft edit', () => {
+	sheet.setConditionalRules([rule(1, 'A0', 'TRUE')]);
+	const session = new ConditionalSession(sheet, { sheet: sheet.activeSheet }, {});
+	session.begin(1);
+	const original = session.state.draft, v = session.editor;
+	v.feed('A.name("Added")<Esc>ggu');
+	assert.equal(session.state.draft, original); assert.equal(v.formulaCursor, original.length - 1);
+	v.feed('gg<C-r>'); assert.equal(v.formulaCursor, original.length + 13);
+	v.feed('uA.fg("gold")<Esc><C-r>');
+	assert.equal(session.state.draft, original + '.fg("gold")');
+	v.feed('ggVGcaaaa<Esc>0lxu');
+	assert.equal(session.state.draft, 'aaaa'); assert.deepEqual(v.point, { row: 0, col: 1 });
+	session.discard(); session.begin(1); v.feed('.');
+	assert.equal(session.state.draft, original);
 });
 
 test('CF completion and signatures use the chart builder interaction without mixing their methods', () => {

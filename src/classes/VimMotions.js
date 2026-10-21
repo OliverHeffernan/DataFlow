@@ -2,10 +2,10 @@
 export const clamp = (n, low, high) => Math.max(low, Math.min(n, high));
 export const compare = (a, b) => a.row - b.row || a.col - b.col;
 export const offset = (rows, point) => rows.slice(0, point.row).reduce((n, row) => n + row.length + 1, 0) + point.col;
-export function pointAt(rows, index) {
+export function pointAt(rows, index, inserting = false) {
 	for (let row = 0; row < rows.length; row++) {
 		if (index <= rows[row].length || row === rows.length - 1) {
-			return { row, col: clamp(index, 0, Math.max(0, rows[row].length - 1)) };
+			return { row, col: clamp(index, 0, Math.max(0, rows[row].length - (inserting ? 0 : 1))) };
 		}
 		index -= rows[row].length + 1;
 	}
