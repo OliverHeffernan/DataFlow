@@ -13,16 +13,25 @@ export default class ConditionalSession {
 			get marks() { return manager.marks; }, describeDataset: name => manager.describeDataset(name) };
 		this.editor = new VimKeyboard(buffer, {
 			...hooks,
+			// Capture before mutation: a text diff cannot locate edits reliably inside repeated characters.
+			key: key => { this.keyCursor = this.editor.formulaCursor; return hooks.key?.(key); },
 			change: () => this.checkpoint(),
 			undo: (redo, count) => {
 				this.checkpoint();
-				this.position = Math.max(0, Math.min(this.edits.length - 1, this.position + (redo ? count : -count)));
-				state.draft = this.edits[this.position];
+				const position = Math.max(0, Math.min(this.edits.length - 1, this.position + (redo ? count : -count)));
+				if (position === this.position) return;
+				this.editor.formulaCursor = redo ? this.edits[position].cursor : this.edits[position + 1].before;
+				this.position = position;
+				state.draft = this.edits[position].text; state.error = '';
 				this.editor.move(this.editor.point);
 			},
 		});
 		this.editor.textBuffer = true;
-		this.editor.setFormula = text => { state.draft = text; state.error = ''; };
+		this.editor.setFormula = text => {
+			if (text === state.draft) return;
+			if (this.changeStart === null) this.changeStart = this.keyCursor;
+			state.draft = text; state.error = '';
+		};
 	}
 	get rules() { return this.pane.sheet.conditionalRules ?? []; }
 	get selected() { return this.rules.find(rule => rule.id === this.state.selectedId) ?? this.rules[0]; }
@@ -40,13 +49,16 @@ export default class ConditionalSession {
 		this.state.id = id; this.state.selectedId = id; this.state.base = rule?.source ?? '';
 		this.state.draft = rule?.source ?? `=CF()\n  .range(${cellLabel(range.r0, range.c0)}:${cellLabel(range.r1, range.c1)})\n  .when(AND(isNumeric([]{}), []{}>0))\n  .bg("#40381c")`;
 		this.state.editing = true; this.state.error = '';
-		this.edits = [this.state.draft]; this.position = 0;
+		this.edits = [{ text: this.state.draft, cursor: 0 }]; this.position = 0; this.changeStart = null; this.keyCursor = 0;
 		this.editor.resetNavigation(); this.editor.context = 'formula';
 		this.editor.formulaCursor = 0;
+		this.editor.changeKeys = []; this.editor.lastChange = []; this.editor.completionIndex = 0;
 	}
 	checkpoint() {
-		if (this.edits[this.position] === this.state.draft) return;
-		this.edits = [...this.edits.slice(0, this.position + 1), this.state.draft]; this.position++;
+		if (this.edits[this.position].text !== this.state.draft) {
+			this.edits = [...this.edits.slice(0, this.position + 1), { text: this.state.draft, cursor: this.editor.formulaCursor, before: this.changeStart }]; this.position++;
+		}
+		this.changeStart = null;
 	}
 	apply() {
 		if (!this.state.editing) throw new Error('Open a rule draft first');

@@ -54,7 +54,7 @@ export function keyboardHints(keyboard) {
 	else {
 		const visual = ['v', 'V', 'b'].includes(keyboard.mode);
 		const pending = keyboard.pending.replace(/^\d+/, '');
-		const operator = !visual && /^[dcy]/.test(pending) ? pending[0] : '';
+		const operator = !visual ? keyboard.pendingOperator : '';
 		const action = operator ? pending.slice(1).replace(/^\d+/, '').replace(/^(v|V|<C-v>)/, '') : pending;
 		if ((operator || visual) && /^[ia]$/.test(action)) {
 			defaults = [...objects, [['<Esc>'], 'Cancel']];
@@ -75,8 +75,9 @@ export function keyboardHints(keyboard) {
 	}
 	if (keyboard.textBuffer && keyboard.command === null && !keyboard.pending) {
 		defaults = defaults.filter(([keys]) => !['<F4>', '<C-h>', 'H'].includes(keys[0])).map(([keys, description]) => [keys,
-			keys[0] === '<CR>' ? 'Apply rule' : keys[0] === '<Esc>' ? 'Keep draft · NORMAL' : keys[0] === 'j' ? 'Text line' : description]);
+			keys[0] === '<CR>' ? 'Newline' : keys[0] === '<Esc>' ? 'Keep draft · NORMAL' : keys[0] === 'j' ? 'Text line' : description]);
 		if (keyboard.mode === 'n') defaults = [[['<CR>'], 'Apply rule'], ...defaults];
+		if (keyboard.mode !== 'i') defaults = [...defaults, [['J'], 'Join lines'], [['>', '<'], 'Indent / outdent']];
 	}
 	const overridden = new Set(maps.map(map => map.lhs[0]));
 	return [...custom, ...defaults.map(([keys, description]) => ({ key: label(keys.filter(key => !overridden.has(key))), description })).filter(hint => hint.key)];

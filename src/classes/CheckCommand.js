@@ -203,7 +203,7 @@ export default class CheckCommand {
 		const session = this.rulesFor(), keyboard = this.keyboard;
 		if (keyboard.command !== null) return false;
 		if (session.state.editing) {
-			if (key === '<CR>' && !keyboard.pending && !keyboard.anchor) { this.cfCommand('apply'); return true; }
+			if (key === '<CR>' && keyboard.mode === 'n' && !keyboard.pending && !keyboard.anchor) { this.cfCommand('apply'); return true; }
 			return false;
 		}
 		if (['<C-w>', 'q', '@'].includes(keyboard.pending) || ['<C-w>', 'q', '@', ':', 'u', '<C-r>', '<Esc>'].includes(key)) return false;
@@ -228,7 +228,8 @@ export default class CheckCommand {
 			document.getElementById('formText').innerHTML = new SyntaxHighlighting().highlight(session.state.draft);
 			this.sheet.cellCurPos = keyboard.formulaCursor; this.renderFormulaCursor();
 		}
-		document.getElementById('modeDisplay').innerText = `-- CF ${session.state.editing ? (keyboard.mode === 'i' ? 'INSERT' : 'NORMAL') : 'RULES'} --`;
+		const names = { n: 'NORMAL', i: 'INSERT', v: 'VISUAL', V: 'VISUAL-LINE', b: 'VISUAL-BLOCK' };
+		document.getElementById('modeDisplay').innerText = `-- CF ${session.state.editing ? names[keyboard.mode] : 'RULES'} --`;
 		const display = document.getElementById('commandLine');
 		display.textContent = keyboard.command ?? keyboard.pending + keyboard.mappingKeys.join('');
 		display.classList.toggle('typing-command', keyboard.command !== null);

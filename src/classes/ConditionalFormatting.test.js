@@ -5,8 +5,10 @@ import SheetManager from './SheetManager.js';
 import HistoryManager from './HistoryManager.js';
 import VimKeyboard from './VimKeyboard.js';
 import ConditionalSession from './ConditionalSession.js';
+import CheckCommand from './CheckCommand.js';
 import { compileConditionalRule } from './ConditionalFormatting.js';
 import { formulaAssist } from './FormulaEditing.js';
+import { keyboardHints } from './KeyboardHints.js';
 
 const sheet = new SheetManager();
 sheet.loadAllCells = () => sheet.recalculate();
@@ -76,10 +78,26 @@ test('per-sheet formatting and FORMAT previews preserve exact predicate values, 
 	assert.equal(sheet.cellPresentation.value[0][0].text, 'USD 0.13');
 });
 
+test('omitted conditions colour every non-chart target, including blanks, errors and spill elements', () => {
+	sheet.loadWorkbook({ rows: [
+		['outside', '', '', '', '', 'outside'],
+		['outside', '0', 'text', '', '=VSTACK(3,7)', 'outside'],
+		['outside', '=1/0', '=CHART().line().series(B1:B1)', '=D2', '', 'outside'],
+		['outside', '', '', '', '', 'outside'],
+	] });
+	sheet.setConditionalRules([{ id: 1, source: '=CF().range(B1:E2).bg("navy")' }]);
+	assert.equal(result().typed[2][2].kind, 'chart');
+	assert.deepEqual([...result().colors], [
+		['1:1', { bg: 'navy' }], ['1:2', { bg: 'navy' }], ['1:3', { bg: 'navy' }], ['1:4', { bg: 'navy' }],
+		['2:1', { bg: 'navy' }], ['2:3', { bg: 'navy' }], ['2:4', { bg: 'navy' }],
+	]);
+	assert.equal(result().ruleMatches.get(1), 7); assert.equal(result().ruleErrors.size, 0);
+});
+
 test('later matching rules override only their colour channels and never change stored styling', () => {
 	sheet.styles[0][0] = { fg: 'blue', bg: 'navy', wrap: true, align: 'right', format: { decimals: 2 } };
 	const styles = JSON.stringify(sheet.styles), rows = JSON.stringify(sheet.rows);
-	sheet.setConditionalRules([rule(1, 'A0:B1', 'TRUE', '.fg("red").bg("green")'), rule(2, 'A0', 'TRUE', '.fg("white")'), rule(3, 'A0', 'FALSE', '.bg("black")')]);
+	sheet.setConditionalRules([{ id: 1, source: '=CF().range(A0:B1).fg("red").bg("green")' }, rule(2, 'A0', 'TRUE', '.fg("white")'), rule(3, 'A0', 'FALSE', '.bg("black")')]);
 	assert.deepEqual(result().colors.get('0:0'), { fg: 'white', bg: 'green' });
 	assert.deepEqual(result().colors.get('1:1'), { fg: 'red', bg: 'green' });
 	assert.equal(JSON.stringify(sheet.styles), styles); assert.equal(JSON.stringify(sheet.rows), rows);
@@ -112,16 +130,17 @@ test('spill elements, blanks, error-looking text and actual errors remain distin
 test('unsafe or malformed rules are rejected atomically, even in unused branches and reference offsets', () => {
 	sheet.setConditionalRules([rule(1, 'A0', 'TRUE')]);
 	const before = JSON.stringify({ rows: sheet.rows, styles: sheet.styles, rules: sheet.activeSheet.conditionalRules });
-	for (const predicate of ['random()>0', 'IF(FALSE,random(),TRUE)', 'A{random()}>0', 'IF(FALSE,Missing!A{createUnit("smoot")},TRUE)', 'import("x")', 'map([1,2],abs)', 'TRUE;FALSE', 'sqrt.constructor("x")()']) {
+	for (const predicate of ['', ' ', '1,2', '(', 'random()>0', 'IF(FALSE,random(),TRUE)', 'A{random()}>0', 'IF(FALSE,Missing!A{createUnit("smoot")},TRUE)', 'import("x")', 'map([1,2],abs)', 'TRUE;FALSE', 'sqrt.constructor("x")()']) {
 		assert.throws(() => sheet.setConditionalRules([rule(2, 'A0', predicate)]), undefined, predicate);
 		assert.equal(JSON.stringify({ rows: sheet.rows, styles: sheet.styles, rules: sheet.activeSheet.conditionalRules }), before);
 	}
+	for (const source of ['=CF().bg("navy")', '=CF().range(A0)', '=CF().range(A99).bg("navy")', '=CF().range(A0).bg("not-a-colour")']) assert.throws(() => sheet.setConditionalRules([{ id: 2, source }]));
 	for (const rules of [[rule(1, 'A99', 'TRUE')], [rule(1, 'A0', 'TRUE'), rule(1, 'B0', 'TRUE')], [rule(2, 'A0', 'TRUE', '.bg("not-a-colour")')], [rule(2, 'A0', 'TRUE', '.width(80)')]]) assert.throws(() => sheet.setConditionalRules(rules));
 	assert.equal(JSON.stringify({ rows: sheet.rows, styles: sheet.styles, rules: sheet.activeSheet.conditionalRules }), before);
 });
 
 test('target ranges follow keyboard row/column edits but predicate literals stay positional', () => {
-	sheet.setConditionalRules([rule(1, 'B1:C2', 'A0>3')]);
+	sheet.setConditionalRules([rule(1, 'B1:C2', 'A0>3'), { id: 2, source: '=CF().range(B1:C2).fg("gold")' }]);
 	const keyboard = new VimKeyboard(sheet, { change: () => sheet.recalculate() });
 	keyboard.feed('o<Esc><Esc>');
 	assert.deepEqual(compileConditionalRule(sheet.activeSheet.conditionalRules[0].source).range, { r0: 2, c0: 1, r1: 3, c1: 2 });
@@ -132,6 +151,9 @@ test('target ranges follow keyboard row/column edits but predicate literals stay
 	keyboard.editColumns(0, 1, 0);
 	const compiled = compileConditionalRule(sheet.activeSheet.conditionalRules[0].source);
 	assert.deepEqual(compiled.range, { r0: 2, c0: 0, r1: 4, c1: 3 }); assert.equal(compiled.predicate, 'A0>3');
+	sheet.recalculate();
+	assert.equal(result().ruleMatches.get(2), 12); assert.equal(result().ruleErrors.size, 0);
+	assert.deepEqual([...result().colors.keys()], ['2:0', '2:1', '2:2', '2:3', '3:0', '3:1', '3:2', '3:3', '4:0', '4:1', '4:2', '4:3']);
 	keyboard.move({ row: 2, col: 0 }); keyboard.feed('3dd');
 	assert.deepEqual(sheet.activeSheet.conditionalRules, []);
 });
@@ -159,6 +181,84 @@ test('draft Vim edits and undo are isolated until apply; stale rule drafts canno
 	assert.throws(() => session.apply(), /sheet was replaced/);
 });
 
+test('CF insert uses line-local carets, vertical movement and newlines without applying the rule', async () => {
+	const check = Object.create(CheckCommand.prototype), pane = { sheet: sheet.activeSheet, content: 'cf', row: 0, col: 0 };
+	pane.keyboard = new VimKeyboard(sheet, { key: key => check.ruleKey(key) });
+	Object.assign(check, { sheet, currentWindow: pane, keyboard: pane.keyboard, render: async () => {}, focus() {}, setPhMessage() {} });
+	await check.cfCommand('new');
+	const session = check.rulesFor(), v = check.keyboard;
+	v.feed('A<CR>');
+	assert.equal(session.state.editing, true); assert.equal(session.rules.length, 0);
+	assert.match(session.state.draft, /^=CF\(\)\n\n  \.range/);
+	assert.deepEqual(v.point, { row: 1, col: 0 });
+	v.feed('<Esc>'); assert.deepEqual(v.point, { row: 1, col: 0 });
+	assert.ok(keyboardHints(v).some(hint => hint.key === 'Enter' && hint.description === 'Apply rule'));
+	v.feed('i');
+	assert.ok(keyboardHints(v).some(hint => hint.key === 'Enter' && hint.description === 'Newline'));
+	v.feed('<Esc><CR>');
+	assert.equal(session.state.editing, false); assert.equal(session.rules.length, 1);
+
+	await check.cfCommand('edit', '1');
+	v.feed('2jA<Up><Up>'); assert.deepEqual(v.point, { row: 0, col: 5 });
+	v.feed('<Down><Down>'); assert.deepEqual(v.point, { row: 2, col: 15 });
+	v.feed('<Home>'); assert.deepEqual(v.point, { row: 2, col: 0 });
+	v.feed('<End>'); assert.deepEqual(v.point, { row: 2, col: 15 });
+	v.feed('<C-h>'); assert.match(session.state.draft, /\.range\(A0:A0\n/);
+	v.feed('<C-u>'); assert.match(session.state.draft, /^=CF\(\)\n\n\n  \.when/);
+});
+
+test('CF completion still owns arrows and Tab while ordinary Insert navigation preserves Unicode columns', () => {
+	const session = new ConditionalSession(sheet, { sheet: sheet.activeSheet }, {});
+	session.begin(null, { r0: 0, c0: 0, r1: 0, c1: 0 });
+	session.editor.setFormula('=CF().\n123456789012345');
+	const v = session.editor;
+	v.feed('A<Down><Tab>'); assert.equal(session.state.draft, '=CF().when()\n123456789012345');
+	v.feed('<Down>'); assert.deepEqual(v.point, { row: 1, col: 11 });
+	session.editor.setFormula('😀abc\nx\n1234567'); v.formulaCursor = 0;
+	v.feed('<Esc>gg3li<Down><Down>!<Home><Up>');
+	assert.deepEqual(v.point, { row: 1, col: 0 });
+	assert.equal(session.state.draft, '😀abc\nx\n123!4567');
+	assert.equal(JSON.stringify(sheet.rows), JSON.stringify([['5', '4', '5', 'alpha'], ['8', '2', '5', 'alpha'], ['', '8', '3', 'beta'], ['bad', '4', '8', '']]));
+});
+
+test('CF joins and indentation compose with counts, motions, visual selections and repeat without yanking', () => {
+	const session = new ConditionalSession(sheet, { sheet: sheet.activeSheet }, {});
+	session.begin(null, { r0: 0, c0: 0, r1: 0, c1: 0 });
+	const v = session.editor;
+	v.setFormula('first\n  second\nthird\nfourth');
+	v.register = { text: 'keep' };
+	v.feed('2>>'); assert.equal(session.state.draft, '  first\n    second\nthird\nfourth');
+	v.feed('j.'); assert.equal(session.state.draft, '  first\n      second\n  third\nfourth');
+	v.feed('gg>2j'); assert.equal(session.state.draft, '    first\n        second\n    third\nfourth');
+	v.feed('ggV2j2<'); assert.equal(session.state.draft, 'first\n    second\nthird\nfourth');
+	assert.equal(v.mode, 'n'); assert.equal(v.register.text, 'keep');
+	v.feed('3J'); assert.equal(session.state.draft, 'first second third\nfourth');
+	v.feed('gJ'); assert.equal(session.state.draft, 'first second thirdfourth');
+	v.feed('J'); assert.equal(session.state.draft, 'first second thirdfourth');
+	v.setFormula('one\ntwo\nthree\nfour\nfive'); v.feed('ggVJ');
+	assert.equal(session.state.draft, 'one two\nthree\nfour\nfive'); assert.equal(v.mode, 'n');
+	v.feed('2jVkJgg.'); assert.equal(session.state.draft, 'one two three four\nfive');
+	v.setFormula('one\ntwo\nthree\nfour'); v.feed('ggVj2>j.');
+	assert.equal(session.state.draft, '    one\n        two\n    three\nfour');
+	assert.equal(v.register.text, 'keep');
+});
+
+test('CF undo and redo restore edit locations and a reopened draft cannot repeat the previous draft edit', () => {
+	sheet.setConditionalRules([rule(1, 'A0', 'TRUE')]);
+	const session = new ConditionalSession(sheet, { sheet: sheet.activeSheet }, {});
+	session.begin(1);
+	const original = session.state.draft, v = session.editor;
+	v.feed('A.name("Added")<Esc>ggu');
+	assert.equal(session.state.draft, original); assert.equal(v.formulaCursor, original.length - 1);
+	v.feed('gg<C-r>'); assert.equal(v.formulaCursor, original.length + 13);
+	v.feed('uA.fg("gold")<Esc><C-r>');
+	assert.equal(session.state.draft, original + '.fg("gold")');
+	v.feed('ggVGcaaaa<Esc>0lxu');
+	assert.equal(session.state.draft, 'aaaa'); assert.deepEqual(v.point, { row: 0, col: 1 });
+	session.discard(); session.begin(1); v.feed('.');
+	assert.equal(session.state.draft, original);
+});
+
 test('CF completion and signatures use the chart builder interaction without mixing their methods', () => {
 	assert.deepEqual(formulaAssist('=CF().', 6, sheet, 'CF').suggestions, ['.range', '.when', '.fg', '.bg', '.name']);
 	assert.equal(formulaAssist('=CF().when(C{}="Overdue",', 25, sheet, 'CF').signature.name, '.when');
@@ -167,7 +267,7 @@ test('CF completion and signatures use the chart builder interaction without mix
 });
 
 test('rules use chronological workbook history and round-trip metadata without sharing duplicate state', () => {
-	const history = new HistoryManager(), first = rule(1, 'A0:B1', '[]{}>4');
+	const history = new HistoryManager(), first = { id: 1, source: '=CF().range(A0:B1).bg("navy")' };
 	sheet.activeSheet.layout = { widths: [91, 143] };
 	sheet.styles[0][0].format = 'number';
 	sheet.setConditionalRules([first]);
@@ -184,7 +284,7 @@ test('rules use chronological workbook history and round-trip metadata without s
 	sheet.loadWorkbook(saved);
 	assert.deepEqual(sheet.activeSheet.conditionalRules, [first]);
 	assert.deepEqual(sheet.activeSheet.layout, { widths: [91, 143] }); assert.equal(sheet.styles[0][0].format, 'number');
-	assert.deepEqual([...result().colors.keys()], ['0:0', '1:0']);
+	assert.deepEqual([...result().colors.keys()], ['0:0', '0:1', '1:0', '1:1']);
 	sheet.createSheet('Copy', true); sheet.activeSheet.conditionalRules[0].source = rule(1, 'A0', 'FALSE').source;
 	sheet.activeSheet.layout.widths[0] = 250;
 	assert.deepEqual(sheet.sheets[0].conditionalRules, [first]); assert.equal(sheet.sheets[0].layout.widths[0], 91);

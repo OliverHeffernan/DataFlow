@@ -12,7 +12,7 @@ function text(argument) {
 
 export function compileConditionalRule(source) {
 	if (typeof source !== 'string') throw new Error('A conditional rule must be builder text');
-	const rule = { source, range: null, predicate: '', colors: {}, name: '' };
+	const rule = { source, range: null, predicate: 'TRUE', colors: {}, name: '' };
 	for (const { method, args } of builderCalls(source, 'CF')) {
 		if (!['range', 'when', 'fg', 'bg', 'name'].includes(method)) throw new Error(`Unknown CF method .${method}()`);
 		if (args.length !== 1 || !args[0]) throw new Error(`.${method}() expects one argument`);
@@ -32,7 +32,6 @@ export function compileConditionalRule(source) {
 		}
 	}
 	if (!rule.range) throw new Error('Add .range(A0:D3)');
-	if (!rule.predicate) throw new Error('Add .when(condition)');
 	if (!Object.keys(rule.colors).length) throw new Error('Add .fg("colour") or .bg("colour")');
 	return rule;
 }
