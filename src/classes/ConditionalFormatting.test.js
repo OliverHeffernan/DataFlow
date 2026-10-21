@@ -94,12 +94,13 @@ test('omitted conditions colour every non-chart target, including blanks, errors
 	assert.equal(result().ruleMatches.get(1), 7); assert.equal(result().ruleErrors.size, 0);
 });
 
-test('later matching rules override only their colour channels and never change stored styling', () => {
+test('later matching rules override only their style properties and never change stored styling', () => {
 	sheet.styles[0][0] = { fg: 'blue', bg: 'navy', wrap: true, align: 'right', format: { decimals: 2 } };
 	const styles = JSON.stringify(sheet.styles), rows = JSON.stringify(sheet.rows);
-	sheet.setConditionalRules([{ id: 1, source: '=CF().range(A0:B1).fg("red").bg("green")' }, rule(2, 'A0', 'TRUE', '.fg("white")'), rule(3, 'A0', 'FALSE', '.bg("black")')]);
-	assert.deepEqual(result().colors.get('0:0'), { fg: 'white', bg: 'green' });
-	assert.deepEqual(result().colors.get('1:1'), { fg: 'red', bg: 'green' });
+	sheet.setConditionalRules([{ id: 1, source: '=CF().range(A0:B1).fg("red").bg("green").align("left")' }, rule(2, 'A0', 'TRUE', '.fg("white")'), rule(3, 'A0', 'FALSE', '.bg("black").align("right")'), { id: 4, source: '=CF().range(B1).align("auto")' }]);
+	assert.deepEqual(result().colors.get('0:0'), { fg: 'white', bg: 'green', align: 'left' });
+	assert.deepEqual(result().colors.get('1:0'), { fg: 'red', bg: 'green', align: 'left' });
+	assert.deepEqual(result().colors.get('1:1'), { fg: 'red', bg: 'green', align: 'auto' });
 	assert.equal(JSON.stringify(sheet.styles), styles); assert.equal(JSON.stringify(sheet.rows), rows);
 	sheet.setConditionalRules([]);
 	assert.equal(result().colors.size, 0); assert.equal(JSON.stringify(sheet.styles), styles);
@@ -136,6 +137,7 @@ test('unsafe or malformed rules are rejected atomically, even in unused branches
 	}
 	for (const source of ['=CF().bg("navy")', '=CF().range(A0)', '=CF().range(A99).bg("navy")', '=CF().range(A0).bg("not-a-colour")']) assert.throws(() => sheet.setConditionalRules([{ id: 2, source }]));
 	for (const rules of [[rule(1, 'A99', 'TRUE')], [rule(1, 'A0', 'TRUE'), rule(1, 'B0', 'TRUE')], [rule(2, 'A0', 'TRUE', '.bg("not-a-colour")')], [rule(2, 'A0', 'TRUE', '.width(80)')]]) assert.throws(() => sheet.setConditionalRules(rules));
+	for (const style of ['.align("justify")', '.align("start")', '.align(right)', '.align("left","right")', '.align()']) assert.throws(() => sheet.setConditionalRules([rule(2, 'A0', 'TRUE', style)]));
 	assert.equal(JSON.stringify({ rows: sheet.rows, styles: sheet.styles, rules: sheet.activeSheet.conditionalRules }), before);
 });
 
@@ -260,10 +262,34 @@ test('CF undo and redo restore edit locations and a reopened draft cannot repeat
 });
 
 test('CF completion and signatures use the chart builder interaction without mixing their methods', () => {
-	assert.deepEqual(formulaAssist('=CF().', 6, sheet, 'CF').suggestions, ['.range', '.when', '.fg', '.bg', '.name']);
+	assert.deepEqual(formulaAssist('=CF().', 6, sheet, 'CF').suggestions, ['.range', '.when', '.fg', '.bg', '.name', '.align']);
 	assert.equal(formulaAssist('=CF().when(C{}="Overdue",', 25, sheet, 'CF').signature.name, '.when');
+	assert.deepEqual(formulaAssist('=CF().align(', 12, sheet, 'CF').signature.args, ['"auto" | "left" | "center" | "right"']);
+	assert.deepEqual(formulaAssist('=CHART().a', 10).suggestions, []);
 	assert.deepEqual(formulaAssist('=CHART().b', 10).suggestions, ['.bar']);
 	assert.equal(formulaAssist('=CF().range(A0:B3).name(".b', 26, sheet, 'CF').suggestions.length, 0);
+});
+
+test('pane alignment edits remain draft-local, support text undo, and persist alignment-only rules through structural edits', () => {
+	const history = new HistoryManager(), pane = { sheet: sheet.activeSheet };
+	const source = '=CF().range(B1:C2).name("literal .align(\\"right\\")").align("center")';
+	sheet.setConditionalRules([{ id: 1, source }]);
+	const before = JSON.stringify(sheet.serializeWorkbook()), session = new ConditionalSession(sheet, pane, {});
+	session.begin(1); session.editor.feed('$'); session.setAlignment('right');
+	assert.equal(session.alignment, 'right'); assert.equal(JSON.stringify(sheet.serializeWorkbook()), before);
+	session.editor.feed('u'); assert.equal(session.state.draft, source);
+	assert.equal(session.editor.formulaCursor, source.length - 1);
+	session.editor.feed('<C-r>'); assert.equal(compileConditionalRule(session.state.draft).colors.align, 'right');
+	session.setAlignment(''); assert.equal(session.alignment, ''); assert.throws(() => session.apply(), /Add .fg/);
+	session.setAlignment('auto'); session.apply();
+	assert.deepEqual(result().colors.get('1:1'), { align: 'auto' });
+	assert.equal(compileConditionalRule(sheet.activeSheet.conditionalRules[0].source).name, 'literal .align("right")');
+	history.undo(sheet); assert.equal(sheet.activeSheet.conditionalRules[0].source, source);
+	history.redo(sheet); sheet.adjustConditionalRules('row', 0, 0, 1);
+	const saved = JSON.parse(JSON.stringify(sheet.serializeWorkbook())); sheet.loadWorkbook(saved);
+	assert.deepEqual(result().colors.get('2:1'), { align: 'auto' });
+	assert.equal(result().colors.has('1:1'), false);
+	assert.equal(saved.sheets[0].conditionalRules[0].source.includes('.align("auto")'), true);
 });
 
 test('rules use chronological workbook history and round-trip metadata without sharing duplicate state', () => {

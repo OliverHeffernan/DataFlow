@@ -1,13 +1,13 @@
 <template>
 	<div class="conditional-pane" :class="{ 'editing-rule': session.state.editing }" ref="panel">
 		<template v-if="!session.state.editing">
-			<div class="cf-toolbar"><div><h2>Rules</h2><span>{{ items.length }} {{ items.length === 1 ? 'rule' : 'rules' }} · Later rules win per colour</span></div></div>
+			<div class="cf-toolbar"><div><h2>Rules</h2><span>{{ items.length }} {{ items.length === 1 ? 'rule' : 'rules' }} · Later rules win per style property</span></div></div>
 			<p v-if="!items.length" class="cf-empty">No rules on this sheet. Create a rule from your selection, then describe its condition with the formula builder.</p>
 			<ol class="cf-rules" aria-label="Conditional formatting rules">
 				<li v-for="item in items" :key="item.id" class="cf-rule" :data-rule-id="item.id" :class="{ chosen: item.id === session.selected?.id }" :aria-current="item.id === session.selected?.id ? 'true' : undefined">
 					<div class="cf-rule-content">
 						<span class="cf-swatch" :style="{ color: item.colors.fg ?? '#dbe6f3', backgroundColor: item.colors.bg ?? '#091119' }">Aa</span>
-						<span class="cf-summary"><strong>{{ item.name || `Rule ${item.id}` }} <small>#{{ item.id }}</small></strong><span class="cf-range">{{ item.target }} <span>· {{ result?.ruleMatches.get(item.id) ?? 0 }} matched</span></span>·<code>{{ item.predicate }}</code></span>
+						<span class="cf-summary"><strong>{{ item.name || `Rule ${item.id}` }} <small>#{{ item.id }}</small></strong><span class="cf-range">{{ item.target }} <span>· {{ result?.ruleMatches.get(item.id) ?? 0 }} matched</span></span>·<code>{{ item.predicate }}</code><span v-if="item.colors.align" class="cf-alignment">· Align: {{ alignmentLabels[item.colors.align] }}</span></span>
 					</div>
 					<div v-if="result?.ruleErrors.has(item.id)" class="cf-diagnostic" role="status">{{ result.ruleErrors.get(item.id).count }} predicate error(s) · {{ result.ruleErrors.get(item.id).message }}</div>
 				</li>
@@ -15,6 +15,13 @@
 		</template>
 		<section v-else class="cf-builder" aria-label="Conditional rule builder">
 			<div class="cf-builder-heading"><strong>{{ session.state.id === null ? 'New rule' : `Edit rule #${session.state.id}` }}</strong><span class="cf-draft-badge">Unapplied draft</span></div>
+			<div class="cf-alignment-control">
+				<label :for="`cf-alignment-${pane.id}`">Alignment</label>
+				<select :id="`cf-alignment-${pane.id}`" :value="alignment ?? ''" :disabled="!active || alignment === null" @change="changeAlignment($event.target.value)" @keydown.esc.prevent.stop="check.focus()">
+					<option v-for="(label, value) in alignmentLabels" :key="value" :value="value">{{ label }}</option>
+				</select>
+				<span>{{ alignment === null ? 'Complete the builder text to use this control.' : 'Unchanged inherits styling; Automatic uses the cell’s format and value.' }}</span>
+			</div>
 			<NewFormBar v-if="active" keyboard-only />
 			<pre v-else class="cf-inactive-draft">{{ session.state.draft }}</pre>
 			<div class="cf-diagnostic" role="status" v-if="session.state.error || validation">{{ session.state.error || validation }}</div>
@@ -31,6 +38,15 @@ import { cellLabel } from '../classes/FormulaFunctions.js';
 import NewFormBar from './NewFormBar.vue';
 const props = defineProps({ pane: { type: Object, required: true }, active: Boolean });
 const check = new CheckCommand(), manager = new SheetManager(), session = check.rulesFor(props.pane), panel = ref(null);
+const alignmentLabels = { '': 'Unchanged', auto: 'Automatic', left: 'Left', center: 'Center', right: 'Right' };
+const alignment = computed(() => {
+	if (!session.state.editing) return '';
+	try { const value = session.alignment; return Object.hasOwn(alignmentLabels, value) ? value : null; } catch { return null; }
+});
+function changeAlignment(value) {
+	try { session.setAlignment(value); } catch (error) { session.state.error = error.message; }
+	check.render(); check.focus();
+}
 const result = computed(() => manager.sheetResults.value.get(props.pane.sheet));
 const items = computed(() => {
 	manager.sheetResults.value;
@@ -62,7 +78,7 @@ watch(() => [session.state.editing, props.active], async ([editing, active]) => 
 .cf-rule { border: 1px solid #26394c; border-left: none; border-right: none; overflow: hidden; margin: 0; }
 .cf-rule.chosen { border-color: #75e2bc; background: #0d1926; }
 .cf-rule-content { display: flex; gap: 12px; padding: 12px; }
-.cf-summary { min-width: 0; display: flex; flex-direction: row; gap: 4px; overflow: hidden; }
+.cf-summary { min-width: 0; display: flex; flex-direction: row; flex-wrap: wrap; gap: 4px; overflow: hidden; }
 .cf-summary strong { font-weight: 500; }
 .cf-summary small { color: #688294; font-size: 10px; }
 .cf-summary code { color: #b9c9d8; overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -73,6 +89,12 @@ watch(() => [session.state.editing, props.active], async ([editing, active]) => 
 .cf-builder-heading { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: 8px; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #26394c; }
 .cf-builder-heading strong { font-weight: 500; }
 .cf-draft-badge { color: #f4d779; font-size: 10px; }
+.cf-alignment { color: #9fd6ff; white-space: nowrap; }
+.cf-alignment-control { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; flex-shrink: 0; padding: 8px 12px; border-bottom: 1px solid #26394c; }
+.cf-alignment-control select { color: #dbe6f3; background: #111d2a; border: 1px solid #334a62; padding: 4px 8px; font: inherit; }
+.cf-alignment-control select:focus-visible { outline: 1px solid #75e2bc; }
+.cf-alignment-control select:disabled { opacity: .5; }
+.cf-alignment-control > span { color: #9aaec3; font-size: 11px; }
 .cf-builder .formula-editor { display: flex; flex-direction: column; min-height: 0; padding: 8px 12px; }
 .cf-builder #newFormBar { min-height: 0; max-height: none; background: #111d2a; font-size: 13px; }
 .cf-builder #formText { background: #111d2a; }

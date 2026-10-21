@@ -54,7 +54,9 @@
 		sheetManager.styleVersion.value;
 		const style = props.pane.sheet.styles[props.rowNo]?.[props.colNo] ?? sheetManager.defaultStyling;
 		const colors = result.value?.colors?.get(`${props.rowNo}:${props.colNo}`) ?? {};
-		return { color: colors.fg ?? style.fg, backgroundColor: colors.bg ?? style.bg };
+		const align = colors.align ?? style.align;
+		return { color: colors.fg ?? style.fg, backgroundColor: colors.bg ?? style.bg,
+			textAlign: ['left', 'center', 'right'].includes(align) ? align : presentation.value?.align ?? 'left' };
 	});
 			
 	async function handleClick(event) {

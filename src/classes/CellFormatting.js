@@ -9,6 +9,7 @@ export const formatDefaults = Object.freeze({
 export const formatTypes = ['general', 'number', 'currency', 'date', 'time'];
 export const formatKeys = Object.keys(formatDefaults);
 export const formatTypeLabel = kind => ({ general: 'General', number: 'Number', currency: 'Currency', date: 'Date', time: 'Time' })[kind];
+export const horizontalAlignments = ['auto', 'left', 'center', 'right'];
 
 // Flat, primitive metadata fits workbook persistence without changing the raw cell schema.
 export function formatSpec(style = {}) {
@@ -103,10 +104,13 @@ function dateText(value, spec) {
 
 // Returns presentation only. Callers retain the exact value and legacy native-number APIs.
 export function presentCell(value, style, generalText = String(value ?? '')) {
+	// General uses the calculated type, not numeric-looking formula text. Explicit styles
+	// are resolved by the renderer so a matching CF auto can bypass direct alignment.
+	const align = typeof value === 'number' || isBigNumber(value) ? 'right' : 'left';
 	try {
 		const spec = formatSpec(style);
-		if (spec.formatKind === 'general' || value === '' || value == null || value?.kind === 'chart') return { text: generalText, warning: '' };
-		if (['date', 'time'].includes(spec.formatKind)) return { text: dateText(value, spec), warning: '' };
+		if (spec.formatKind === 'general' || value === '' || value == null || value?.kind === 'chart') return { text: generalText, warning: '', align };
+		if (['date', 'time'].includes(spec.formatKind)) return { text: dateText(value, spec), warning: '', align: 'right' };
 		let number = cellToValue(typeof value === 'number' ? String(value) : value);
 		if (!isBigNumber(number) || !number.isFinite()) throw new Error('This format requires a finite real number');
 		if (spec.formatKind === 'number' && spec.formatPercent) {
@@ -123,6 +127,6 @@ export function presentCell(value, style, generalText = String(value ?? '')) {
 		}
 		if (spec.formatKind === 'currency') text = `${text[0] === '-' ? '-' : ''}${spec.formatCurrency} ${text.replace(/^-/, '')}`;
 		else if (spec.formatPercent) text += '%';
-		return { text, warning: tooLong ? 'Fixed display exceeds 1024 characters; showing scientific notation' : '' };
-	} catch (error) { return { text: generalText, warning: error.message }; }
+		return { text, warning: tooLong ? 'Fixed display exceeds 1024 characters; showing scientific notation' : '', align: 'right' };
+	} catch (error) { return { text: generalText, warning: error.message, align }; }
 }

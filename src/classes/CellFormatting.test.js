@@ -20,7 +20,7 @@ const show = (value, style) => presentCell(cellToValue(value), style, value);
 const number = { formatKind: 'number', formatDigits: 2 };
 
 test('display rounding, percent scaling and grouping retain decimal precision, signs and raw fallbacks', () => {
-	assert.deepEqual(show('1234.56789', { ...number, formatGroup: true, formatDigits: 5 }), { text: '1,234.56789', warning: '' });
+	assert.deepEqual(show('1234.56789', { ...number, formatGroup: true, formatDigits: 5 }), { text: '1,234.56789', warning: '', align: 'right' });
 	assert.equal(show('999.995', number).text, '1000.00');
 	assert.equal(show('-1.005', number).text, '-1.01');
 	assert.equal(show('-0.004', number).text, '0.00');
@@ -38,7 +38,7 @@ test('display rounding, percent scaling and grouping retain decimal precision, s
 
 test('ISO dates are civil text, instants project to explicit zones, and clocks never acquire invented dates', () => {
 	const date = { formatKind: 'date', formatPreset: 'long' }, timed = { ...date, formatIncludeTime: true };
-	assert.deepEqual(show('2024-02-29', date), { text: '29 Feb 2024', warning: '' });
+	assert.deepEqual(show('2024-02-29', date), { text: '29 Feb 2024', warning: '', align: 'right' });
 	assert.equal(show('2026-10-20', { ...date, formatTimeZone: 'America/Los_Angeles' }).text, '20 Oct 2026');
 	assert.equal(show('2026-10-20T01:30:45+13:00', timed).text, '19 Oct 2026 12:30:45 UTC');
 	assert.equal(show('2026-10-20T01:30:45Z', { ...timed, formatTimeZone: 'Pacific/Auckland', formatSeconds: false }).text, '20 Oct 2026 14:30 +13:00 [Pacific/Auckland]');
@@ -53,6 +53,56 @@ test('ISO dates are civil text, instants project to explicit zones, and clocks n
 	assert.match(show('09:08', date).warning, /no date/);
 	assert.ok(show('0001-01-01T00:00+01:00', timed).warning);
 	assert.equal(show('2000-02-29', date).warning, '');
+});
+
+test('automatic alignment follows every successful number/date/time format and the typed General fallback', () => {
+	for (const formatGroup of [false, true]) for (const formatDigits of [0, 2, 64]) {
+		for (const formatPercent of [false, true]) assert.equal(show('-12.345', { ...number, formatGroup, formatDigits, formatPercent }).align, 'right');
+		for (const formatCurrency of ['NZD', 'USD', 'JPY']) assert.equal(show('-12.345', { formatKind: 'currency', formatGroup, formatDigits, formatCurrency }).align, 'right');
+	}
+	for (const formatPreset of ['iso', 'short', 'long']) for (const formatTimeZone of ['UTC', 'Pacific/Auckland']) {
+		assert.equal(show('2026-10-20', { formatKind: 'date', formatPreset, formatTimeZone }).align, 'right');
+		for (const formatSeconds of [false, true]) {
+			assert.equal(show('2026-10-20T01:30:45Z', { formatKind: 'date', formatIncludeTime: true, formatPreset, formatTimeZone, formatSeconds }).align, 'right');
+			assert.equal(show('2026-10-20T01:30:45Z', { formatKind: 'time', formatTimeZone, formatSeconds }).align, 'right');
+		}
+	}
+	assert.equal(show('09:08', { formatKind: 'time' }).align, 'right');
+	assert.equal(show('1e5000', number).align, 'right'); // bounded scientific fallback is still numeric
+	assert.equal(presentCell('123', {}).align, 'left'); // formula text, not a numeric literal
+	assert.equal(presentCell(123, {}).align, 'right');
+	for (const [value, format, expected] of [['12', {}, 'right'], ['label', number, 'left'], ['', number, 'left'],
+		['bad date', { formatKind: 'date' }, 'left'], ['2026-10-20', { formatKind: 'date', formatIncludeTime: true }, 'left'],
+		['12', { formatKind: 'unsupported' }, 'right'], ['label', { formatKind: 'unsupported' }, 'left']]) assert.equal(show(value, format).align, expected);
+	sheet.loadWorkbook([['123', '="123"', '=TRUE', '=1/0', '=VSTACK(7,9)'], ['', '', '', '', '']]);
+	assert.deepEqual(sheet.cellPresentation.value[0].map(cell => cell.align), ['right', 'left', 'left', 'left', 'right']);
+	assert.equal(sheet.cellPresentation.value[1][4].align, 'right');
+});
+
+test('alignment commands are atomic, undoable and persisted independently of number formats and colour resets', () => {
+	Object.assign(sheet.styles[0][0], { ...number, fg: 'gold', wrap: true }); history.reset(sheet);
+	const original = JSON.stringify(sheet.serializeWorkbook());
+	sheet.setStyles(':hi   align left', 0, 0);
+	assert.equal(sheet.styles[0][0].align, 'left'); assert.equal(sheet.styles[0][1].align, undefined);
+	const saved = JSON.stringify(sheet.serializeWorkbook());
+	for (const command of [':hi align center align diagonal', ':hi align auto bg', ':hi resetall align start', ':hi align right unexpected']) {
+		assert.throws(() => sheet.setStyles(command, 0, 0));
+		assert.equal(JSON.stringify(sheet.serializeWorkbook()), saved);
+	}
+	assert.equal(history.historyFor(sheet).undo.length, 2);
+	history.undo(sheet); assert.equal(JSON.stringify(sheet.serializeWorkbook()), original);
+	history.redo(sheet); assert.equal(sheet.styles[0][0].align, 'left');
+	const v = keyboard(); v.feed('gFf<CR><Esc>'); // choosing Number resets format settings, not alignment
+	assert.equal(sheet.styles[0][0].align, 'left');
+	sheet.setStyles(':hi reset align center', 0, 0);
+	assert.equal(sheet.styles[0][0].align, 'center'); assert.equal(sheet.styles[0][0].fg, 'white');
+	sheet.resetAllStyles(); assert.equal(sheet.styles[0][0].align, 'center'); assert.equal(sheet.styles[0][0].wrap, true);
+	sheet.loadWorkbook(JSON.parse(JSON.stringify(sheet.serializeWorkbook())));
+	assert.equal(sheet.styles[0][0].align, 'center'); assert.equal(sheet.styles[0][0].formatKind, 'number');
+	sheet.setStyles(':hi align auto', 0, 0);
+	assert.equal(Object.hasOwn(sheet.styles[0][0], 'align'), false);
+	assert.equal(sheet.styles[0][0].formatKind, 'number');
+	history.undo(sheet); assert.equal(sheet.styles[0][0].align, 'center');
 });
 
 test('FORMAT previews a fixed visual range, isolates input, preserves other styles, and commits one undoable workbook edit', () => {

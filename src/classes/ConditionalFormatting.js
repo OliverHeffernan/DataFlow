@@ -1,5 +1,6 @@
 import { builderCalls } from './FormulaBuilder.js';
 import { cellLabel, columnIndex, evaluateFormula, FormulaError, truthy, validatePredicate } from './FormulaFunctions.js';
+import { horizontalAlignments } from './CellFormatting.js';
 
 const namedColors = new Set(('aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato transparent turquoise violet wheat white whitesmoke yellow yellowgreen').split(' '));
 
@@ -12,9 +13,10 @@ function text(argument) {
 
 export function compileConditionalRule(source) {
 	if (typeof source !== 'string') throw new Error('A conditional rule must be builder text');
+	// Keep the existing overlay shape for consumers; colours and alignment merge per property.
 	const rule = { source, range: null, predicate: 'TRUE', colors: {}, name: '' };
 	for (const { method, args } of builderCalls(source, 'CF')) {
-		if (!['range', 'when', 'fg', 'bg', 'name'].includes(method)) throw new Error(`Unknown CF method .${method}()`);
+		if (!['range', 'when', 'fg', 'bg', 'align', 'name'].includes(method)) throw new Error(`Unknown CF method .${method}()`);
 		if (args.length !== 1 || !args[0]) throw new Error(`.${method}() expects one argument`);
 		if (method === 'range') {
 			const match = args[0].match(/^([A-Z]+)(\d+)(?:\s*:\s*([A-Z]+)(\d+))?$/);
@@ -25,6 +27,11 @@ export function compileConditionalRule(source) {
 		} else if (method === 'when') {
 			validatePredicate(args[0]); rule.predicate = args[0];
 		} else if (method === 'name') rule.name = text(args[0]);
+		else if (method === 'align') {
+			const align = text(args[0]);
+			if (!horizontalAlignments.includes(align)) throw new Error('Alignment must be auto, left, center or right');
+			rule.colors.align = align;
+		}
 		else {
 			const color = text(args[0]);
 			if (!/^#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/i.test(color) && !namedColors.has(color.toLowerCase())) throw new Error(`Invalid colour: ${color}; use a hex or CSS named colour`);
@@ -32,7 +39,7 @@ export function compileConditionalRule(source) {
 		}
 	}
 	if (!rule.range) throw new Error('Add .range(A0:D3)');
-	if (!Object.keys(rule.colors).length) throw new Error('Add .fg("colour") or .bg("colour")');
+	if (!Object.keys(rule.colors).length) throw new Error('Add .fg("colour"), .bg("colour") or .align("left"|"center"|"right"|"auto")');
 	return rule;
 }
 

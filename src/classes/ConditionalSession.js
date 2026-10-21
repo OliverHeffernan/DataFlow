@@ -2,6 +2,8 @@ import { shallowReactive } from 'vue';
 import VimKeyboard from './VimKeyboard.js';
 import { cellLabel } from './FormulaFunctions.js';
 import { compileConditionalRule } from './ConditionalFormatting.js';
+import { builderCalls } from './FormulaBuilder.js';
+import { horizontalAlignments } from './CellFormatting.js';
 
 // One window's unapplied text buffer. Its Vim edits/undo never touch cells or workbook history.
 export default class ConditionalSession {
@@ -59,6 +61,22 @@ export default class ConditionalSession {
 			this.edits = [...this.edits.slice(0, this.position + 1), { text: this.state.draft, cursor: this.editor.formulaCursor, before: this.changeStart }]; this.position++;
 		}
 		this.changeStart = null;
+	}
+	get alignment() {
+		const call = builderCalls(this.state.draft, 'CF').reverse().find(call => call.method === 'align');
+		return call ? JSON.parse(call.args[0]) : '';
+	}
+	setAlignment(align) {
+		if (!this.state.editing) throw new Error('Open a rule draft first');
+		if (align !== '' && !horizontalAlignments.includes(align)) throw new Error('Alignment must be auto, left, center or right');
+		// Parse structure, not a regex: quoted names/conditions may themselves contain .align().
+		// An alignment-only draft can lose its last style and remain editable until corrected.
+		const calls = builderCalls(this.state.draft, 'CF').filter(call => call.method !== 'align');
+		if (align) calls.push({ method: 'align', args: [JSON.stringify(align)] });
+		this.checkpoint();
+		this.keyCursor = this.editor.formulaCursor;
+		this.editor.setFormula('=CF()' + calls.map(call => `\n  .${call.method}(${call.args.join(', ')})`).join(''));
+		this.checkpoint(); this.editor.move(this.editor.point);
 	}
 	apply() {
 		if (!this.state.editing) throw new Error('Open a rule draft first');

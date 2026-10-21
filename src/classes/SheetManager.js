@@ -2,7 +2,7 @@ import { ref, shallowRef, shallowReactive, toDisplayString } from "vue";
 //import { reactive } from "vue";
 import { FormulaError, cellLabel, cellToValue, evaluateFormula, toCellValue, rewriteSheetReferences, rewriteMarkReferences } from "./FormulaFunctions.js";
 import { markName, datasetColumns, validateMarks, structuralMarks } from './WorkbookMarks.js';
-import { presentCell } from './CellFormatting.js';
+import { horizontalAlignments, presentCell } from './CellFormatting.js';
 import SyntaxHighlighting from "./SyntaxHighlighting.js";
 import { evaluateChart } from "./ChartFormula.js";
 import { adjustConditionalRules, evaluateConditionalRules, validateConditionalRules } from './ConditionalFormatting.js';
@@ -821,52 +821,46 @@ export default class SheetManager {
 	}
 
 	loadStyles() {
-		// Every view binds colours from the model; never write one window's DOM to style a sheet.
+		// Every view binds styling from the model; never write one window's DOM to style a sheet.
 		this.styleVersion.value++;
 	}
 
 	setStyles(com, row, col, recordUndo = true) {
-		const split = com.split(" ");
-		let validCom = true;
-		for (let i = 1; i < split.length; i++) {
-			const color = split[i];
-			const style = new Option().style;
-			style.color = color;
-			// check if it is a valid css color
-			const validColor = style.color !== "";
-			if (split[i - 1] == "bg") {
-				if (validColor) {
-					this.styles[row][col].bg = split[i];
-				} else {
-					this.setPlaceholder(color + "is not a valid CSS color");
-				}
-			} else if (split[i - 1] == "fg") {
-				if (validColor) {
-					this.styles[row][col].fg = split[i];
-				} else {
-					this.setPlaceholder(color + "is not a valid CSS color");
-				}
-			} else if (split[i] == "reset") {
-				this.resetStyles(row, col);
-			} else if (split[i] == "resetall") {
-				this.resetAllStyles();
+		const tokens = com.trim().split(/\s+/).slice(1), changes = [];
+		// Validate the whole command before mutating styles or publishing history.
+		for (let i = 0; i < tokens.length; i++) {
+			const key = tokens[i];
+			if (key === 'reset' || key === 'resetall') { changes.push([key]); continue; }
+			if (!['fg', 'bg', 'align'].includes(key) || tokens[i + 1] === undefined) throw new Error('Usage: :hi fg <colour> bg <colour> align <auto|left|center|right> (or reset / resetall)');
+			const value = tokens[++i];
+			if (key === 'align') {
+				if (!horizontalAlignments.includes(value)) throw new Error('Alignment must be auto, left, center or right');
+			} else {
+				const style = new Option().style;
+				style.color = value;
+				if (!style.color) throw new Error(`${value} is not a valid CSS color`);
 			}
+			changes.push([key, value]);
+		}
+		for (const [key, value] of changes) {
+			if (key === 'resetall') this.resetAllStyles(false);
+			else if (key === 'reset') Object.assign(this.styles[row][col], this.defaultStyling);
+			else if (key === 'align' && value === 'auto') delete this.styles[row][col].align;
+			else this.styles[row][col][key] = value;
 		}
 		this.loadStyles();
-		if (recordUndo) {
-			historyManager.do(this, 105);
-		}
+		if (recordUndo) historyManager.do(this);
 	}
 
 	resetStyles(row, col) {
 		this.setStyles(":hi fg white bg transparent", row, col);
 	}
 
-	resetAllStyles() {
+	resetAllStyles(recordUndo = true) {
 		// Existing highlight resets affect colours, not number formats or layout metadata.
 		this.styles = this.styles.map(row => row.map(style => ({ ...style, fg: this.defaultStyling.fg, bg: this.defaultStyling.bg })));
 		this.loadStyles();
-		historyManager.do(this, 141);
+		if (recordUndo) historyManager.do(this);
 	}
 
 	setConditionalRules(rules) {
@@ -997,7 +991,7 @@ export default class SheetManager {
 			const preview = this.formatPreview?.sheet === record ? this.formatPreview.styles : null;
 			const presentation = result.values.map((row, r) => row.map((legacy, c) => {
 				const value = result.typed[r][c], text = toDisplayString(legacy);
-				return { value, ...(result.errors.has(keyOf(r, c)) ? { text, warning: '' } : presentCell(value, preview?.get(keyOf(r, c)) ?? record.styles[r]?.[c], text)) };
+				return { value, ...(result.errors.has(keyOf(r, c)) ? { text, warning: '', align: 'left' } : presentCell(value, preview?.get(keyOf(r, c)) ?? record.styles[r]?.[c], text)) };
 			}));
 			results.set(record, { ...result, presentation });
 		}

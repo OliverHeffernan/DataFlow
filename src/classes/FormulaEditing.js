@@ -20,9 +20,9 @@ export const functionHelp = {
 	'.title': ['"text"'], '.xLabel': ['"text"'], '.yLabel': ['"text"'],
 	'.size': ['width', 'height'], '.width': ['pixels'], '.height': ['pixels'], '.position': ['x', 'y'],
 	CF: [], '.range': ['A0:D3'], '.when': ['condition per target cell'],
-	'.fg': ['"colour"'], '.bg': ['"colour"'], '.name': ['"text"'],
+	'.fg': ['"colour"'], '.bg': ['"colour"'], '.name': ['"text"'], '.align': ['"auto" | "left" | "center" | "right"'],
 };
-const conditionalMethods = new Set(['.range', '.when', '.fg', '.bg', '.name']);
+const conditionalMethods = new Set(['.range', '.when', '.fg', '.bg', '.name', '.align']);
 
 export function quotedEnd(text, at) {
 	const quote = text[at];

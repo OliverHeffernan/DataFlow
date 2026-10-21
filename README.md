@@ -294,6 +294,10 @@ If I wanted to keep the background the same, but change the foreground/font colo
 ```
 :hi fg black
 ```
+Set horizontal alignment with `:hi align left`, `:hi align center`, or `:hi align right`; combine it with colours, for example `:hi fg gold align center`. These commands affect the current cell. `:hi align auto` removes the explicit alignment and restores automatic defaults. Colour resets preserve alignment and number formats.
+
+Numeric General values and successfully formatted Number, Percent, Currency, Date and Time cells default to right alignment. General text, booleans, blanks and errors default to left alignment. Conditional rules can override alignment with `.align("left"|"center"|"right"|"auto")`, also available through the rule pane’s Alignment control. See [conditional rules](docs/keyboard.md#conditional-rules-use-the-formula-builder) for precedence.
+
 This has support for all CSS colors, including hex values, named colors, and rgb values. But when typing rgb values, make sure not to include any spaces between values.
 
 When using rgb values, do this:
