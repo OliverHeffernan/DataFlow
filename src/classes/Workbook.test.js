@@ -209,6 +209,28 @@ test('lookup and join cross-sheet cycles cannot be hidden by defaults or IFERROR
 	assert.match(sheet.cellErrors.get('0:0'), /spill cycle/);
 });
 
+test('row streams retain lazy foreign and relative reads, named ranges and object tables across rename and reopen', () => {
+	const report = Array.from({ length: 6 }, () => Array(6).fill(''));
+	report[0][0] = '=rowstream(`people).map(a->{name:a.name,age:a.age}).toTable()';
+	report[0][3] = '=rowstream(\'People 2026\'!A0:B2).map(a->a.age).sum()';
+	report[1][3] = '=rowstream(\'People 2026\'![-3]{0}:[-2]{2}).map(a->a.age).sum()';
+	report[2][3] = '=rowstream(\'People 2026\'!A0:B3).anyMatch(a->a.name="John")';
+	report[3][3] = '=SUM(B1:B2)';
+	sheet.loadWorkbook({ sheets: [
+		{ name: 'People 2026', rows: [['name', 'age'], ['John', '0.1'], ['Mary', '0.2'], ['Later', '=1/0']] },
+		{ name: 'Report', rows: report },
+	], activeSheet: 1 });
+	sheet.setMark('people', { r0: 0, c0: 0, r1: 2, c1: 1 }, 'range', 'People 2026');
+	assert.deepEqual(sheet.getValue(0, 0), [['name', 'age'], ['John', 0.1], ['Mary', 0.2]]);
+	assert.deepEqual([0, 1, 2, 3].map(row => sheet.getValue(row, 3)), [0.3, 0.3, true, 0.3]);
+	sheet.switchSheet('People 2026'); sheet.renameSheet("O'Brien"); sheet.switchSheet('Report');
+	assert.match(sheet.rows[0][3], /'O''Brien'!/);
+	sheet.loadWorkbook(JSON.parse(JSON.stringify(sheet.serializeWorkbook())));
+	assert.deepEqual(sheet.getValue(0, 0), [['name', 'age'], ['John', 0.1], ['Mary', 0.2]]);
+	assert.deepEqual([0, 1, 2, 3].map(row => sheet.getValue(row, 3)), [0.3, 0.3, true, 0.3]);
+	assert.equal(sheet.rows[1][0], '');
+});
+
 test('rename and its cross-sheet rewrites undo together without changing text or chart titles', () => {
 	sheet.renameSheet('Inputs'); sheet.createSheet('Report');
 	sheet.rows[0][0] = '=Inputs!B0'; sheet.rows[0][1] = '=IF(TRUE,"Inputs!A0",Inputs!A0)';

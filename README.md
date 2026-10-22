@@ -63,38 +63,14 @@ For example, if you had a column of values that you wanted a sum for, you could 
 This gets the sum from row 0, to the previous row, meaning that if you add any more values in between, it will update immediately without needing to readjust the range. This applies for AVG, COUNT, and can also be utilised in SUMIF, AVGIF, and COUNTIF functions.
 
 As shown in the above code, to get the current column, you can type []. You can also use {} to get the current row.
-#### SUM: `SUM(range)`
-SUM provides a sum of all the values in the given range.
 
-The range is of format A0:B15, which selects all cells within a rectangle starting at A0 and ending at B15.
+### Formula reference and types
 
-#### AVG/MEAN: `AVG(range)`
-AVG averages all values given in a range.
+The [complete formula reference](docs/formulas.md) documents every function and method, including `SUM`, `AVG`/`MEAN`, `COUNT`, conditional aggregates, arrays, streams, Optionals, chart/conditional builders and exposed mathjs functions. Each entry includes parameter types, return types, conversions, defaults, empty behavior, errors and examples. The [type reference](docs/formulas.md#formula-types) describes scalars, records, arrays/tables, `Stream<T>`, `Optional<T>`, callbacks, Chart and other formula values.
 
-#### COUNT: `COUNT(range)`
-Returns the number of cells in the range.
+Implementations, structured type descriptors and method documentation live together. The reference and editor signatures are generated from those definitions, not separate handwritten help tables. Run `npm run docs:generate` after changing a definition; `npm run docs:check` detects stale output.
 
-#### SUMIF: `SUMIF(conditionRange, criteria, valueRange)`
-SUMIF allows you to filter through the range, valueRange, adding it if a corresponding cell is equal to the criteria. This is useful for things like budgets, where you may want to see a sum of your spending in certain categories.
-
-criteria is of format =3
-
-below is an example of a SUMIF function being used.
-
-`=SUMIF(A0:A10,=5,B0:B10)`
-
-The above function would return a sum of all values on column B, within rows 0 and 10, where the corresponding value in column A is 5.
-
-Criteria support `=`, `<>` / `!=` / `!`, `<`, `>`, `<=`, and `>=`. Criteria may be quoted (e.g. `">5"`) or use the existing unquoted syntax (e.g. `>5`).
-
-There is currently no support for cell ranges being provided in the criteria.
-
-There are more IF functions below:
-`COUNTIF`: count if
-`AVGIF`: average if
-`SUMIF`: sum if
-
-All of the above if functions take the same parameters as SUMIF.
+For a budget, `=SUMIF(A0:A10,=5,B0:B10)` sums values in column B whose corresponding A cell equals 5. See [SUMIF](docs/formulas.md#function-SUMIF) for criteria and conversion rules, and [COUNTIF](docs/formulas.md#function-COUNTIF)/[AVGIF](docs/formulas.md#function-AVGIF) for their distinct signatures.
 
 ### Nested formulas and dynamic arrays
 
@@ -107,16 +83,7 @@ Functions accept other functions as arguments. Ranges and array results retain t
 =SORT(UNIQUE(FILTER(A1:C6, C1:C6>0)), 2, -1)
 ```
 
-| Function | Behavior |
-| --- | --- |
-| `IF(condition, whenTrue, [whenFalse])` | Evaluate only the selected branch; the condition must be scalar. Omitted `whenFalse` defaults to FALSE. |
-| `IFERROR(value, fallback)` | Use the fallback if evaluating the value fails. Literal error-looking strings are still text; circular references remain errors. |
-| `FILTER(array, include, [ifEmpty])` | Keep rows whose corresponding mask is true. The mask must have one value per row. No matches returns `ifEmpty`, or `#CALC!` if omitted. |
-| `VSTACK(array, …)` | Stack arrays vertically. All inputs must have the same width. |
-| `HSTACK(array, …)` | Stack arrays horizontally. All inputs must have the same height. |
-| `SORT(array, [columnIndex], [sortOrder])` | Sort rows by a **zero-based** column within the input array (default 0), ascending (1) or descending (-1). Blanks sort last. |
-| `UNIQUE(array)` | Keep distinct rows, in their original order. |
-| `AND(condition, …)`, `OR(condition, …)`, `NOT(condition)` | Combine scalar conditions or elementwise array masks. |
+See the [function reference](docs/formulas.md#spreadsheet-and-builder-functions) for typed signatures, shape requirements and defaults.
 
 Comparisons accept `=`, `<>`, `<`, `>`, `<=`, `>=`, and mathjs `==`/`!=`. Comparisons and arithmetic apply elementwise to ranges; scalars broadcast, while two arrays must have the same dimensions. Text is case-sensitive. Numeric cell text is treated as numbers; quoted text remains text. Existing `SUM`, `AVG`/`MEAN`, and `COUNT` work on nested array results. For compatibility, COUNT counts cells (including blanks/text) and AVG divides the numeric sum by that cell count.
 
@@ -125,6 +92,35 @@ Real-number formulas use 64-significant-digit decimal arithmetic, including inte
 An array formula **spills** into empty cells below and to its right. A dashed outline identifies the selected spill and the pane's bottom bar names its source. Press `i` or Enter on a spill child to edit its source formula. Outputs are derived, not independently stored. Source changes, undo/redo and reopening a sheet rebuild them. A single reference to an array source passes the full array to another formula; a range reads each displayed element. Charts can read spilled values too.
 
 Occupied destinations, overlapping spills and sheet edges produce `#SPILL!` without overwriting anything. The pane's bottom bar and the cell tooltip explain errors. A FILTER mask or stack dimension mismatch gives `#VALUE!`; out-of-sheet references give `#REF!`. This is a focused array-function set, not complete Excel formula compatibility: FILTER filters rows, IF conditions are scalar, and stacks reject incompatible dimensions instead of padding them.
+
+### Row streams
+
+`rowstream(range)` treats the first row as headings and the remaining rows as read-only records. Use `a.name` for identifier headings or `a["Last Name"]` for other names. Headings must be nonblank, unique text; field names are case-sensitive. The heading row never passes through callbacks.
+
+```text
+=rowstream(A0:C23).toTable()
+=rowstream(A0:C23).filter(a->a.name=="John").map(a->{name:a.name+" "+a.lastName,age:a.age}).toTable()
+=rowstream(A0:C23).map(a->a.age).average().orElse(0)
+=rowstream(A0:C23).map(a->a.age).sum()
+=rowstream(A0:C23).map(a->a.lastName).reduce("",(a,b)->IF(a=="",b,a+","+b))
+```
+
+Lambdas use `a->expression` or `(a,b)->expression`, with ordinary formula functions, comparisons, cell references and decimal arithmetic. Inside stream expressions, `+` concatenates when either operand is text; otherwise it adds numbers. Use straight quotes and an explicit `+` between each part. Lambdas are interpreted expressions, not JavaScript: statements, assignment, arbitrary methods and prototype access are unavailable.
+
+The generated [Stream methods](docs/formulas.md#stream-methods) reference contains all intermediate and terminal signatures. **A terminal operation is required.** Further methods belong to its return type: `findFirst`, `min`, `max` and `average` return `Optional<T>`, whereas seeded `reduce`, `sum`, `count`, match tests and `toTable` return their values directly.
+
+Unwrap an Optional explicitly before display or arithmetic. For example:
+
+```text
+=rowstream(A0:C23).filter(a->a.name=="John").findFirst().map(a->a.age).orElse(0)
+=rowstream(A0:C23).map(a->a.age).min().orElseThrow()
+```
+
+`orElse` evaluates its fallback only when empty. Zero, FALSE and empty text remain present values; calculation errors do not become empty Optionals. Records stay records throughout the chain, so Optional mappings can access their fields. An unwrapped record displays as a headed one-row table. See [Optional methods](docs/formulas.md#optional-methods) for mapping, filtering, flattening and presence checks. Existing formulas ending in `.min()`, `.max()`, `.average()` or `.findFirst()` must now explicitly unwrap; `.orElseThrow()` requires a value and `.orElse(...)` supplies a default.
+
+`rowstream(A0:C23).toTable()` reproduces the entire range, including its headings, just like an always-true FILTER. Empty filters still produce the original headings. Literal object and positional projections retain their declared headings even when empty; for other computed empty projections, supply explicit headings. A scalar projection can be named with `.toTable("surname")`.
+
+Range sources read rows on demand. Generator-backed filter/map/limit/skip stages do not build intermediate tables, and short-circuit terminals do not read later rows. Sorting buffers its input; distinct retains seen keys; toTable materializes the final result (up to 1,000,000 cells). Array-expression sources, such as `rowstream(VSTACK(...))`, evaluate that source array first. Existing cross-sheet and relative range notation, recalculation, decimal precision and spill protection apply unchanged.
 
 ### Lookups and joins
 
@@ -191,16 +187,7 @@ Enter a chart builder as a cell formula. Commit it with Enter to render an SVG c
 
 For a minimal chart, use `=CHART().line().series(B1:B6)`. A chart type is required: `=CHART()` and builders without a type display a blank cell. While editing, type a dot or method prefix after `CHART()` for builder suggestions; Tab inserts the method and parentheses. Signature help highlights the current method argument.
 
-| Builder method | Meaning |
-| --- | --- |
-| `.line()`, `.bar()`, `.scatter()`, `.pie()` | Required chart type; there is no default. Bars are grouped by series. |
-| `.x(range)` | Shared x-labels, scatter x-values, or pie slice labels. Defaults to point numbers starting at 1. |
-| `.series(range, "name")` | Add a series. Repeat for multiple series (except pie); the name is optional. |
-| `.title("text")` | Set the title. |
-| `.xLabel("text")`, `.yLabel("text")` | Set axis labels (ignored for pie charts). |
-| `.size(width, height)` | Overall chart dimensions in pixels, including title and axes. Defaults to 320 × 200. |
-| `.width(width)`, `.height(height)` | Set either dimension independently. |
-| `.position(x, y)` | Nonnegative pixel offsets from the formula cell's top-left corner. Defaults to (0, 0); larger offsets can place the chart over other cells. |
+See the generated [Chart methods reference](docs/formulas.md#chart-methods) for typed parameters, defaults, return types and examples.
 
 Methods can appear in any order. Later configuration calls override earlier settings; `.series()` always adds another series. For example, `.size(360, 220).height(280)` produces a 360 × 280 chart. Sizes must be positive numeric literals; positions must be nonnegative numeric literals. Chart dimensions and offsets never change cell sizes. Charts move with their formula cells when the sheet scrolls. Very small charts scale their contents down to fit.
 

@@ -2,9 +2,17 @@
 // are only produced at the sheet's display/API boundary, not between arithmetic operations.
 const config = { number: 'BigNumber', precision: 64, relTol: 1e-64, absTol: 0 }
 import { create, all } from 'mathjs'
+import { extractLambdas } from './FormulaLambda.js';
+import { FormulaError, AnyType, NumberType, TextType, BooleanType, ScalarType, NumericInputType, ConditionType, ArrayType, RowType, TableType, RecordType, StreamType, OptionalType, LambdaType, typeOf, typeParameter, union, parameter, defineFunction, validateArguments, validateResult, resultType } from './FormulaTypes.js';
+import { mathSignatures } from './FormulaMathSignatures.js';
+export { FormulaError } from './FormulaTypes.js';
 const math = create(all, config)
 // Cache syntax only. Values, deferred references, pure-mode checks and RNG calls stay per evaluation.
 const expressionTrees = new Map();
+const T = typeParameter('T'), U = typeParameter('U'), A = typeParameter('A');
+StreamType.itemParameter = OptionalType.itemParameter = T;
+const ArrayInputType = union(ScalarType, ArrayType.of(ScalarType));
+const ConditionInputType = union(ConditionType, ArrayType.of(ConditionType));
 
 /*
  * Expression-tree formula engine.
@@ -16,14 +24,6 @@ const expressionTrees = new Map();
  *   ctx.ref(row, col)   -> scalar, or the full 2D array of an array formula
  *   ctx.range(r0, c0, r1, c1) -> 2D array of element values
  */
-
-// A user-visible formula error. `message` is shown in the cell, `explanation` is the readable reason.
-export class FormulaError extends Error {
-	constructor(message, explanation = message) {
-		super(message);
-		this.explanation = explanation;
-	}
-}
 
 // Control-flow errors (cycle detection, aborted speculative evaluation) set `uncatchable`, so IFERROR
 // never hides them and results never depend on evaluation order.
@@ -73,9 +73,16 @@ const flat = values => values.flatMap(value => to2D(value).flat());
 const map2D = (array, fn) => array.map(row => row.map(fn));
 
 // Normalise a mathjs result (Matrix, 1D array, nested array) into the 2D convention.
-function normalise(value) {
+function normalise(value, expressionValue = false) {
 	if (value && typeof value.toArray === "function" && math.isMatrix(value)) value = value.toArray();
 	if (value === undefined || value === null) return "";
+	const type = typeOf(value);
+	if (expressionValue && (StreamType.accepts(value) || OptionalType.accepts(value) || LambdaType.accepts(value) || RecordType.accepts(value))) return value;
+	if (!expressionValue) {
+		const presentation = type.present(value);
+		if (presentation.kind === 'record' || type.base === RowType) return streamTable(stream(function* () { yield value; }, null));
+		value = presentation.value;
+	}
 	if (!isArray(value)) return value;
 	if (value.length === 0) throw new FormulaError("#CALC!", "The result is an empty array");
 	if (!value.some(isArray)) return [value.map(scalar)];
@@ -86,11 +93,14 @@ function normalise(value) {
 }
 
 function scalar(value) {
+	if (StreamType.accepts(value) || OptionalType.accepts(value) || LambdaType.accepts(value)) typeOf(value).present(value);
+	if (RecordType.accepts(value)) throw new FormulaError('#VALUE!', 'A record is not a scalar; select a field or convert it to a table');
 	if (isArray(value) || math.isMatrix(value)) throw new FormulaError("#VALUE!", "Arrays with more than two dimensions are not supported");
 	return value ?? "";
 }
 
 function num(value) {
+	scalar(value);
 	if (typeof value === "number") return math.bignumber(String(value));
 	if (typeof value === "boolean") return math.bignumber(Number(value));
 	if (value === "" || value == null) return math.bignumber(0);
@@ -104,6 +114,7 @@ function num(value) {
 }
 
 export function truthy(value) {
+	scalar(value);
 	if (typeof value === "boolean") return value;
 	if (typeof value === "number") return value !== 0 && !Number.isNaN(value);
 	if (math.isBigNumber(value)) return !value.isZero() && !value.isNaN();
@@ -120,6 +131,7 @@ export function truthy(value) {
 
 // Spreadsheet comparison: blanks act as 0 against numbers, numbers sort before text, text compares exactly.
 export function compareValues(a, b) {
+	scalar(a); scalar(b);
 	if (a === "" && (typeof b === "number" || typeof b === "boolean" || math.isBigNumber(b))) a = 0;
 	if (b === "" && (typeof a === "number" || typeof a === "boolean" || math.isBigNumber(a))) b = 0;
 	if (typeof a === "boolean") a = Number(a);
@@ -270,22 +282,51 @@ function checkMatchSize(name, rows, cols) {
 }
 
 // Spreadsheet functions receive unevaluated argument nodes, so IF/IFERROR/FILTER can be lazy.
-const FUNCTIONS = {
-	SUM: (args, evaluate) => { arity("SUM", args, 1, Infinity); return sumOf(args.map(evaluate)); },
-	COUNT: (args, evaluate) => { arity("COUNT", args, 1, Infinity); return flat(args.map(evaluate)).length; },
-	AVG: (args, evaluate) => average("AVG", args, evaluate),
-	MEAN: (args, evaluate) => average("MEAN", args, evaluate),
-	SUMIF: (args, evaluate) => conditional("SUMIF", args, evaluate),
-	COUNTIF: (args, evaluate) => conditional("COUNTIF", args, evaluate),
-	AVGIF: (args, evaluate) => conditional("AVGIF", args, evaluate),
-	IF(args, evaluate) {
+export const formulaFunctions = {
+	rowstream: defineFunction({ parameters: [parameter('rangeIncludingHeadings', ArrayInputType)], returns: StreamType.of(RecordType),
+		description: 'Read a range or array as headed records. The first row supplies unique nonblank text field names; remaining rows are read lazily. No terminal operation is implied.',
+		errors: ['#VALUE!: invalid headings or source shape; source/reference errors propagate when read.'], examples: ['rowstream(VSTACK("age",23,19)).toTable()'], run(args, evaluate, ctx) {
+		arity('rowstream', args, 1);
+		const iterator = streamRows(args[0], ctx, evaluate)[Symbol.iterator]();
+		const first = iterator.next();
+		if (first.done) throw new FormulaError('#VALUE!', 'rowstream requires a header row');
+		const headers = first.value;
+		validateStreamHeaders(headers);
+		return stream(function* () {
+			for (let next = iterator.next(); !next.done; next = iterator.next()) {
+				yield record(headers.map((name, index) => [name, next.value[index]]));
+			}
+		}, { kind: 'record', headers });
+	} }),
+	SUM: defineFunction({ parameters: [parameter('values', ArrayInputType, { rest: true, required: true })], returns: ScalarType,
+		description: 'Sum numeric values across all cells in all arguments. Text and blanks are ignored; booleans count as 1/0. Ordinary real inputs return Number; compatible mathjs numeric values retain their numeric type. Unlike Stream.sum, numeric text literals are not converted.',
+		errors: ['Source errors propagate; charts and unresolved expression values are not numeric inputs.'], examples: ['SUM(0.1,0.2)', 'SUM(VSTACK(2,"ignored",3))'],
+		run: (args, evaluate) => sumOf(args.map(evaluate)) }),
+	COUNT: defineFunction({ parameters: [parameter('values', ArrayInputType, { rest: true, required: true })], returns: NumberType,
+		description: 'Count all cells, including text and blanks. This preserves DataFlow compatibility, not Excel numeric-only COUNT.', examples: ['COUNT(VSTACK(2,"", "text"))'], run: (args, evaluate) => flat(args.map(evaluate)).length }),
+	AVG: defineFunction({ parameters: [parameter('values', ArrayInputType, { rest: true, required: true })], returns: ScalarType,
+		description: 'Divide SUM by COUNT of all supplied cells, including text/blanks in the divisor. Ordinary real inputs return Number; compatible mathjs numeric inputs retain their numeric type. This is not Stream.average and does not return Optional.', examples: ['AVG(VSTACK(2,"",4))'], run: (args, evaluate) => average('AVG', args, evaluate) }),
+	MEAN: defineFunction({ parameters: [parameter('values', ArrayInputType, { rest: true, required: true })], returns: ScalarType,
+		description: 'Alias of AVG: numeric sum divided by every supplied cell, including text/blanks. Returns Number for ordinary real inputs.', examples: ['MEAN(2,4)'], run: (args, evaluate) => average('MEAN', args, evaluate) }),
+	SUMIF: defineFunction({ parameters: [parameter('conditionRange', ArrayInputType), parameter('criteria', ScalarType), parameter('valueRange', ArrayInputType, { optional: true })], returns: ScalarType,
+		description: 'Sum numeric values whose corresponding condition matches criteria. Omitted valueRange uses conditionRange. Flattened input cell counts must match. Criteria accept =, <>, !=, !, <, >, <=, >= and legacy unquoted syntax; no range-valued criteria. Text values are ignored, booleans count as 1/0.',
+		errors: ['#VALUE!: mismatched cell counts; source errors propagate.'], examples: ['SUMIF(VSTACK(1,3),">1",VSTACK(10,20))'], run: (args, evaluate) => conditional('SUMIF', args, evaluate) }),
+	COUNTIF: defineFunction({ parameters: [parameter('conditionRange', ArrayInputType), parameter('criteria', ScalarType), parameter('legacyIgnoredRange', ArrayInputType, { optional: true })], returns: NumberType,
+		description: 'Count cells matching the same comparison criteria as SUMIF. The optional legacy third argument is accepted but not evaluated or used.', examples: ['COUNTIF(VSTACK(1,3),">1")'], run: (args, evaluate) => conditional('COUNTIF', args, evaluate) }),
+	AVGIF: defineFunction({ parameters: [parameter('conditionRange', ArrayInputType), parameter('criteria', ScalarType), parameter('valueRange', ArrayInputType, { optional: true })], returns: ScalarType,
+		description: 'Divide the matching numeric sum by the number of matching conditions, including matches with nonnumeric values. Omitted valueRange uses conditionRange. Criteria and flattened dimensions follow SUMIF. Does not return Optional.',
+		errors: ['#DIV/0!: no matches; #VALUE!: mismatched cell counts.'], examples: ['AVGIF(VSTACK(1,3),">1",VSTACK(10,20))'], run: (args, evaluate) => conditional('AVGIF', args, evaluate) }),
+	IF: defineFunction({ parameters: [parameter('condition', ConditionType), parameter('whenTrue', T, { lazy: true }), parameter('whenFalse', U, { optional: true, lazy: true })], returns: union(T, U, BooleanType),
+		description: 'Evaluate only the branch selected by one scalar condition. Omitted whenFalse returns FALSE. Branches may return different types or arrays; the return type is their union. Errors in unused branches are not evaluated.',
+		errors: ['#VALUE!: array condition or invalid condition conversion.'], examples: ['IF(TRUE,7,1/0)'], run(args, evaluate) {
 		arity("IF", args, 2, 3);
 		const condition = unwrap(evaluate(args[0]));
 		if (isArray(condition)) throw new FormulaError("#VALUE!", "IF needs a single condition; use FILTER or AND/OR masks for arrays");
 		if (truthy(condition)) return evaluate(args[1]);
 		return args.length === 3 ? evaluate(args[2]) : false;
-	},
-	IFERROR(args, evaluate) {
+	} }),
+	IFERROR: defineFunction({ parameters: [parameter('value', T, { lazy: true }), parameter('fallback', U, { lazy: true })], returns: union(T, U),
+		description: 'Evaluate value, using fallback only if evaluation fails. Error-looking text is not an error. Cycles and aborted evaluations cannot be hidden. This handles errors, not empty Optionals.', examples: ['IFERROR(1/0,"Unavailable")'], run(args, evaluate) {
 		arity("IFERROR", args, 2);
 		try {
 			return evaluate(args[0]);
@@ -293,8 +334,10 @@ const FUNCTIONS = {
 			if (isUncatchable(error)) throw error;
 			return evaluate(args[1]);
 		}
-	},
-	FILTER(args, evaluate) {
+	} }),
+	FILTER: defineFunction({ parameters: [parameter('array', ArrayInputType), parameter('include', ConditionInputType), parameter('ifEmpty', U, { optional: true, lazy: true })], returns: union(ArrayType.of(T), U),
+		description: 'Keep rows with a true mask value, in source order. Include must be one column or one row with exactly one condition per input row. Scalars promote to 1×1 arrays. Headers are ordinary rows. Fallback evaluates only if no rows match; without it no matches is an error, not Optional.empty.',
+		errors: ['#VALUE!: invalid mask dimensions; #CALC!: no matches without ifEmpty; #SPILL!: occupied or out-of-sheet output.'], examples: ['FILTER(VSTACK(2,5),VSTACK(FALSE,TRUE))'], run(args, evaluate) {
 		arity("FILTER", args, 2, 3);
 		const array = to2D(evaluate(args[0]));
 		const include = to2D(evaluate(args[1]));
@@ -306,8 +349,10 @@ const FUNCTIONS = {
 		if (rows.length) return rows.map(row => [...row]);
 		if (args.length === 3) return evaluate(args[2]);
 		throw new FormulaError("#CALC!", "FILTER found no matching rows");
-	},
-	LOOKUP(args, evaluate) {
+	} }),
+	LOOKUP: defineFunction({ parameters: [parameter('queryKeys', ArrayInputType), parameter('sourceKeys', ArrayInputType), parameter('values', ArrayInputType), parameter('ifMissing', ArrayInputType, { optional: true, lazy: true })], returns: ArrayType.of(T),
+		description: 'Return one values row per query key row, preserving query order. Key widths must match; sourceKeys and values need the same height. Multiple key columns form exact composite keys. Text is case/whitespace sensitive; numeric decimals match exactly; blank components never match. A missing-key fallback is a scalar filling the row, or a 1×output-width row, evaluated only if needed. Duplicate matches are errors even with a fallback. A 1×1 result displays as a scalar. Maximum output: 1,000,000 cells.',
+		errors: ['#N/A: missing key without fallback; #VALUE!: duplicate matches, invalid keys/shapes/fallback; #CALC!: result too large; source and spill errors propagate.'], examples: ['LOOKUP("P2",VSTACK("P1","P2"),VSTACK(10,20))'], run(args, evaluate) {
 		arity("LOOKUP", args, 3, 4);
 		const [queries, keys, values] = args.slice(0, 3).map(arg => to2D(evaluate(arg)));
 		if (keys.length !== values.length) {
@@ -331,8 +376,10 @@ const FUNCTIONS = {
 			fallback = isArray(value) ? value[0] : Array(width).fill(value);
 		}
 		return matches.map(rows => [...(rows.length ? values[rows[0]] : fallback)]);
-	},
-	JOIN(args, evaluate) {
+	} }),
+	JOIN: defineFunction({ parameters: [parameter('left', ArrayInputType), parameter('leftKeys', ArrayInputType), parameter('right', ArrayInputType), parameter('rightKeys', ArrayInputType), parameter('kind', TextType, { optional: true, default: 'left' })], returns: ArrayType.of(ScalarType),
+		description: 'Return all matching pairs: left columns followed by right columns, in left then right source order. Data/key heights and key widths must match. Exact composite-key semantics follow LOOKUP. Duplicate keys produce every pair. Kind "left" keeps unmatched left rows padded with blanks; "inner" omits them. No sorting or deduplication. Headers are ordinary rows. Maximum output: 1,000,000 cells.',
+		errors: ['#VALUE!: invalid kind, keys or shapes; #CALC!: no inner matches or output too large; source and spill errors propagate.'], examples: ['JOIN(VSTACK("a","b"),VSTACK(1,2),"x",2)'], run(args, evaluate) {
 		arity("JOIN", args, 4, 5);
 		const [left, leftKeys, right, rightKeys] = args.slice(0, 4).map(arg => to2D(evaluate(arg)));
 		const kind = args.length === 5 ? unwrap(evaluate(args[4])) : "left";
@@ -351,16 +398,23 @@ const FUNCTIONS = {
 			else if (kind === "left") result.push([...row, ...padding]);
 		});
 		return result;
-	},
-	VSTACK: (args, evaluate) => { arity("VSTACK", args, 1, Infinity); return stack("VSTACK", args.map(arg => to2D(evaluate(arg)))); },
-	HSTACK: (args, evaluate) => { arity("HSTACK", args, 1, Infinity); return stack("HSTACK", args.map(arg => to2D(evaluate(arg)))); },
-	AND: (args, evaluate) => logical("AND", args, evaluate, (a, b) => a && b),
-	OR: (args, evaluate) => logical("OR", args, evaluate, (a, b) => a || b),
-	NOT(args, evaluate) {
+	} }),
+	VSTACK: defineFunction({ parameters: [parameter('array', ArrayInputType, { rest: true, required: true })], returns: ArrayType.of(ScalarType),
+		description: 'Stack arrays vertically in argument order. Scalars promote to 1×1. Every input must have the same width; no padding or implicit headers.', errors: ['#VALUE!: incompatible widths; normal spill protection applies.'], examples: ['VSTACK(2,5)'], run: (args, evaluate) => stack('VSTACK', args.map(arg => to2D(evaluate(arg)))) }),
+	HSTACK: defineFunction({ parameters: [parameter('array', ArrayInputType, { rest: true, required: true })], returns: ArrayType.of(ScalarType),
+		description: 'Stack arrays horizontally in argument order. Scalars promote to 1×1. Every input must have the same height; no padding or implicit headers.', errors: ['#VALUE!: incompatible heights; normal spill protection applies.'], examples: ['HSTACK(2,5)'], run: (args, evaluate) => stack('HSTACK', args.map(arg => to2D(evaluate(arg)))) }),
+	AND: defineFunction({ parameters: [parameter('condition', ConditionInputType, { rest: true, required: true })], returns: union(BooleanType, ArrayType.of(BooleanType)),
+		description: 'Combine conditions elementwise with AND. All arguments evaluate; scalars broadcast, while arrays must have the same shape. Uses spreadsheet condition conversion, not JavaScript truthiness.', errors: ['#VALUE!: invalid condition or shape mismatch.'], examples: ['AND(VSTACK(TRUE,FALSE),TRUE)'], run: (args, evaluate) => logical('AND', args, evaluate, (a, b) => a && b) }),
+	OR: defineFunction({ parameters: [parameter('condition', ConditionInputType, { rest: true, required: true })], returns: union(BooleanType, ArrayType.of(BooleanType)),
+		description: 'Combine conditions elementwise with OR. All arguments evaluate; scalars broadcast and arrays require the same shape.', errors: ['#VALUE!: invalid condition or shape mismatch.'], examples: ['OR(FALSE,TRUE)'], run: (args, evaluate) => logical('OR', args, evaluate, (a, b) => a || b) }),
+	NOT: defineFunction({ parameters: [parameter('condition', ConditionInputType)], returns: union(BooleanType, ArrayType.of(BooleanType)),
+		description: 'Invert a scalar condition or every element of a condition array, preserving shape.', errors: ['#VALUE!: invalid condition conversion.'], examples: ['NOT(FALSE)'], run(args, evaluate) {
 		arity("NOT", args, 1);
 		return elementwise(evaluate(args[0]), value => !truthy(value));
-	},
-	SORT(args, evaluate) {
+	} }),
+	SORT: defineFunction({ parameters: [parameter('array', ArrayInputType), parameter('columnIndex', NumericInputType, { optional: true, default: 0 }), parameter('sortOrder', NumericInputType, { optional: true, default: 1 })], returns: ArrayType.of(T),
+		description: 'Stable row sort by a zero-based column index within the array. Order is 1 ascending or -1 descending; blanks are always last. Headers, if supplied, are ordinary data. Column and order must be integers.',
+		errors: ['#VALUE!: invalid column/order or numeric conversion; normal spill protection applies.'], examples: ['SORT(VSTACK(5,2),0,1)'], run(args, evaluate) {
 		arity("SORT", args, 1, 3);
 		const array = to2D(evaluate(args[0]));
 		const column = args.length > 1 ? integerArg(evaluate(args[1]), "SORT", "column index") : 0;
@@ -375,8 +429,9 @@ const FUNCTIONS = {
 			if (x === "" || y === "") return (x === "") - (y === ""); // blanks last
 			return order * compareValues(x, y);
 		});
-	},
-	UNIQUE(args, evaluate) {
+	} }),
+	UNIQUE: defineFunction({ parameters: [parameter('array', ArrayInputType)], returns: ArrayType.of(T),
+		description: 'Keep the first occurrence of each distinct row, preserving source order. Equality is type-sensitive across fields: text "1", number 1 and TRUE are different.', examples: ['UNIQUE(VSTACK(2,2,5))'], run(args, evaluate) {
 		arity("UNIQUE", args, 1);
 		const seen = new Set();
 		return to2D(evaluate(args[0])).filter(row => {
@@ -385,8 +440,9 @@ const FUNCTIONS = {
 			seen.add(key);
 			return true;
 		}).map(row => [...row]);
-	},
+	} }),
 };
+const FUNCTIONS = formulaFunctions;
 
 // Legacy AVG/MEAN semantics: sum of numeric values divided by the number of cells.
 function average(name, args, evaluate) {
@@ -416,11 +472,31 @@ const PURE_MATH = new Set([
 	'isNumeric', 'isNaN', 'isInteger', 'isPositive', 'isNegative', 'isZero', 'equalText', 'compareText',
 ]);
 
+// The imported library owns its prose and public overload declarations. Bind both to
+// its actual implementation here; never maintain a second handwritten library catalog.
+export const mathFunctions = Object.fromEntries(Object.keys(math).filter(name => typeof math[name] === 'function' && !BLOCKED_MATH.has(name)).map(name => {
+	let documentation;
+	try { documentation = math.help(name).doc; } catch { documentation = {}; }
+	const overloads = mathSignatures[name] ?? [];
+	const signatures = Object.keys(math[name].signatures ?? {});
+	const numberOnly = signatures.some(signature => /\bnumber\b/.test(signature)) && !signatures.some(signature => /\b(?:BigNumber|any)\b/.test(signature));
+	return [name, defineFunction({ parameters: overloads[0]?.parameters ?? [parameter('arguments', AnyType, { rest: true })], returns: overloads.length ? union(...overloads.map(overload => overload.returns)) : AnyType,
+		description: Array.isArray(documentation.description) ? documentation.description.join('\n') : documentation.description ?? `mathjs ${name}. No upstream prose is supplied; refer to the declared/runtime overloads below.`,
+		category: documentation.category ?? 'Library', overloads, syntax: documentation.syntax ?? [], runtimeSignatures: signatures, library: true, pure: PURE_MATH.has(name), nativeNumbers: numberOnly,
+		examples: documentation.examples ?? [], errors: ['Library type/domain/shape errors propagate. Spreadsheet inputs use two-dimensional arrays, blank becomes 0, and unresolved Stream/Optional/Lambda or record inputs are rejected. JavaScript callback overloads are unavailable; use stream methods. Native library array outputs must normalize to a nonempty rectangular array of scalar cells.'],
+		run(args, evaluate) {
+			const toMath = value => { scalar(value); return value === '' ? 0 : value?.kind === 'chart' ? num(value) : value; };
+			const values = args.map(evaluate).map(value => isArray(value) ? map2D(value, toMath) : toMath(value));
+			return normalise(math[name](...values.map(value => numberOnly ? toCellValue(value) : value)));
+		} })];
+}));
+
 function validatePureTree(tree) {
-	const supported = new Set(['ConstantNode', 'ParenthesisNode', 'SymbolNode', 'ConditionalNode', 'ArrayNode', 'RangeNode', 'RelationalNode', 'OperatorNode', 'FunctionNode']);
+	const supported = new Set(['ConstantNode', 'ParenthesisNode', 'SymbolNode', 'ConditionalNode', 'ArrayNode', 'RangeNode', 'RelationalNode', 'OperatorNode', 'FunctionNode', 'ObjectNode', 'AccessorNode', 'IndexNode']);
 	tree.traverse(node => {
 		if (!supported.has(node.type)) throw new FormulaError('#VALUE!', `Unsupported predicate syntax: ${node.type}`);
 		if (node.type === 'FunctionNode') {
+			if (node.fn?.type === 'AccessorNode' && (StreamType.method(propertyName(node.fn)) || OptionalType.method(propertyName(node.fn)))) return;
 			const name = node.fn?.type === 'SymbolNode' ? node.fn.name : '';
 			if (!Object.hasOwn(FUNCTIONS, name) && !PURE_MATH.has(name)) throw new FormulaError('#NAME?', `Function ${name || node.toString()} is not available in conditional rules`);
 		}
@@ -439,6 +515,15 @@ function evaluateNode(node, ctx) {
 			return evaluate(node.content);
 		case "SymbolNode":
 			return symbol(node.name, ctx);
+		case 'ObjectNode':
+			if (!ctx.streamExpression) throw new FormulaError('#VALUE!', 'Record literals are only available inside stream operations');
+			return record(Object.entries(node.properties).map(([name, value]) => [name, evaluate(value)]));
+		case 'AccessorNode': {
+			const value = evaluate(node.object), name = propertyName(node);
+			if (StreamType.accepts(value) || OptionalType.accepts(value)) throw new FormulaError('#VALUE!', 'Call a registered method with parentheses');
+			if (!RecordType.accepts(value) || !Object.hasOwn(value, name)) throw new FormulaError('#VALUE!', `Unknown row field ${name}`);
+			return value[name];
+		}
 		case "ConditionalNode": {
 			const condition = unwrap(evaluate(node.condition));
 			if (isArray(condition)) throw new FormulaError("#VALUE!", "Conditions must be a single value");
@@ -467,7 +552,7 @@ function evaluateNode(node, ctx) {
 			return result;
 		}
 		case "OperatorNode":
-			return operator(node, evaluate);
+			return operator(node, evaluate, ctx);
 		case "FunctionNode":
 			return call(node, ctx, evaluate);
 		default:
@@ -476,6 +561,7 @@ function evaluateNode(node, ctx) {
 }
 
 function symbol(name, ctx) {
+	if (ctx.locals?.has(name)) return ctx.locals.get(name);
 	if (ctx.references?.has(name)) return ctx.references.get(name)();
 	let match = name.match(RANGE);
 	if (match) {
@@ -494,8 +580,14 @@ function symbol(name, ctx) {
 	throw new FormulaError("#NAME?", `Undefined symbol ${name}`);
 }
 
-function operator(node, evaluate) {
+function operator(node, evaluate, ctx) {
 	const { fn, args } = node;
+	if (fn === 'add' && ctx.streamExpression) {
+		return args.map(evaluate).reduce((a, b) => broadcast(a, b, (x, y) => {
+			if (typeof x === 'string' || typeof y === 'string') return String(scalar(x)) + String(scalar(y));
+			return math.add(num(x), num(y));
+		}));
+	}
 	if (fn === "and" || fn === "or" || fn === "xor") {
 		const combine = { and: (a, b) => a && b, or: (a, b) => a || b, xor: (a, b) => a !== b }[fn];
 		return broadcast(evaluate(args[0]), evaluate(args[1]), (a, b) => combine(truthy(a), truthy(b)));
@@ -519,23 +611,272 @@ function operator(node, evaluate) {
 }
 
 function call(node, ctx, evaluate) {
+	if (node.fn?.type === 'AccessorNode') {
+		const value = evaluate(node.fn.object), name = propertyName(node.fn);
+		if (!StreamType.accepts(value) && !OptionalType.accepts(value)) throw new FormulaError('#VALUE!', 'This value has no callable formula methods');
+		const method = typeOf(value).method(name);
+		if (!method) throw new FormulaError('#NAME?', `Unknown ${typeOf(value).name} method ${name}`);
+		arity(name, node.args, method.min, method.max);
+		const args = node.args.map((arg, i) => {
+			const read = () => evaluateNode(arg, { ...ctx, streamExpression: true });
+			return method.parameters[i]?.lazy ? read : read();
+		});
+		validateArguments(method, args);
+		const returns = resultType(method, typeOf(value), args.map((arg, i) => method.parameters[i]?.lazy ? AnyType : typeOf(arg)));
+		return validateResult({ ...method, returns }, method.run(value, args));
+	}
 	const name = node.fn?.type === "SymbolNode" ? node.fn.name : null;
 	if (!name) throw new FormulaError("#VALUE!", `Unsupported function call: ${node.toString()}`);
 	if (ctx.pure && !Object.hasOwn(FUNCTIONS, name) && !PURE_MATH.has(name)) throw new FormulaError('#NAME?', `Function ${name} is not available in conditional rules`);
-	if (Object.hasOwn(FUNCTIONS, name)) return FUNCTIONS[name](node.args, evaluate);
-	if (typeof math[name] !== "function" || BLOCKED_MATH.has(name) || !Object.hasOwn(math, name)) {
+	if (Object.hasOwn(FUNCTIONS, name)) {
+		const definition = FUNCTIONS[name];
+		arity(name, node.args, definition.min, definition.max);
+		return definition.run(node.args, child => {
+			const value = evaluate(child);
+			if (StreamType.accepts(value) || OptionalType.accepts(value) || LambdaType.accepts(value)) typeOf(value).present(value);
+			return value;
+		}, ctx);
+	}
+	if (!Object.hasOwn(mathFunctions, name)) {
 		throw new FormulaError("#NAME?", `Unknown function ${name}`);
 	}
-	const toMath = value => value === "" ? 0 : value?.kind === "chart" ? num(value) : value;
-	const args = node.args.map(evaluate).map(value => isArray(value) ? map2D(value, toMath) : toMath(value));
-	// Some mathjs functions (e.g. random/randomInt) only support native numbers. Convert only at
-	// that boundary; array/any and decimal-aware functions retain their high-precision inputs.
-	const signatures = Object.keys(math[name].signatures ?? {});
-	const numberOnly = signatures.some(signature => /\bnumber\b/.test(signature))
-		&& !signatures.some(signature => /\b(?:BigNumber|any)\b/.test(signature));
-	return normalise(math[name](...args.map(value => numberOnly ? toCellValue(value) : value)));
+	return mathFunctions[name].run(node.args, evaluate);
 }
 
+/* ---------- lazy row streams ---------- */
+
+function record(entries) {
+	const value = Object.assign(Object.create(null), Object.fromEntries(entries));
+	RecordType.of(Object.fromEntries(entries.map(([key, value]) => [key, typeOf(value)]))).brand(value);
+	return Object.freeze(value);
+}
+
+function propertyName(node) {
+	const dimensions = node.index.dimensions;
+	if (dimensions.length !== 1 || dimensions[0].type !== 'ConstantNode' || typeof dimensions[0].value !== 'string') {
+		throw new FormulaError('#VALUE!', 'Row fields and stream methods require a literal name');
+	}
+	return dimensions[0].value;
+}
+
+function validateStreamHeaders(headers) {
+	if (!headers.length || headers.some(name => typeof name !== 'string' || !name.trim()) || new Set(headers).size !== headers.length) {
+		throw new FormulaError('#VALUE!', 'Stream headings must be nonblank, unique text (case-sensitive)');
+	}
+}
+
+function stream(values, schema) {
+	const value = { values, schema };
+	const itemType = schema?.kind === 'record' ? RecordType.of(Object.fromEntries(schema.headers.map(name => [name, AnyType]))) : AnyType;
+	return StreamType.of(itemType).brand(value);
+}
+
+function referenceRows(source, row, col, ctx) {
+	const span = referenceSpans(source)[0];
+	if (span?.sheetName !== undefined) {
+		if (span.prefix === '#REF!' || !ctx.sheet) throw new FormulaError('#REF!', `Unknown sheet: ${span.sheetName}`);
+		return referenceRows(span.reference, row, col, ctx.sheet(span.sheetName));
+	}
+	const ref = resolveReference(source, row, col, ctx);
+	const target = ref.sheetName ? ctx.sheet(ref.sheetName) : ctx;
+	const args = [Math.min(ref.r0, ref.r1), Math.min(ref.c0, ref.c1), Math.max(ref.r0, ref.r1), Math.max(ref.c0, ref.c1)];
+	return target.rangeRows ? target.rangeRows(...args) : target.range(...args);
+}
+
+function streamRows(node, ctx, evaluate) {
+	if (node.type === 'ParenthesisNode') return streamRows(node.content, ctx, evaluate);
+	if (node.type === 'SymbolNode') {
+		const deferred = ctx.references?.get(node.name);
+		if (deferred?.rows) return deferred.rows();
+		const range = node.name.match(RANGE);
+		if (range) return referenceRows(`${range[1]}${range[2]}:${range[3]}${range[4]}`, 0, 0, ctx);
+	}
+	return to2D(evaluate(node));
+}
+
+function callback(value, count) {
+	if (!LambdaType.accepts(value) || value.params.length !== count) throw new FormulaError('#VALUE!', `Expected a lambda with ${count} parameter${count === 1 ? '' : 's'}`);
+	return value.invoke;
+}
+
+function projectionSchema(lambda, original) {
+	// Shape inference never reads cells or invokes a mapper, so an empty projection retains headings.
+	let tree;
+	try { tree = math.parse(lambda.body); } catch { return null; }
+	while (tree.type === 'ParenthesisNode') tree = tree.content;
+	if (tree.type === 'ObjectNode') return { kind: 'record', headers: Object.keys(tree.properties) };
+	if (tree.type === 'ArrayNode') return { kind: 'row', headers: tree.items.map((_, i) => `column${i + 1}`) };
+	if (tree.type === 'SymbolNode' && tree.name === lambda.params[0]) return original;
+	return null;
+}
+
+function itemSchema(value) {
+	if (RecordType.accepts(value)) return { kind: 'record', headers: Object.keys(value) };
+	if (isArray(value)) {
+		if (value.length !== 1) throw new FormulaError('#VALUE!', 'A stream item must be a scalar, record, or single row');
+		return { kind: 'row', headers: value[0].map((_, i) => `column${i + 1}`) };
+	}
+	scalar(value);
+	return { kind: 'scalar', headers: ['value'] };
+}
+
+function streamTable(input, headings = []) {
+	const iterator = input.values()[Symbol.iterator](), first = iterator.next();
+	const schema = first.done ? input.schema ?? { kind: 'scalar', headers: headings.length ? headings : ['value'] } : itemSchema(first.value);
+	const headers = headings.length ? headings : schema.headers;
+	validateStreamHeaders(headers);
+	if (headers.length !== schema.headers.length) throw new FormulaError('#VALUE!', 'toTable headings must match the number of output columns');
+	const table = [[...headers]];
+	for (let next = first; !next.done; next = iterator.next()) {
+		const value = next.value, actual = itemSchema(value);
+		if (actual.kind !== schema.kind || actual.headers.length !== schema.headers.length
+			|| (schema.kind === 'record' && schema.headers.some(name => !Object.hasOwn(value, name)))) {
+			throw new FormulaError('#VALUE!', 'toTable requires the same fields and number of columns in every row');
+		}
+		checkMatchSize('toTable', table.length + 1, headers.length);
+		table.push((schema.kind === 'record' ? schema.headers.map(name => value[name]) : schema.kind === 'row' ? value[0] : [value]).map(scalar));
+	}
+	return table;
+}
+
+function optional(value, present = true) {
+	if (present && isArray(value)) RowType.of(AnyType).brand(value);
+	return OptionalType.of(present ? typeOf(value) : AnyType).brand(Object.freeze({ present, value }));
+}
+
+function streamKey(value) {
+	if (RecordType.accepts(value)) return ['record', Object.keys(value).sort().map(name => [name, streamKey(value[name])])];
+	if (isArray(value)) return ['row', value.map(streamKey)];
+	scalar(value);
+	return [math.isBigNumber(value) ? 'number' : typeof value, String(value)];
+}
+
+function streamAggregate(input, kind) {
+	let total = math.bignumber(0), count = 0;
+	for (const item of input.values()) {
+		const raw = unwrap(item);
+		if (!NumericInputType.accepts(raw)) throw new FormulaError('#VALUE!', `${kind} requires numeric stream items; map a numeric field first`);
+		const value = num(raw);
+		if (kind === 'min' || kind === 'max') {
+			if (!count || (kind === 'min' ? compareValues(value, total) < 0 : compareValues(value, total) > 0)) total = value;
+		} else total = math.add(total, value);
+		count++;
+	}
+	if (kind === 'sum') return total;
+	return count ? optional(kind === 'average' ? math.divide(total, count) : total) : optional(undefined, false);
+}
+
+// Each operation owns its signature and iterator/terminal implementation. Adding a method requires
+// no syntax changes. Only sorting, distinct's seen-set, and table results retain input values.
+StreamType.methods = {
+	filter: defineFunction({ parameters: [parameter('predicate', LambdaType.of(T, ConditionType))], returns: StreamType.of(T),
+		description: 'Lazily keep items whose one-parameter predicate is true, preserving order and headings. Predicate results use spreadsheet condition conversion.', emptyBehavior: 'Returns an empty stream retaining its schema.', examples: ['rowstream(VSTACK("n",2,5)).filter(a->a.n>2).toTable()'], run(input, [lambda]) {
+		const test = callback(lambda, 1);
+		return stream(function* () { for (const value of input.values()) if (truthy(unwrap(test(value)))) yield value; }, input.schema);
+	} }),
+	map: defineFunction({ parameters: [parameter('mapper', LambdaType.of(T, U))], returns: StreamType.of(U),
+		description: 'Lazily project each item to a scalar, immutable record, or positional row. Record keys become headings; literal record/row projections retain headings even if empty. Fields must be scalar when converted to a table. Inside callbacks + concatenates if either operand is text; otherwise it adds numerically.', emptyBehavior: 'No mapper invocations. Literal projection schema is retained.', errors: ['#VALUE!: invalid callback, duplicate/empty/reserved object keys or incompatible table fields.'], examples: ['rowstream(VSTACK("n",2,5)).map(a->{double:a.n*2}).toTable()'], run(input, [lambda]) {
+		const project = callback(lambda, 1);
+		return stream(function* () { for (const value of input.values()) yield project(value); }, projectionSchema(lambda, input.schema));
+	} }),
+	sorted: defineFunction({ parameters: [parameter('comparator', LambdaType.of(T, T, NumberType))], returns: StreamType.of(T),
+		description: 'Stable sort with a two-parameter comparator returning a finite negative, zero or positive number. Buffers the input when consumed.', emptyBehavior: 'Empty stream with original schema.', errors: ['#VALUE!: invalid comparator or nonfinite comparison result.'], examples: ['rowstream(VSTACK("n",2,5)).sorted((a,b)->b.n-a.n).toTable()'], run(input, [lambda]) {
+		const compare = callback(lambda, 2);
+		return stream(function* () { yield* [...input.values()].sort((a, b) => {
+			const result = num(unwrap(compare(a, b)));
+			if (!math.isFinite(result)) throw new FormulaError('#VALUE!', 'A stream comparator must return a finite number');
+			return Number(math.sign(result));
+		}); }, input.schema);
+	} }),
+	distinct: defineFunction({ parameters: [], returns: StreamType.of(T),
+		description: 'Keep the first structurally equal item, preserving order. Text, numbers and booleans are distinct types; record field order does not affect equality. Retains seen keys, not whole input tables.', emptyBehavior: 'Empty stream.', examples: ['rowstream(VSTACK("n",2,2,5)).distinct().count()'], run(input) {
+		return stream(function* () {
+			const seen = new Set();
+			for (const value of input.values()) {
+				const key = JSON.stringify(streamKey(value));
+				if (!seen.has(key)) { seen.add(key); yield value; }
+			}
+		}, input.schema);
+	} }),
+	limit: defineFunction({ parameters: [parameter('count', NumericInputType)], returns: StreamType.of(T),
+		description: 'Keep at most count items. Count must convert to a nonnegative integer. Zero reads no data rows; the source heading still validates. Does not read an item beyond the limit.', emptyBehavior: 'Empty stream.', errors: ['#VALUE!: negative/nonintegral count.'], examples: ['rowstream(VSTACK("n",2,5)).limit(1).toTable()'], run(input, [value]) {
+		const count = integerArg(value, 'limit', 'count');
+		if (count < 0) throw new FormulaError('#VALUE!', 'limit count must be nonnegative');
+		return stream(function* () {
+			if (!count) return;
+			let remaining = count;
+			for (const item of input.values()) { yield item; if (!--remaining) break; }
+		}, input.schema);
+	} }),
+	skip: defineFunction({ parameters: [parameter('count', NumericInputType)], returns: StreamType.of(T),
+		description: 'Read and discard the first count items, then yield the rest. Count must convert to a nonnegative integer. Errors in skipped source rows still propagate.', emptyBehavior: 'Empty stream.', errors: ['#VALUE!: negative/nonintegral count.'], examples: ['rowstream(VSTACK("n",2,5)).skip(1).toTable()'], run(input, [value]) {
+		let remaining = integerArg(value, 'skip', 'count');
+		if (remaining < 0) throw new FormulaError('#VALUE!', 'skip count must be nonnegative');
+		return stream(function* () { for (const item of input.values()) { if (remaining > 0) remaining--; else yield item; } }, input.schema);
+	} }),
+	reduce: defineFunction({ parameters: [parameter('seed', A), parameter('reducer', LambdaType.of(A, T, A))], returns: A, terminal: true,
+		description: 'Fold items left-to-right with (accumulator,item)->nextAccumulator. The accumulator must retain the seed type/record schema. Returns the accumulated value directly, never an Optional merely because the input is empty. Records/rows become headed tables only at the cell boundary.', emptyBehavior: 'Returns seed unchanged.', errors: ['#VALUE!: invalid reducer or changed accumulator type/schema.'], examples: ['rowstream(VSTACK("n",2,5)).reduce(10,(total,a)->total+a.n)'], run(input, [seed, lambda]) {
+		const reduce = callback(lambda, 2);
+		let result = seed;
+		const accumulatorType = typeOf(seed);
+		for (const item of input.values()) {
+			result = reduce(result, item);
+			if (!accumulatorType.accepts(result)) throw new FormulaError('#VALUE!', 'reduce must preserve the seed type and record schema');
+		}
+		if (isArray(result)) RowType.of(AnyType).brand(result);
+		return result;
+	} }),
+	toTable: defineFunction({ parameters: [parameter('heading', TextType, { rest: true, help: '["heading", …]' })], returns: TableType.of(T), terminal: true,
+		description: 'Materialize a spill table, headings first. Records use their field names; scalars use value; positional rows use column1, column2, …. Optional heading arguments rename columns and must match width. Every item must have consistent fields/width and scalar cells. Without projection, reproduces the source range like always-true FILTER. Maximum output: 1,000,000 cells.', emptyBehavior: 'Headings only. Literal projection headings survive; provide headings for an otherwise unknown empty shape.', errors: ['#VALUE!: inconsistent shapes, invalid headings or non-scalar fields; #CALC!: too many cells; #SPILL!: collision or sheet bounds.'], examples: ['rowstream(VSTACK("n",2,5)).toTable()'], run: (input, headers) => TableType.of(T).brand(streamTable(input, headers)) }),
+	count: defineFunction({ parameters: [], returns: NumberType, terminal: true, description: 'Count data items, excluding the heading. Consumes the stream; source errors propagate.', emptyBehavior: '0.', examples: ['rowstream(VSTACK("n",2,5)).count()'], run(input) { let count = 0; for (const _ of input.values()) count++; return math.bignumber(count); } }),
+	anyMatch: defineFunction({ parameters: [parameter('predicate', LambdaType.of(T, ConditionType))], returns: BooleanType, terminal: true,
+		description: 'Return TRUE on the first matching item; no later rows are read. Predicate uses spreadsheet condition conversion.', emptyBehavior: 'FALSE.', examples: ['rowstream(VSTACK("n",2,5)).anyMatch(a->a.n>3)'], run(input, [lambda]) {
+		const test = callback(lambda, 1);
+		for (const value of input.values()) if (truthy(unwrap(test(value)))) return true;
+		return false;
+	} }),
+	allMatch: defineFunction({ parameters: [parameter('predicate', LambdaType.of(T, ConditionType))], returns: BooleanType, terminal: true,
+		description: 'Return FALSE on the first nonmatching item; no later rows are read. Predicate uses spreadsheet condition conversion.', emptyBehavior: 'TRUE (there are no counterexamples).', examples: ['rowstream(VSTACK("n",2,5)).allMatch(a->a.n>0)'], run(input, [lambda]) {
+		const test = callback(lambda, 1);
+		for (const value of input.values()) if (!truthy(unwrap(test(value)))) return false;
+		return true;
+	} }),
+	noneMatch: defineFunction({ parameters: [parameter('predicate', LambdaType.of(T, ConditionType))], returns: BooleanType, terminal: true,
+		description: 'Return FALSE on the first matching item; no later rows are read. Equivalent to negating anyMatch.', emptyBehavior: 'TRUE.', examples: ['rowstream(VSTACK("n",2,5)).noneMatch(a->a.n<0)'], run: (input, args) => !StreamType.methods.anyMatch.run(input, args) }),
+	findFirst: defineFunction({ parameters: [], returns: OptionalType.of(T), terminal: true,
+		description: 'Return the first item wrapped in Optional without reading later items. Retains the actual scalar/record/row for subsequent Optional methods. A blank first item is present, not empty.', emptyBehavior: 'Optional.empty.', examples: ['rowstream(VSTACK("n",2,5)).findFirst().map(a->a.n).orElse(0)'], run(input) {
+		const first = input.values().next();
+		return optional(first.value, !first.done);
+	} }),
+	...Object.fromEntries(['sum', 'min', 'max', 'average'].map(name => [name, {
+		...defineFunction({ parameters: [], returns: name === 'sum' ? NumberType : OptionalType.of(NumberType), terminal: true,
+			description: `${({ sum: 'Add', min: 'Find the smallest of', max: 'Find the largest of', average: 'Compute the arithmetic mean of' })[name]} the numeric stream items. Map the desired field first. Numeric text and booleans convert; blanks count as zero (including in the average divisor); nonnumeric text errors. Uses decimal arithmetic.`,
+			emptyBehavior: name === 'sum' ? '0, the additive identity.' : 'Optional.empty, not a calculation error.', errors: ['#VALUE!: nonnumeric items; source and arithmetic errors propagate, never become empty.'],
+			examples: [`rowstream(VSTACK("n",2,5)).map(a->a.n).${name}()${name === 'sum' ? '' : '.orElse(0)'}`], run: input => streamAggregate(input, name) }),
+	}])),
+};
+
+OptionalType.methods = {
+	map: defineFunction({ parameters: [parameter('mapper', LambdaType.of(T, U))], returns: OptionalType.of(U), description: 'Transform a present value. The mapper is not invoked when empty. Returning an Optional nests it; use flatMap to flatten one level.', emptyBehavior: 'Optional.empty.', examples: ['rowstream(VSTACK("n",2)).findFirst().map(a->a.n*3).orElse(0)'], run(input, [lambda]) {
+		const project = callback(lambda, 1);
+		return input.present ? optional(project(input.value)) : optional(undefined, false);
+	} }),
+	flatMap: defineFunction({ parameters: [parameter('mapper', LambdaType.of(T, OptionalType.of(U)))], returns: OptionalType.of(U), description: 'Transform a present value using a mapper that itself returns Optional. Flattens exactly one level. A non-Optional mapper result is an error.', emptyBehavior: 'Optional.empty; mapper not invoked.', errors: ['#VALUE!: mapper did not return Optional.'], examples: ['rowstream(VSTACK("n",2)).findFirst().flatMap(a->rowstream(VSTACK("n",a.n)).findFirst()).map(a->a.n).orElse(0)'], run(input, [lambda]) {
+		const project = callback(lambda, 1);
+		return input.present ? project(input.value) : optional(undefined, false);
+	} }),
+	filter: defineFunction({ parameters: [parameter('predicate', LambdaType.of(T, ConditionType))], returns: OptionalType.of(T), description: 'Keep a present value only if its predicate is true; otherwise return empty. Uses spreadsheet condition conversion.', emptyBehavior: 'Optional.empty; predicate not invoked.', examples: ['rowstream(VSTACK("n",2)).findFirst().filter(a->a.n>3).isEmpty()'], run(input, [lambda]) {
+		const test = callback(lambda, 1);
+		return input.present && truthy(unwrap(test(input.value))) ? input : optional(undefined, false);
+	} }),
+	isPresent: defineFunction({ parameters: [], returns: BooleanType, description: 'Test presence without unwrapping. Zero, FALSE and empty text are present.', emptyBehavior: 'FALSE.', examples: ['rowstream(VSTACK("n",0)).findFirst().isPresent()'], run: input => input.present }),
+	isEmpty: defineFunction({ parameters: [], returns: BooleanType, description: 'Test absence without unwrapping.', emptyBehavior: 'TRUE.', examples: ['rowstream(VSTACK("n",2)).limit(0).findFirst().isEmpty()'], run: input => !input.present }),
+	orElse: defineFunction({ parameters: [parameter('fallback', T, { lazy: true })], returns: T, description: 'Unwrap a present value, or evaluate fallback only when empty. Unlike Java orElse, this is lazy like spreadsheet IF; a separate orElseGet is unnecessary. The fallback supplies the missing result type when empty.', emptyBehavior: 'Evaluates and returns fallback.', examples: ['rowstream(VSTACK("n",2)).map(a->a.n).average().orElse(0)', 'rowstream(VSTACK("n",2)).findFirst().map(a->a.n).orElse(1/0)'], run: (input, [fallback]) => input.present ? input.value : fallback() }),
+	orElseThrow: defineFunction({ parameters: [], returns: T, description: 'Unwrap a present value; explicitly request #N/A if empty. Errors remain distinguishable from an empty Optional.', emptyBehavior: 'Throws #N/A.', errors: ['#N/A: Optional is empty.'], examples: ['rowstream(VSTACK("n",2)).findFirst().orElseThrow().n'], run(input) {
+		if (!input.present) throw new FormulaError('#N/A', 'Optional has no value');
+		return input.value;
+	} }),
+};
 /* ---------- text normalisation (always skipping quoted strings) ---------- */
 
 function stringEnd(text, start) {
@@ -678,6 +1019,36 @@ function splitTopLevel(text, from, to, separators = ",") {
 	return spans;
 }
 
+function expressionBracket(text, at, ctx) {
+	if (text[at] === '{') return !/[\w\]]/.test(text.slice(0, at).trimEnd().at(-1) ?? '')
+		&& /^\{\s*(?:[A-Za-z_]\w*|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\s*:/.test(text.slice(at));
+	return text[at] === '[' && ctx.streamExpression && !/^[{\d]/.test(text.slice(matching(text, at) + 1));
+}
+
+function quoteRecordKeys(text) {
+	let result = '';
+	for (let at = 0; at < text.length;) {
+		if (text[at] === '"' || text[at] === "'") {
+			const end = stringEnd(text, at); result += text.slice(at, end); at = end; continue;
+		}
+		if (text[at] !== '{' || !expressionBracket(text, at, {})) { result += text[at++]; continue; }
+		const end = matching(text, at);
+		if (end < 0) throw new FormulaError('#ERROR!', 'Unclosed record literal');
+		const keys = new Set();
+		result += '{' + splitTopLevel(text, at + 1, end).map(([start, stop]) => {
+			const entry = text.slice(start, stop), key = entry.match(/^\s*([A-Za-z_]\w*|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\s*:/);
+			if (!key) throw new FormulaError('#VALUE!', 'Record fields need a literal name followed by a colon');
+			const name = /^["']/.test(key[1]) ? math.parse(key[1]).value : key[1];
+			// mathjs stores ObjectNode properties in a plain object; never silently drop this key.
+			if (name === '__proto__' || keys.has(name)) throw new FormulaError('#VALUE!', 'Projected field names must be unique and cannot be __proto__');
+			keys.add(name);
+			return JSON.stringify(name) + ':' + quoteRecordKeys(entry.slice(key[0].length));
+		}).join(',') + '}';
+		at = end + 1;
+	}
+	return result;
+}
+
 function resolveRelative(text, row, col, ctx, depth) {
 	let out = "";
 	for (let i = 0; i < text.length;) {
@@ -692,6 +1063,10 @@ function resolveRelative(text, row, col, ctx, depth) {
 		const close = matching(text, i);
 		if (close < 0) throw new FormulaError("#ERROR!", `Unclosed ${char} in formula`);
 		const inner = text.slice(i + 1, close);
+		if (expressionBracket(text, i, ctx)) {
+			out += char + resolveRelative(inner, row, col, ctx, depth) + text[close];
+			i = close + 1; continue;
+		}
 		i = close + 1;
 		// [1, 2; 3, 4] stays a matrix literal; a single expression in [] is a column calculation.
 		if (char === "[" && splitTopLevel(inner, 0, inner.length, ",;").length > 1) {
@@ -744,8 +1119,8 @@ function quoteCriteria(text) {
 export function normaliseFormula(source, row, col, ctx, depth = 0) {
 	let text = String(source).replace(/^\s*=/, "");
 	text = mapOutsideStrings(text, segment => segment
-		.replace(/\bTHISROW\b/g, row).replace(/\bTHISCOL\b/g, col)
-		.replace(/\bPREVROW\b/g, row - 1).replace(/\bPREVCOL\b/g, col - 1));
+		.replace(/(?<![\w.])(?:THISROW|THISCOL|PREVROW|PREVCOL)\b/g, name => ctx.locals?.has(name) ? name
+			: ({ THISROW: row, THISCOL: col, PREVROW: row - 1, PREVCOL: col - 1 })[name]));
 	text = resolveRelative(text, row, col, ctx, depth);
 	text = quoteCriteria(text);
 	return mapOutsideStrings(text, segment => segment
@@ -760,7 +1135,22 @@ function evaluateExpression(source, row, col, ctx, depth) {
 	// cells in an unused IF branch and would put relative-reference errors outside IFERROR's boundary.
 	let deferred = '', at = 0;
 	const references = new Map();
-	source = quoteCriteria(String(source));
+	const syntax = extractLambdas(quoteRecordKeys(quoteCriteria(String(source))), stringEnd, matching);
+	source = syntax.text;
+	for (const lambda of syntax.lambdas) {
+		if (!lambda.body || new Set(lambda.params).size !== lambda.params.length) throw new FormulaError('#VALUE!', 'A lambda needs a body and unique parameters');
+		if (/^\{\s*\}$/.test(lambda.body)) throw new FormulaError('#VALUE!', 'A projected record needs at least one field');
+		evaluateExpression(lambda.body, row, col, {
+			...ctx, locals: new Map([...(ctx.locals ?? []), ...lambda.params.map(name => [name, null])]), streamExpression: true, validateOnly: true,
+		}, depth + 1);
+		lambda.invoke = (...values) => {
+			const locals = new Map(ctx.locals);
+			lambda.params.forEach((name, i) => locals.set(name, values[i]));
+			return evaluateExpression(lambda.body, row, col, { ...ctx, locals, streamExpression: true }, depth + 1);
+		};
+		LambdaType.of(...lambda.params.map(() => AnyType), AnyType).brand(lambda);
+		references.set(lambda.name, () => lambda);
+	}
 	const spans = new Map(referenceSpans(source).map(span => [span.start, span]));
 	while (at < source.length) {
 		const span = spans.get(at);
@@ -772,7 +1162,7 @@ function evaluateExpression(source, row, col, ctx, depth) {
 		const token = source.slice(at, end);
 		// Matrix literals must keep their ArrayNode; defer only actual reference/calculation syntax.
 		const matrix = token[0] === '[' && !span && splitTopLevel(token, 1, token.length - 1, ',;').length > 1;
-		if (matrix) { deferred += '['; at++; continue; }
+		if (matrix || (!span && expressionBracket(source, at, ctx))) { deferred += source[at++]; continue; }
 		if (ctx.pure && (span || bracket >= 0)) {
 			// Validate deferred coordinate expressions too, including unused IF branches. Validation
 			// must never read a sheet or execute a predicate while a builder is being edited/loaded.
@@ -794,6 +1184,7 @@ function evaluateExpression(source, row, col, ctx, depth) {
 				const target = ctx.sheet(ref.sheetName);
 				return ref.mode === 'cell' ? target.ref(ref.r0, ref.c0) : target.range(ref.r0, ref.c0, ref.r1, ref.c1);
 			});
+			references.get(name).rows = () => referenceRows(token, row, col, ctx);
 			deferred += name;
 		} else if (span?.sheetName !== undefined) {
 			const name = `DFREF__${references.size}`;
@@ -801,10 +1192,12 @@ function evaluateExpression(source, row, col, ctx, depth) {
 				if (span.prefix === '#REF!' || !ctx.sheet) throw new FormulaError('#REF!', `Unknown sheet: ${span.sheetName}`);
 				return evaluateExpression(span.reference, row, col, ctx.sheet(span.sheetName), depth + 1);
 			});
+			references.get(name).rows = () => referenceRows(token, row, col, ctx);
 			deferred += name;
 		} else if (!matrix && /[\[{}]/.test(token) && (span || bracket >= 0)) {
 			const name = `DFREF__${references.size}`;
 			references.set(name, () => evaluateExpression(normaliseFormula(token, row, col, ctx, depth + 1), row, col, ctx, depth + 1));
+			references.get(name).rows = () => referenceRows(token, row, col, ctx);
 			deferred += name;
 		} else deferred += token;
 		at = end;
@@ -826,7 +1219,7 @@ function evaluateExpression(source, row, col, ctx, depth) {
 	}
 	if (ctx.pure) validatePureTree(tree);
 	if (ctx.validateOnly) return false;
-	return normalise(evaluateNode(tree, { ...ctx, references }));
+	return normalise(evaluateNode(tree, { ...ctx, references }), ctx.streamExpression);
 }
 
 /**

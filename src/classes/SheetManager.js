@@ -83,18 +83,17 @@ class CalcPass {
 				if (value?.kind === 'chart') throw new Error('A chart cannot be used as chart data');
 				return Array.isArray(value) ? value[0][0] : value;
 			},
-			range: (r0, c0, r1, c1) => {
+			range: (...bounds) => [...this.ctx.rangeRows(...bounds)],
+			rangeRows: function* (r0, c0, r1, c1) {
 				for (const [row, col] of [[r0, c0], [r1, c1]]) {
 					if (!this.inSheet(row, col)) throw new FormulaError("#REF!", `Range ${cellLabel(r0, c0)}:${cellLabel(r1, c1)} extends outside the sheet`);
 				}
-				const values = [];
 				for (let row = r0; row <= r1; row++) {
 					const line = [];
 					for (let col = c0; col <= c1; col++) line.push(this.formulaRead(row, col, true));
-					values.push(line);
+					yield line;
 				}
-				return values;
-			},
+			}.bind(this),
 		};
 	}
 

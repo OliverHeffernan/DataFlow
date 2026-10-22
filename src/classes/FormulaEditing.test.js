@@ -6,6 +6,8 @@ import SheetManager from './SheetManager.js';
 import VimKeyboard from './VimKeyboard.js';
 import { compileConfig } from './LuaConfig.js';
 import { keyboardHints } from './KeyboardHints.js';
+import { formulaCatalog } from './FormulaCatalog.js';
+import { AnyType, ArrayType, FormulaType, LambdaType, OptionalType, RecordType, StreamType, NumberType } from './FormulaTypes.js';
 
 function setup(formula, row = 5, col = 3) {
 	const sheet = new SheetManager();
@@ -43,7 +45,7 @@ test('absolute, relative and calculated ranges share matching source colors with
 test('completion and signatures respect nested calls, relative calculations and quoted commas', () => {
 	const text = '=VSTACK(FILTER(A0:C3, C0:C3>0), SO';
 	const help = formulaAssist(text, text.length);
-	assert.deepEqual(help.suggestions, ['SORT']);
+	assert.deepEqual(help.suggestions, ['SORT', 'solveODE', 'sort']);
 	assert.equal(help.signature.name, 'VSTACK');
 	assert.equal(help.signature.argument, 1);
 	const nested = '=FILTER(A0:C3, AND(B0:B3="a,b", C0:C3>0), ';
@@ -65,8 +67,10 @@ test('lookup and join completion exposes signatures through nested arrays and qu
 	assert.deepEqual(assist('=loo').suggestions, ['LOOKUP']);
 	assert.deepEqual(assist('=JO').suggestions, ['JOIN']);
 	assert.equal(assist('=LOOKUP(HSTACK("a,b", "NZ"), \'Prices, 2026\'!A0:B4, C0:C4, ').signature.argument, 3);
-	assert.deepEqual(assist('=JOIN(A0:B2, A0:A2, HSTACK(C0:C2,D0:D2), E0:E2, ').signature,
-		{ name: 'JOIN', args: ['left', 'leftKeys', 'right', 'rightKeys', '[kind = "left"]'], argument: 4 });
+	const { name, args, argument, definition, returnType } = assist('=JOIN(A0:B2, A0:A2, HSTACK(C0:C2,D0:D2), E0:E2, ').signature;
+	assert.deepEqual({ name, args, argument }, { name: 'JOIN', args: ['left', 'leftKeys', 'right', 'rightKeys', '[kind = "left"]'], argument: 4 });
+	assert.equal(definition, formulaCatalog.JOIN);
+	assert.equal(returnType.base, ArrayType);
 	const { keyboard } = setup('');
 	keyboard.feed('i=LO<Tab>"x","x",7<End><CR>');
 	assert.equal(keyboard.formula, '=LOOKUP("x","x",7)');
@@ -80,19 +84,55 @@ test('CHART builder completion and signatures follow chains without leaking into
 	const assist = text => formulaAssist(text, Array.from(text).length);
 	assert.deepEqual(assist('=CHART().').suggestions, ['.line', '.bar', '.scatter', '.pie', '.x', '.series']);
 	assert.deepEqual(assist('=CHART().series(A0:A3, "😀, .size(").si').suggestions, ['.size']);
-	assert.deepEqual(assist('=CHART().series([-1]{max(0,1)}:[-1]{3}, ').signature,
-		{ name: '.series', args: ['valueRange', '["name"]'], argument: 1 });
+	const { name, args, argument } = assist('=CHART().series([-1]{max(0,1)}:[-1]{3}, ').signature;
+	assert.deepEqual({ name, args, argument }, { name: '.series', args: ['valueRange', '["name"]'], argument: 1 });
 	assert.equal(assist('=CHART().size(320, ').signature.argument, 1);
 	assert.equal(assist('=CHART().series([-1]{max(0,').signature.name, 'max');
 	assert.deepEqual(assist('=SUM(A0:A3).si').suggestions, []);
 	assert.deepEqual(assist('=CHART().title(".si').suggestions, []);
-	assert.deepEqual(assist('=si').suggestions, ['sin']);
+	assert.deepEqual(assist('=si').suggestions, ['sign', 'sin', 'sinh', 'size']);
 	const { keyboard } = setup('=CHART()');
 	keyboard.feed('A. se<Tab>');
 	assert.equal(keyboard.formula, '=CHART().series()');
 	assert.equal(keyboard.formulaCursor, 16);
 	keyboard.feed('A0:A3,"😀"<End>.p<Tab><End>.si<Tab>320,240<CR>');
 	assert.equal(keyboard.formula, '=CHART().series(A0:A3,"😀").pie().size(320,240)');
+});
+
+test('stream completion follows returned types, including Optional after a terminal', () => {
+	const assist = text => formulaAssist(text, Array.from(text).length);
+	assert.deepEqual(assist('=rows').suggestions, ['rowstream']);
+	assert.deepEqual(assist('=rowstream(A0:C3).fi').suggestions, ['.filter', '.findFirst']);
+	assert.deepEqual(assist('=SUM(rowstream(A0:C3).map(a->{name:a.name,age:a.age}).av').suggestions, ['.average']);
+	const { name, args, argument, definition } = assist('=rowstream(A0:C3).reduce("a,b", (a,b)->').signature;
+	assert.deepEqual({ name, args, argument }, { name: '.reduce', args: ['seed', 'reducer'], argument: 1 });
+	assert.equal(definition, StreamType.methods.reduce);
+	assert.ok(definition.returns instanceof FormulaType);
+	assert.deepEqual(assist('=rowstream(A0:C3).findFirst().or').suggestions, ['.orElse', '.orElseThrow']);
+	const optional = assist('=rowstream(A0:C3).average(').signature.returnType;
+	assert.equal(optional.base, OptionalType);
+	assert.equal(optional.arguments[0], NumberType);
+	for (const terminal of ['average', 'min', 'max']) {
+		const signature = assist(`=rowstream(A0:C3).map(a->a.age).${terminal}().orElse(`).signature;
+		assert.equal(signature.parameters?.[0].type, NumberType);
+		assert.equal(signature.returnType, NumberType);
+		assert.equal(signature.definition, OptionalType.methods.orElse);
+	}
+	const mapper = assist('=rowstream(A0:C3).average().map(').signature.parameters?.[0].type;
+	assert.equal(mapper?.base, LambdaType);
+	assert.deepEqual(mapper.arguments, [NumberType, AnyType]);
+	assert.equal(assist('=rowstream(A0:C3).findFirst().orElse(').signature.parameters[0].type, RecordType);
+	assert.equal(assist('=rowstream(A0:C3).map(a->a.age).findFirst().orElse(').signature.parameters[0].type, AnyType);
+	assert.equal(OptionalType.methods.orElse.parameters[0].type.parameter, true);
+	assert.deepEqual(assist('=rowstream(A0:C3).average().map(a->a*2).or').suggestions, ['.orElse', '.orElseThrow']);
+	assert.deepEqual(assist('=rowstream(A0:C3).average().orElse(0).ma').suggestions, []);
+	assert.equal(assist('=rowstream(A0:C3).map(a->{name:a.name,age:').signature.argument, 0);
+	assert.deepEqual(assist('=rowstream(A0:C3).sum().ma').suggestions, []);
+	assert.deepEqual(assist('=CHART().ma').suggestions, []);
+	assert.deepEqual(assist('=CF().fi').suggestions, []);
+	const { keyboard } = setup('');
+	keyboard.feed('i=rows<Tab>A0:C3<End>.ma<Tab>a->{name:a.name,age:a.age}<End>.to<Tab><End><CR>');
+	assert.equal(keyboard.formula, '=rowstream(A0:C3).map(a->{name:a.name,age:a.age}).toTable()');
 });
 
 test('F4 toggles scalar and range references reversibly and preserves Unicode caret positions', () => {

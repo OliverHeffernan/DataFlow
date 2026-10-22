@@ -1,5 +1,6 @@
 import { referenceSpans, resolveReference, toCellValue } from "./FormulaFunctions.js";
 import { builderCalls } from './FormulaBuilder.js';
+import { ChartType, NumberType, TextType, ReferenceType, union, parameter, defineFunction } from './FormulaTypes.js';
 
 function text(arg) {
 	if (!arg?.startsWith('"')) throw new Error("Text must be in double quotes");
@@ -22,38 +23,42 @@ function number(value, label) {
 	return Number(value);
 }
 
+ChartType.methods = {
+	...Object.fromEntries(['line', 'bar', 'scatter', 'pie'].map(kind => [kind, defineFunction({ parameters: [], returns: ChartType,
+		description: `Select a ${kind} chart; later type calls override earlier ones. ${kind === 'pie' ? 'Requires exactly one series with nonnegative values. Zero/blank values create no slice.' : kind === 'scatter' ? 'Requires finite numeric x-values; points retain source order.' : 'Blank y-values leave gaps; zero and negative values are supported.'}`,
+		examples: [`CHART().${kind}().series(B0:B3)`], run: ({ chart }) => { chart.type = kind; } })])),
+	x: defineFunction({ parameters: [parameter('labelRange', ReferenceType)], returns: ChartType,
+		description: 'Set shared labels or scatter x-values from an ascending single row/column/cell reference. Relative, cross-sheet and named references work. Length must match every series. Default: point numbers starting at 1.', errors: ['Invalid reference/shape, mismatched length, or nonnumeric scatter x-value.'], examples: ['CHART().bar().x(A0:A3).series(B0:B3)'], run: (state, [range]) => { state.xRange = range; } }),
+	series: defineFunction({ parameters: [parameter('valueRange', ReferenceType), parameter('name', TextType, { optional: true, help: '["name"]' })], returns: ChartType,
+		description: 'Append a series from an ascending single row/column/cell reference. Names are double-quoted text literals, defaulting to Series 1, Series 2, …. All series must have the same length; finite numeric data is required and blanks create gaps. Pie permits one nonnegative series. Source edits recalculate the chart.', errors: ['Invalid/nonfinite data, invalid reference, unequal lengths or invalid pie data.'], examples: ['CHART().line().series(B0:B3,"Revenue")'], run: ({ chart, seriesRanges }, [range, name]) => {
+		seriesRanges.push(range); chart.series.push({ name: name === undefined ? `Series ${chart.series.length + 1}` : text(name) });
+	} }),
+	...Object.fromEntries(['title', 'xLabel', 'yLabel'].map(name => [name, defineFunction({ parameters: [parameter('text', TextType, { help: '"text"' })], returns: ChartType,
+		description: `Set ${name} using a double-quoted text literal, not a formula expression. Defaults to empty text. Axis labels are ignored by pie charts. Text is displayed literally, never as HTML.`, examples: [`CHART().line().series(B0:B3).${name}("Revenue")`], run: ({ chart }, [value]) => { chart[name] = text(value); } })])),
+	size: defineFunction({ parameters: [parameter('width', NumberType), parameter('height', NumberType)], returns: ChartType,
+		description: 'Set overall pixel dimensions using positive numeric literals. Defaults to 320 × 200; does not change cell sizes. Later size/width/height calls override the relevant dimensions.', errors: ['Nonpositive or nonliteral dimensions.'], examples: ['CHART().line().series(B0:B3).size(360,220)'], run: ({ chart }, args) => { [chart.width, chart.height] = args.map(arg => dimension(arg)); } }),
+	...Object.fromEntries(['width', 'height'].map(name => [name, defineFunction({ parameters: [parameter('pixels', NumberType)], returns: ChartType,
+		description: `Set ${name} in pixels using a positive numeric literal. Defaults to ${name === 'width' ? 320 : 200}. Later calls override earlier settings without resizing cells.`, errors: ['Nonpositive or nonliteral dimension.'], examples: [`CHART().line().series(B0:B3).${name}(240)`], run: ({ chart }, [value]) => { chart[name] = dimension(value); } })])),
+	position: defineFunction({ parameters: [parameter('x', NumberType), parameter('y', NumberType)], returns: ChartType,
+		description: 'Set nonnegative pixel offsets from the formula cell, using numeric literals. Defaults to (0,0). The chart moves with its cell; no drag-positioning or cell-size changes.', errors: ['Negative or nonliteral position.'], examples: ['CHART().line().series(B0:B3).position(12,8)'], run: ({ chart }, args) => { const [x, y] = args.map(arg => dimension(arg, true)); chart.position = { x, y }; } }),
+};
+
+export const chartFunction = defineFunction({ parameters: [], returns: union(ChartType, TextType), description: 'Begin a declarative Chart builder. No build() terminal is needed: a selected chart type renders over the grid. Without a type the cell displays blank. A typed chart requires at least one series; configurations apply in call order. Readable errors are prefixed Chart:.', errors: ['Malformed builder, invalid data or circular source references.'], examples: ['CHART().line().series(B0:B3)'], run: evaluateChart });
+
 export function evaluateChart(source, row, col, ctx) {
 	const chart = {
 		kind: "chart", type: null, width: 320, height: 200,
 		position: { x: 0, y: 0 }, title: "", xLabel: "", yLabel: "", series: [],
 	};
-	let xRange;
 	const seriesRanges = [];
+	const state = { chart, seriesRanges, xRange: undefined };
 	for (const { method, args } of builderCalls(source, 'CHART')) {
-		const arity = {
-			line: [0], bar: [0], scatter: [0], pie: [0], x: [1], series: [1, 2],
-			title: [1], xLabel: [1], yLabel: [1], size: [2], width: [1], height: [1], position: [2],
-		};
-		if (!Object.hasOwn(arity, method)) throw new Error(`Unknown method .${method}()`);
-		if (!arity[method].includes(args.length) || args.some(arg => !arg)) {
+		const definition = ChartType.method(method);
+		if (!definition) throw new Error(`Unknown method .${method}()`);
+		if (args.length < definition.min || args.length > definition.max || args.some(arg => !arg)) {
 			throw new Error(`Wrong arguments for .${method}()`);
 		}
-		switch (method) {
-			case "line": case "bar": case "scatter": case "pie": chart.type = method; break;
-			case "title": case "xLabel": case "yLabel": chart[method] = text(args[0]); break;
-			case "width": case "height": chart[method] = dimension(args[0]); break;
-			case "size": [chart.width, chart.height] = args.map(arg => dimension(arg)); break;
-			case "position": {
-				const [x, y] = args.map(arg => dimension(arg, true));
-				chart.position = { x, y };
-				break;
-			}
-			case "x": xRange = args[0]; break;
-			case "series":
-				seriesRanges.push(args[0]);
-				chart.series.push({ name: args.length === 2 ? text(args[1]) : `Series ${chart.series.length + 1}` });
-				break;
-		}
+		definition.run(state, args);
 	}
 	if (!chart.type) return "";
 	if (!chart.series.length) throw new Error("Add at least one .series(range)");
@@ -86,7 +91,7 @@ export function evaluateChart(source, row, col, ctx) {
 			String(value).trim() === "" ? null : number(value, seriesRanges[i]));
 	}
 	const length = chart.series[0].values.length;
-	chart.x = xRange ? range(xRange) : Array.from({ length }, (_, i) => i + 1);
+	chart.x = state.xRange ? range(state.xRange) : Array.from({ length }, (_, i) => i + 1);
 	if (chart.x.length !== length || chart.series.some(series => series.values.length !== length)) {
 		throw new Error("X range and every series must have the same length");
 	}

@@ -54,6 +54,7 @@ test("existing arithmetic, mathjs functions, aggregates and relative notation ke
 		["=2+3*4", 14], ["=2^3 mod 5", 3], ["=sqrt(16) + max(B0:B3)", 13], ["=round(pi, 2)", 3.14],
 		["=SUM(B0:B4)", 18], ["=AVG(B0:B4)", 3.6], ["=MEAN(B0:B3)", 4.5], ["=COUNT(B0:B4)", 5],
 		["= SUM( B0 : B3 ) + 1", 19], ["=B4 + 1", 1], ["=[1]{max(0, 1) - 1} * 2", 10], ["=B{B1}", 1],
+		["=A{B1:B1}", "Feb"],
 	]) {
 		assert.equal(evaluate(formula), expected, formula);
 	}
@@ -432,4 +433,158 @@ test("spill cycles are rejected and spill outputs shrink or move on recalculatio
 	set("E0", "");
 	sheet.recalculate();
 	assert.equal([...sheet.spillCells.keys()].some(key => key.endsWith(":4")), false);
+});
+
+function streamData() {
+	[
+		['name', 'lastName', 'age'], ['John', 'Smith', '23'], ['Mary', 'Jones', '41'], ['John', 'Doe', '19'],
+	].forEach((row, i) => row.forEach((text, j) => { sheet.rows[i][j] = text; }));
+}
+
+test('row streams preserve headings and project named objects, scalar columns and positional rows', () => {
+	streamData();
+	assert.deepEqual(evaluate('=rowstream(A0:C3).toTable()'), evaluate('=FILTER(A0:C3, A0:A3=A0:A3)'));
+	const projected = '=rowstream(A0:C3).filter(a->a.name="John").map(a->{name:a.name+" "+a.lastName,age:a.age}).toTable()';
+	assert.deepEqual(evaluate(projected), [['name', 'age'], ['John Smith', 23], ['John Doe', 19]]);
+	assert.deepEqual(evaluate('=rowstream(A0:C3).map(a->a.lastName).toTable("surname")'), [['surname'], ['Smith'], ['Jones'], ['Doe']]);
+	assert.deepEqual(evaluate('=rowstream(A0:C3).map(a->[a.lastName,a.age+1]).limit(2).toTable("surname","nextAge")'),
+		[['surname', 'nextAge'], ['Smith', 24], ['Jones', 42]]);
+	assert.deepEqual(evaluate('=rowstream(A0:C3).filter(a->FALSE).map(a->{name:a.name,age:a.age}).toTable()'), [['name', 'age']]);
+	assert.deepEqual(evaluate('=rowstream(A0:C0).toTable()'), [['name', 'lastName', 'age']]);
+	assert.deepEqual(evaluate('=rowstream(A0:C3).limit(1).map(a->{A0:C1,THISROW:a.name}).toTable()'), [['A0', 'THISROW'], [23, 'John']]);
+	set('B0', 'Last Name');
+	assert.equal(evaluate('=rowstream(A0:C3).map(a->a["Last Name"]).findFirst().orElseThrow()'), 'Smith');
+});
+
+test('stream pipelines preserve operation order, stable sorting and typed structural distinctness', () => {
+	streamData();
+	assert.deepEqual(evaluate('=rowstream(A0:C3).sorted((a,b)->b.age-a.age).skip(1).limit(1).map(a->{who:a.lastName}).toTable()'), [['who'], ['Smith']]);
+	assert.equal(evaluate('=rowstream(A0:C3).map(a->a.name).distinct().reduce("",(a,b)->a+","+b)'), ',John,Mary');
+	assert.equal(evaluate('=rowstream(A0:C3).map(a->{name:a.name}).distinct().count()'), 2);
+	assert.equal(evaluate('=rowstream(VSTACK("n",1,"1",TRUE,1.00)).map(a->a.n).distinct().count()'), 3);
+	assert.deepEqual(evaluate('=rowstream(A0:C3).sorted((a,b)->0).toTable()'),
+		[['name', 'lastName', 'age'], ['John', 'Smith', 23], ['Mary', 'Jones', 41], ['John', 'Doe', 19]]);
+});
+
+test('numeric stream terminals and reducers retain decimal precision and define empty results', () => {
+	streamData();
+	for (const [method, expected] of [['sum', 83], ['min', 19], ['max', 41], ['average', 83 / 3]]) {
+		assert.equal(evaluate(`=rowstream(A0:C3).map(a->a.age).${method}()${method === 'sum' ? '' : '.orElseThrow()'}`), expected);
+	}
+	assert.equal(evaluate('=rowstream(A0:C3).map(a->-a.age).max().orElseThrow()'), -19);
+	assert.equal(evaluate('=rowstream(A0:C3).map(a->a.age).reduce(100,(a,b)->a-b)'), 17);
+	assert.equal(evaluate('=rowstream(VSTACK("n",1000000000000000.1,0.2)).map(a->a.n).sum()-1000000000000000'), 0.3);
+	assert.equal(evaluate('=rowstream(VSTACK("n",0.1,0.2)).map(a->a.n).average().orElseThrow()-0.15'), 0);
+	assert.equal(evaluate('=rowstream(VSTACK("n",9007199254740993,9007199254740992)).map(a->a.n).min().orElseThrow()-9007199254740992'), 0);
+	for (const [terminal, expected] of [['sum()', 0], ['count()', 0], ['reduce(7,(a,b)->a+b.age)', 7]]) {
+		assert.equal(evaluate(`=rowstream(A0:C3).filter(a->FALSE).${terminal}`), expected);
+	}
+	for (const terminal of ['min', 'max', 'average', 'findFirst']) {
+		const empty = `=rowstream(A0:C3).filter(a->FALSE).${terminal}()`;
+		assert.equal(evaluate(empty + '.isEmpty()'), true);
+		assert.equal(evaluate(empty + '.orElse(-7)'), -7);
+		assert.equal(evaluate(empty + '.orElseThrow()'), '#N/A');
+	}
+	assert.deepEqual(evaluate('=rowstream(A0:C3).reduce({total:0},(a,b)->{total:a.total+b.age})'), [['total'], [83]]);
+});
+
+test('Optionals distinguish absence from zero, FALSE and blank, and lazily resolve defaults', () => {
+	for (const [item, expected] of [['0', 0], ['FALSE', false], ['""', '']]) {
+		const present = `=rowstream(VSTACK("n",${item})).map(a->a.n).findFirst()`;
+		assert.equal(evaluate(present + '.isPresent()'), true);
+		assert.equal(evaluate(present + '.isEmpty()'), false);
+		assert.equal(evaluate(present + '.orElse(1/0)'), expected);
+	}
+	const empty = '=rowstream(VSTACK("n",5)).limit(0).findFirst()';
+	assert.equal(evaluate(empty + '.map(a->1/0).filter(a->1/0).orElse(17)'), 17);
+	assert.equal(evaluate(empty + '.flatMap(a->1/0).isEmpty()'), true);
+	assert.equal(evaluate(empty + '.orElse(1/0)'), '#DIV/0!');
+	assert.equal(evaluate('=rowstream(VSTACK("n",5)).findFirst().filter(a->a.n>8).orElse({n:11}).n'), 11);
+});
+
+test('Optional mapping retains records, supports nesting and flatMap, and preserves source errors', () => {
+	streamData();
+	const first = '=rowstream(A0:C3).findFirst()';
+	assert.equal(evaluate(first + '.map(a->a.age+2).orElseThrow()'), 25);
+	assert.deepEqual(evaluate(first + '.map(a->{full:a.name+" "+a.lastName,years:a.age}).orElseThrow()'),
+		[['full', 'years'], ['John Smith', 23]]);
+	assert.equal(evaluate(first + '.map(a->rowstream(VSTACK("n",a.age)).findFirst()).orElseThrow().map(b->b.n).orElseThrow()'), 23);
+	assert.equal(evaluate(first + '.flatMap(a->rowstream(VSTACK("n",a.age)).findFirst()).map(b->b.n).orElseThrow()'), 23);
+	assert.equal(evaluate(first + '.flatMap(a->rowstream(VSTACK("n",a.age)).limit(0).findFirst()).orElse(31)'), 31);
+	assert.equal(evaluate(first + '.flatMap(a->a.age).orElse(0)'), '#VALUE!');
+	assert.equal(evaluate(first + '.map(a->1/0).orElse(0)'), '#DIV/0!');
+	assert.equal(evaluate('=rowstream(VSTACK("n","invalid")).map(a->a.n).min().orElse(0)'), '#VALUE!');
+	set('C1', '=1/0');
+	assert.equal(evaluate(first + '.isEmpty()'), '#DIV/0!');
+	set('C1', '=Z0');
+	assert.equal(evaluate('=IFERROR(rowstream(A0:C3).findFirst().orElse(0),99)'), 'circular logic detected');
+});
+
+test('expression-only values require resolution and reducer accumulators retain their type/schema', () => {
+	streamData();
+	const first = 'rowstream(A0:C3).findFirst()';
+	for (const expression of [first, first + '+1', `SUM(${first})`, `IF(${first},1,0)`, `${first}.map(a->{value:rowstream(A0:C3).findFirst()}).orElseThrow()`, `${first}.map(a->a.age.constructor).orElse(0)`, `${first}.map((a,b)->a).orElse(0)`]) {
+		assert.equal(evaluate('=' + expression), '#VALUE!', expression);
+	}
+	assert.equal(evaluate('=rowstream(A0:C3).reduce({total:0},(a,b)->{total:a.total+b.age}).total'), 83);
+	assert.equal(evaluate('=rowstream(A0:C3).limit(0).reduce("seed",(a,b)->1/0)'), 'seed');
+	for (const [seed, reducer] of [['0', '(a,b)->"changed"'], ['0', '(a,b)->{isBigNumber:TRUE}'], ['{total:0}', '(a,b)->{other:b.age}'], ['{total:0}', '(a,b)->{total:"text"}']]) {
+		assert.equal(evaluate(`=rowstream(A0:C3).reduce(${seed},${reducer})`), '#VALUE!');
+	}
+});
+
+test('stream short-circuit terminals do not read unused source rows, even at a limit boundary', () => {
+	streamData(); set('C2', '=1/0');
+	for (const [terminal, expected] of [['limit(1).count()', 1], ['limit(0).count()', 0], ['map(a->a.age).findFirst().orElseThrow()', 23], ['anyMatch(a->a.name="John")', true], ['allMatch(a->a.name="Mary")', false], ['noneMatch(a->a.name="John")', false]]) {
+		assert.equal(evaluate(`=rowstream(A0:C3).${terminal}`), expected, terminal);
+	}
+	assert.equal(evaluate('=rowstream(A0:C3).limit(2).count()'), '#DIV/0!');
+	assert.equal(evaluate('=rowstream(A0:C3).anyMatch(a->a.name="Mary")'), '#DIV/0!');
+	for (const [terminal, expected] of [['anyMatch(a->TRUE)', false], ['allMatch(a->FALSE)', true], ['noneMatch(a->TRUE)', true]]) {
+		assert.equal(evaluate(`=rowstream(A0:C0).${terminal}`), expected);
+	}
+});
+
+test('stream lambdas have lexical scopes, ordinary formula functions and fresh relative references', () => {
+	streamData(); set('D0', '10');
+	assert.equal(evaluate('=rowstream(A0:C3).map(a->IF(a.age>20,round(a.age/2),0)).sum()'), 33);
+	assert.equal(evaluate('=rowstream(A0:C3).limit(1).map(a->rowstream(A0:C3).map(b->a.age-b.age).sum()).sum()'), -14);
+	assert.equal(evaluate('=rowstream(A0:C3).limit(1).map(a->a.age+[-22]{0}).sum()'), 33);
+	assert.equal(evaluate('=rowstream(A0:C3).limit(1).map(a->"x, -> ) { age: " + a.name).findFirst().orElseThrow()'), 'x, -> ) { age: John');
+	assert.equal(evaluate('=SUM(rowstream(A0:C3).map(a->a.age).sum(),1)'), 84);
+	assert.equal(evaluate('=IF(FALSE,rowstream(A0:C3),7)'), 7);
+	assert.equal(evaluate('=IFERROR(rowstream(A0:C3).map(a->1/0).sum(),99)'), 99);
+	assert.throws(() => evaluateFormula('=IF(FALSE,rowstream(A0:C3).map(a->random()).count(),0)', 0, 0, { pure: true }), /#NAME\?/);
+});
+
+test('streams reject unfinished chains, invalid schemas and unsafe or non-lambda callbacks', () => {
+	streamData();
+	for (const expression of ['rowstream(A0:C3)', 'rowstream(A0:C3).map(a->a.age)', 'COUNT(rowstream(A0:C3))', 'rowstream(A0:C3)+1', 'IF(rowstream(A0:C3),1,0)']) {
+		assert.equal(evaluate('=' + expression), '#VALUE!', expression);
+	}
+	for (const suffix of ['.count().map(a->a)', '.map(3).sum()', '.filter((a,b)->TRUE).count()', '.limit(-1).count()', '.skip(0.5).count()', '.map(a->a.missing).toTable()', '.map(a->a.constructor()).toTable()', '.map(a->a.age.constructor).toTable()', '.map(a->a["age"+"x"]).toTable()', '.toTable("x")', '.map(a->IF(a.age>20,{x:a.age},{y:a.age})).toTable()']) {
+		assert.equal(evaluate('=rowstream(A0:C3)' + suffix), '#VALUE!', suffix);
+	}
+	assert.equal(evaluate('=rowstream(A0:C3).map(a->{x:a.name,x:a.age}).toTable()'), '#VALUE!');
+	assert.equal(evaluate('=rowstream(A0:C3).map(a->{__proto__:a.name}).toTable()'), '#VALUE!');
+	assert.equal(evaluate('=rowstream(A0:C3).madeUp()'), '#NAME?');
+	set('B0', 'name'); assert.equal(evaluate('=rowstream(A0:C3).toTable()'), '#VALUE!');
+	set('B0', ''); assert.equal(evaluate('=rowstream(A0:C3).count()'), '#VALUE!');
+});
+
+test('stream tables use ordinary protected spills and recalculate dependencies without stale rows', () => {
+	streamData();
+	set('E0', '=rowstream(A0:C3).filter(a->a.name="John").map(a->{name:a.lastName,age:a.age}).toTable()');
+	set('H0', '=F2+1');
+	const stored = JSON.stringify(sheet.rows);
+	assertOrderIndependent();
+	assert.equal(JSON.stringify(sheet.rows), stored);
+	assert.deepEqual([shown('E0'), shown('E2'), shown('F1'), shown('H0')], ['name', 'Doe', 23, 20]);
+	set('A3', 'Jane'); set('C1', '27');
+	sheet.recalculate();
+	assert.deepEqual([shown('F1'), shown('E2'), spill('E2')], [27, '', undefined]);
+	set('E1', 'keep');
+	assert.equal(value('E0'), '#SPILL!'); assert.equal(value('E1'), 'keep');
+	set('E1', ''); set('C1', '=F1');
+	assertOrderIndependent(); assert.equal(shown('E0'), '#SPILL!');
 });

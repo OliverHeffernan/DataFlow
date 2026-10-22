@@ -11,6 +11,8 @@
 		"serve": "vite",
 		"build": "vite build",
 		"test": "node --test src/classes/*.test.js scripts/*.test.js",
+		"docs:generate": "node scripts/formula-reference.js",
+		"docs:check": "node scripts/formula-reference.js --check",
 		"preview": "vite preview",
 		"tauri": "tauri"
 	},
@@ -24,6 +26,7 @@
 		"vue": "^3.5.44"
 	},
 	"devDependencies": {
+		"@babel/parser": "7.29.9",
 		"@tauri-apps/cli": "^2.12.3",
 		"@vitejs/plugin-vue": "^6.0.10",
 		"vite": "^8.3.4"

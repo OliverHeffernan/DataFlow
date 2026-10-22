@@ -6,7 +6,8 @@
 			<div id="formText"></div>
 		</div>
 		<div class="formula-signature" v-if="ui.assist.signature" aria-label="Function signature">
-			<span class="signature-name">{{ ui.assist.signature.name }}</span>(<template v-for="(arg, index) in ui.assist.signature.args" :key="index"><span v-if="index">, </span><strong v-if="index === Math.min(ui.assist.signature.argument, ui.assist.signature.args.length - 1)">{{ arg }}</strong><span v-else>{{ arg }}</span></template>)
+			<span class="signature-name">{{ ui.assist.signature.name }}</span>(<template v-for="(arg, index) in ui.assist.signature.args" :key="index"><span v-if="index">, </span><strong v-if="index === Math.min(ui.assist.signature.argument, ui.assist.signature.args.length - 1)">{{ arg }}</strong><span v-else>{{ arg }}</span><span v-if="arg !== '…'" class="signature-type">: {{ ui.assist.signature.parameters[Math.min(index, ui.assist.signature.parameters.length - 1)]?.type.name }}</span></template>)<span class="signature-type"> → {{ ui.assist.signature.returnType.name }}</span>
+			<div class="signature-description" :title="ui.assist.signature.definition.description">{{ ui.assist.signature.definition.description.split('. ')[0] }}</div>
 		</div>
 		<div class="formula-completions" v-if="ui.assist.inserting && ui.assist.suggestions.length" aria-label="Formula suggestions" :role="keyboardOnly ? 'listbox' : undefined">
 			<div class="completion-caption">{{ ui.assist.kind === 'mark' ? 'MARKS / COLUMNS' : ui.assist.prefix.startsWith('.') ? 'BUILDER METHODS' : 'FUNCTIONS' }} <span v-if="!keyboardOnly">↑ ↓ choose · Tab insert</span></div>
@@ -29,6 +30,8 @@ function complete(index) { checkCommand.keyboard.completionIndex = index; checkC
 .formula-editor { flex: 1; min-width: 0; position: relative; }
 .formula-signature { color: #9aaec3; font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 3px 8px; border-top: 1px solid #26394c; overflow-wrap: anywhere; }
 .signature-name { color: #75e2bc; }
+.signature-type { color: #d7b5ff; }
+.signature-description { color: #9aaec3; font-family: system-ui, sans-serif; }
 .formula-signature strong { color: #f4d779; font-weight: 500; background: #28384a; border-radius: 3px; padding: 1px 3px; }
 .formula-completions { position: absolute; top: 100%; left: 0; width: min(440px, calc(100vw - 90px)); color: #dbe6f3; background: #142233; border: 1px solid #334a62; box-shadow: 0 8px 24px #0007; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .completion-caption { display: flex; justify-content: space-between; padding: 7px 10px; font-size: 10px; color: #9aaec3; border-bottom: 1px solid #26394c; }

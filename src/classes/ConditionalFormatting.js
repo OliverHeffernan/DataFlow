@@ -1,6 +1,7 @@
 import { builderCalls } from './FormulaBuilder.js';
 import { cellLabel, columnIndex, evaluateFormula, FormulaError, truthy, validatePredicate } from './FormulaFunctions.js';
 import { horizontalAlignments } from './CellFormatting.js';
+import { ConditionalRuleType, TextType, ReferenceType, ConditionType, parameter, defineFunction } from './FormulaTypes.js';
 
 const namedColors = new Set(('aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato transparent turquoise violet wheat white whitesmoke yellow yellowgreen').split(' '));
 
@@ -11,32 +12,44 @@ function text(argument) {
 	return value;
 }
 
+ConditionalRuleType.methods = {
+	range: defineFunction({ parameters: [parameter('range', ReferenceType, { help: 'A0:D3' })], returns: ConditionalRuleType,
+		description: 'Set the required local absolute target cell/range, such as A0:D3. Endpoints may be reversed. No relative, named or cross-sheet target references. Later calls override earlier ranges; rows and columns are zero-based.', errors: ['Invalid target syntax, unsafe coordinates or out-of-sheet range when installed.'], examples: ['CF().range(A0:D3).bg("navy")'], run(rule, [source]) {
+		const match = source.match(/^([A-Z]+)(\d+)(?:\s*:\s*([A-Z]+)(\d+))?$/);
+		if (!match) throw new Error('.range() needs a local absolute range such as A0:D3');
+		const [r0, c0, r1, c1] = [Number(match[2]), columnIndex(match[1]), Number(match[4] ?? match[2]), columnIndex(match[3] ?? match[1])];
+		if (![r0, c0, r1, c1].every(Number.isSafeInteger)) throw new Error('Range coordinates are too large');
+		rule.range = { r0: Math.min(r0, r1), c0: Math.min(c0, c1), r1: Math.max(r0, r1), c1: Math.max(c0, c1) };
+	} }),
+	when: defineFunction({ parameters: [parameter('condition', ConditionType, { help: 'condition per target cell' })], returns: ConditionalRuleType,
+		description: 'Set a formula expression evaluated separately at each target cell. Defaults to TRUE. Relative references resolve from each target. Reads settled decimal values; chart targets are skipped. Only the safe deterministic function subset is available. Predicate errors are reported per cell, not treated as matches.', errors: ['Unsafe/malformed expression at definition time; invalid or nonscalar condition at evaluation time.'], examples: ['CF().range(A0:D3).when([]{}>5).fg("gold")'], run(rule, [source]) { validatePredicate(source); rule.predicate = source; } }),
+	...Object.fromEntries(['fg', 'bg'].map(name => [name, defineFunction({ parameters: [parameter('colour', TextType, { help: '"colour"' })], returns: ConditionalRuleType,
+		description: `Set the ${name === 'fg' ? 'foreground' : 'background'} using a double-quoted CSS named colour or #RGB/#RGBA/#RRGGBB/#RRGGBBAA hex literal. Later matching rules override only properties they supply, without changing stored cell styling.`, errors: ['Invalid colour or non-quoted literal.'], examples: [`CF().range(A0:D3).${name}("navy")`], run(rule, [source]) {
+		const color = text(source);
+		if (!/^#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/i.test(color) && !namedColors.has(color.toLowerCase())) throw new Error(`Invalid colour: ${color}; use a hex or CSS named colour`);
+		rule.colors[name] = color;
+	} })])),
+	name: defineFunction({ parameters: [parameter('text', TextType, { help: '"text"' })], returns: ConditionalRuleType,
+		description: 'Set an optional rule label using a double-quoted text literal. Defaults to empty text; later calls override it.', examples: ['CF().range(A0:D3).bg("navy").name("Highlight")'], run: (rule, [source]) => { rule.name = text(source); } }),
+	align: defineFunction({ parameters: [parameter('alignment', TextType, { help: '"auto" | "left" | "center" | "right"' })], returns: ConditionalRuleType,
+		description: 'Set alignment to the double-quoted literal auto, left, center or right. Later matching alignment overrides earlier alignment without modifying stored styling.', errors: ['Invalid alignment or non-quoted literal.'], examples: ['CF().range(A0:D3).align("right")'], run(rule, [source]) {
+		const align = text(source);
+		if (!horizontalAlignments.includes(align)) throw new Error('Alignment must be auto, left, center or right');
+		rule.colors.align = align;
+	} }),
+};
+
+export const conditionalFunction = defineFunction({ parameters: [], returns: ConditionalRuleType, description: 'Begin a conditional-format builder in the conditional-format pane. Requires range and at least one foreground/background/alignment property. Condition defaults to TRUE. Rules merge per property in order, never mutate values, and persist with the workbook. Not an ordinary cell formula.', errors: ['Missing target/style or malformed builder; invalid predicates and colours.'], examples: ['CF().range(A0:D3).when([]{}>5).bg("navy")'], run: compileConditionalRule });
+
 export function compileConditionalRule(source) {
 	if (typeof source !== 'string') throw new Error('A conditional rule must be builder text');
 	// Keep the existing overlay shape for consumers; colours and alignment merge per property.
 	const rule = { source, range: null, predicate: 'TRUE', colors: {}, name: '' };
 	for (const { method, args } of builderCalls(source, 'CF')) {
-		if (!['range', 'when', 'fg', 'bg', 'align', 'name'].includes(method)) throw new Error(`Unknown CF method .${method}()`);
+		const definition = ConditionalRuleType.method(method);
+		if (!definition) throw new Error(`Unknown CF method .${method}()`);
 		if (args.length !== 1 || !args[0]) throw new Error(`.${method}() expects one argument`);
-		if (method === 'range') {
-			const match = args[0].match(/^([A-Z]+)(\d+)(?:\s*:\s*([A-Z]+)(\d+))?$/);
-			if (!match) throw new Error('.range() needs a local absolute range such as A0:D3');
-			const [r0, c0, r1, c1] = [Number(match[2]), columnIndex(match[1]), Number(match[4] ?? match[2]), columnIndex(match[3] ?? match[1])];
-			if (![r0, c0, r1, c1].every(Number.isSafeInteger)) throw new Error('Range coordinates are too large');
-			rule.range = { r0: Math.min(r0, r1), c0: Math.min(c0, c1), r1: Math.max(r0, r1), c1: Math.max(c0, c1) };
-		} else if (method === 'when') {
-			validatePredicate(args[0]); rule.predicate = args[0];
-		} else if (method === 'name') rule.name = text(args[0]);
-		else if (method === 'align') {
-			const align = text(args[0]);
-			if (!horizontalAlignments.includes(align)) throw new Error('Alignment must be auto, left, center or right');
-			rule.colors.align = align;
-		}
-		else {
-			const color = text(args[0]);
-			if (!/^#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/i.test(color) && !namedColors.has(color.toLowerCase())) throw new Error(`Invalid colour: ${color}; use a hex or CSS named colour`);
-			rule.colors[method] = color;
-		}
+		definition.run(rule, args);
 	}
 	if (!rule.range) throw new Error('Add .range(A0:D3)');
 	if (!Object.keys(rule.colors).length) throw new Error('Add .fg("colour"), .bg("colour") or .align("left"|"center"|"right"|"auto")');
