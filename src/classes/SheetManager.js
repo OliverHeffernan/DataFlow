@@ -1216,7 +1216,8 @@ export default class SheetManager {
 
 	// function to get the element of a specific cell
 	getCell(row, col) {
-		return document.getElementById(col + ":" + row);
+		const pane = document.getElementById('sheetViewport')?.closest('.workspace-window');
+		return pane ? document.getElementById(`window-${pane.dataset.window}-${col}:${row}`) : null;
 	}
 
 	// returns the currently selected cell based on the className "focusssed"

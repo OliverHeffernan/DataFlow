@@ -57,6 +57,23 @@ export default class WindowManager {
 		return result;
 	}
 
+	// Pane lifetime is independent of the split tree: the renderer keeps a flat keyed list.
+	layout(width, height) {
+		const windows = [], separators = [];
+		const visit = (node, x, y, width, height) => {
+			if (node.type === 'window') { windows.push({ node, x, y, width, height }); return; }
+			const vertical = node.axis === 'vertical', gap = Math.min(5, vertical ? width : height);
+			const first = Math.max(0, (vertical ? width : height) - gap) * node.ratio;
+			separators.push({ node, x: vertical ? x + first : x, y: vertical ? y : y + first,
+				width: vertical ? gap : width, height: vertical ? height : gap, bounds: { x, y, width, height } });
+			visit(node.first, x, y, vertical ? first : width, vertical ? height : first);
+			visit(node.second, vertical ? x + first + gap : x, vertical ? y : y + first + gap,
+				vertical ? width - first - gap : width, vertical ? height : height - first - gap);
+		};
+		visit(this.state.root, 0, 0, width, height);
+		return { windows, separators };
+	}
+
 	neighbor(direction) {
 		if (!'hjkl'.includes(direction) || direction.length !== 1) return null;
 		const rectangles = this.rectangles(), from = rectangles.get(this.state.activeId), horizontal = 'hl'.includes(direction), forward = 'jl'.includes(direction);

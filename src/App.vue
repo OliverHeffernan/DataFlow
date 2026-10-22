@@ -3,7 +3,7 @@
 	<FirstLaunchScreen v-if="launchManager.displayed" />
 	<CommandLine />
 	<RightClickMenu />
-	<main id="windows" aria-label="Workspace windows"><WindowNode :node="check.windows.state.root" /></main>
+	<main id="windows" aria-label="Workspace windows"><WindowNode /></main>
 	</div>
 	<RecoveryDialog :manager="recovery" />
 </template>

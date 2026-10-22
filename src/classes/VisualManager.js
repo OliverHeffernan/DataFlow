@@ -22,8 +22,7 @@ export default class VisualManager {
 	}
 
 	getSelectionElement(row, col) {
-		let element = document.getElementById("visual" + col + ":" + row);
-		return element;
+		return new SheetManager().getCell(row, col)?.nextElementSibling;
 	}
 
 	setVisual(endRow, endCol, cellCurPos, numOfCols) {

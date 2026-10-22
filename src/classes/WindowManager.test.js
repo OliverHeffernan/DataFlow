@@ -37,6 +37,12 @@ test('window content, resizing and workbook replacement preserve session state w
 	right.sheet = report; right.content = 'cf'; right.row = 1;
 	manager.resize(manager.state.root.id, 0.7);
 	assert.equal(manager.rectangles().get(original.id).width, 0.7);
+	const layout = manager.layout(1005, 605);
+	assert.deepEqual(layout.windows.map(({ node, ...rect }) => ({ id: node.id, ...rect })), [
+		{ id: original.id, x: 0, y: 0, width: 700, height: 605 },
+		{ id: right.id, x: 705, y: 0, width: 300, height: 605 },
+	]);
+	assert.equal(layout.separators[0].width, 5);
 	assert.equal(manager.neighbor('h'), original.id);
 	const newInputs = sheet('Inputs'), newReport = sheet('Report'); newReport.rows = [['']];
 	manager.reconcile([newInputs, newReport]);

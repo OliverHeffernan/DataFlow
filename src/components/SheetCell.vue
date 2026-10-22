@@ -1,9 +1,9 @@
 <template>
 	<td class="tableCell">
 		<button
-			:id="active ? colNo + ':' + rowNo : `window-${pane.id}-${colNo}:${rowNo}`"
+			:id="`window-${pane.id}-${colNo}:${rowNo}`"
 			class="cell"
-			:class="{ 'inactive-cursor': !active && rowNo === pane.row && colNo === pane.col }"
+			:class="{ 'pane-cursor': selected }"
 			:data-cell="colNo + ':' + rowNo"
 			:style="cellStyle"
 			:aria-label="value?.kind === 'chart' ? (value.title || `${value.type} chart`) : undefined"
@@ -16,7 +16,6 @@
 			<template v-else>{{ presentation?.text ?? value }}</template>
 		</button>
 		<div
-			:id="active ? 'visual'+colNo+':'+rowNo : undefined"
 			class="sel inactive"
 		></div>
 	</td>
@@ -36,7 +35,7 @@
 
 	const props = defineProps({
 		pane: { type: Object, required: true },
-		active: Boolean,
+		selected: Boolean,
 		rowNo: {
 			type: Number,
 			required: true,
@@ -60,7 +59,7 @@
 	});
 			
 	async function handleClick(event) {
-		await checkCommand.activateWindow(props.pane.id);
+		if (await checkCommand.activateWindow(props.pane.id, false) === false) return;
 		const keyboard = checkCommand.keyboard;
 		keyboard.finishFormat();
 		if (keyboard.mode === 'i') keyboard.escape();
@@ -75,7 +74,7 @@
 	}
 
 	async function handleDblClick() {
-		await checkCommand.activateWindow(props.pane.id);
+		if (await checkCommand.activateWindow(props.pane.id, false) === false) return;
 		sheetManager.selectCell(props.rowNo, props.colNo);
 		checkCommand.editCell();
 		checkCommand.focus();
@@ -170,8 +169,6 @@ td {
 	/*outline: 2px solid white;*/
 	box-shadow: inset 0 0 0 2px white; /* Inner outline effect */
 }
-
-.inactive-cursor { box-shadow: inset 0 0 0 1px #688294; }
 
 .visualSelection {
 	/*background-color: rgba(0, 216, 255, 0.5);*/

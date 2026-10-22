@@ -8,7 +8,7 @@
 			:rowNo="rowNo"
 			:colNo="index"
 			:pane="pane"
-			:active="active"
+			:selected="rowNo === pane.row && index === pane.col"
 		/>
 	</tr>
 </template>
@@ -17,7 +17,6 @@
 
 	defineProps({
 		pane: { type: Object, required: true },
-		active: Boolean,
 		rowNo: {
 			type: Number,
 			required: true,

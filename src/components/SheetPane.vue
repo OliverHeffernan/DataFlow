@@ -2,7 +2,7 @@
 	<div class="sheet-viewport" :id="active ? 'sheetViewport' : undefined" @scroll="scrolled" ref="viewport">
 		<table>
 			<thead><tr><th class="rowLabelType rowLabels">abs</th><th class="rowLabelType relRow">rel</th><th v-for="(_, col) in rows[0]" :key="col" class="labels colLabels">{{ manager.columnLabel(col) }}</th></tr></thead>
-			<tbody><SheetRow v-for="(row, index) in rows" :key="index" :row="row" :rowNo="index" :pane="pane" :active="active" /></tbody>
+			<tbody><SheetRow v-for="(row, index) in rows" :key="index" :row="row" :rowNo="index" :pane="pane" /></tbody>
 		</table>
 		<div class="grid-overlays" :id="active ? 'gridOverlays' : undefined" aria-hidden="true"></div>
 	</div>

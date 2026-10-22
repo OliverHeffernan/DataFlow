@@ -95,8 +95,9 @@ export default class CheckCommand {
 		keyboard.pending = ''; keyboard.mappingKeys = [];
 		clearTimeout(this.mappingTimer);
 	}
-	async activateWindow(id) {
-		if (!this.windows.windows.some(pane => pane.id === id)) return;
+	async activateWindow(id, render = true) {
+		if (!this.windows.windows.some(pane => pane.id === id)) return false;
+		if (id === this.currentWindow.id) return true;
 		if (id !== this.currentWindow.id) {
 			this.keyboard.finishFormat();
 			if (this.currentWindow.content === 'sheet' && this.keyboard.mode === 'i') {
@@ -107,7 +108,7 @@ export default class CheckCommand {
 				if (this.keyboard.commit() === false) {
 					this.keyboard.mode = 'n';
 					this.preserveWindows(() => this.keyboard.move(this.keyboard.point));
-					await this.render(); this.focus(); return;
+					await this.render(); this.focus(); return false;
 				}
 				this.keyboard.changeKeys = keys;
 			}
@@ -123,7 +124,8 @@ export default class CheckCommand {
 			this.adoptKeyboard(pane.rules?.state.editing ? pane.rules.editor : pane.keyboard);
 			this.syncActiveValues(); this.renderedRow = null;
 		}
-		await this.render(); this.focus();
+		if (render) { await this.render(); this.focus(); }
+		return true;
 	}
 	syncActiveValues() {
 		const result = this.sheet.sheetResults.value.get(this.sheet.activeSheet);
