@@ -3,6 +3,8 @@
 const config = { number: 'BigNumber', precision: 64, relTol: 1e-64, absTol: 0 }
 import { create, all } from 'mathjs'
 const math = create(all, config)
+// Cache syntax only. Values, deferred references, pure-mode checks and RNG calls stay per evaluation.
+const expressionTrees = new Map();
 
 /*
  * Expression-tree formula engine.
@@ -811,7 +813,14 @@ function evaluateExpression(source, row, col, ctx, depth) {
 	if (text.trim() === "") return "";
 	let tree;
 	try {
-		tree = math.parse(text);
+		tree = expressionTrees.get(text);
+		if (!tree) {
+			tree = math.parse(text);
+			if (text.length <= 4096) {
+				if (expressionTrees.size >= 256) expressionTrees.delete(expressionTrees.keys().next().value);
+				expressionTrees.set(text, tree);
+			}
+		}
 	} catch (error) {
 		throw new FormulaError(error.message);
 	}

@@ -141,8 +141,10 @@ export function resolveMotion(rows, point, key, count = 1, options = {}) {
 	const lastRow = rows.length - 1;
 	const bounded = p => ({ row: clamp(p.row, 0, lastRow), col: clamp(p.col, 0, Math.max(0, rows[clamp(p.row, 0, lastRow)].length - 1)) });
 	let target = { ...point }, inclusive = false, linewise = false, jump = false;
-	const units = rows.flatMap((row, i) => i ? ['\n', ...row] : row);
-	const current = offset(rows, point);
+	// Coordinate-only motions must not flatten the entire workbook on every keystroke.
+	const linear = !['h', 'l', 'j', 'k', 'gj', 'gk', ' ', '0', '^', '$', 'g_', '|', 'g0', 'g^', 'g$', 'g<End>', 'gm', 'gM', '+', '-', '_', 'gg', 'G', '<C-End>', 'H', 'M', 'L'].includes(key);
+	const units = linear ? rows.flatMap((row, i) => i ? ['\n', ...row] : row) : [];
+	const current = linear ? offset(rows, point) : 0;
 	const first = row => Math.max(0, rows[row].findIndex(c => !blank(c)));
 	const last = row => Math.max(0, rows[row].findLastIndex(c => !blank(c)));
 	const top = viewport.top ?? 0, bottom = viewport.bottom ?? lastRow;

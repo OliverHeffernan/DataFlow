@@ -41,6 +41,14 @@ beforeEach(() => {
 	].forEach((row, i) => row.forEach((text, j) => { sheet.rows[i][j] = text; }));
 });
 
+test('repeated syntax reads fresh reference contexts and still enforces pure evaluation', () => {
+	const run = (formula, ctx) => evaluateFormula(formula, 0, 0, ctx);
+	assert.equal(String(run('=A0 * 3 + 1', { ref: () => 7 })), '22');
+	assert.equal(String(run('=A0 * 3 + 1', { ref: () => 11 })), '34');
+	assert.equal(typeof run('=random()', {}), 'number');
+	assert.throws(() => run('=random()', { pure: true }), /#NAME\?/);
+});
+
 test("existing arithmetic, mathjs functions, aggregates and relative notation keep working", () => {
 	for (const [formula, expected] of [
 		["=2+3*4", 14], ["=2^3 mod 5", 3], ["=sqrt(16) + max(B0:B3)", 13], ["=round(pi, 2)", 3.14],

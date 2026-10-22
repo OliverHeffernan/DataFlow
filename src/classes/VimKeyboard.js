@@ -334,7 +334,8 @@ export default class VimKeyboard {
 			this.done(); return;
 		}
 		if (!operator && this.action(action, count, explicit)) { this.done(); return; }
-		let motion = resolveMotion(this.rows, this.point, action, count, { sheet: this.context === 'sheet', explicit, state: this.state, viewport: this.hooks.viewport?.(this) });
+		const viewport = ['H', 'M', 'L', 'g0', 'g^', 'g$', 'g<End>', 'gm'].includes(action) ? this.hooks.viewport?.(this) : undefined;
+		let motion = resolveMotion(this.rows, this.point, action, count, { sheet: this.context === 'sheet', explicit, state: this.state, viewport });
 		if (operator === 'c' && /^[wW]$/.test(action) && /\S/u.test(this.rows[this.point.row][this.point.col] || '')) {
 			const spans = wordSpans(this.rows, this.context === 'sheet', action === 'W'), index = offset(this.rows, this.point);
 			const current = spans.findIndex(([a, b]) => a <= index && b >= index);

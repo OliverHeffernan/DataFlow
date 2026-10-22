@@ -3,7 +3,7 @@
 
 </template>
 <script setup>
-import { onMounted } from 'vue';
+import { onMounted, onUnmounted } from 'vue';
 const props = defineProps({
 	colour: {
 		type: String,
@@ -14,13 +14,14 @@ const props = defineProps({
 let left = Math.random() * 100;
 let top = Math.random() * 100;
 
-let element;
+let element, frame;
 
 onMounted(() => {
 	element = document.getElementById(props.colour);
-	requestAnimationFrame(trigMove);
+	frame = requestAnimationFrame(trigMove);
 
 });
+onUnmounted(() => cancelAnimationFrame(frame));
 
 
 let dir = Math.random() * 2 * Math.PI;
@@ -61,7 +62,7 @@ function trigMove() {
     element.style.left = left + "%";
 
     // Request next frame
-    requestAnimationFrame(trigMove);
+    frame = requestAnimationFrame(trigMove);
 }
 
 </script>

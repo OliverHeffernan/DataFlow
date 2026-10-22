@@ -28,7 +28,7 @@ export default class FormatSession {
 		return rows;
 	}
 	label(row) { return row.value === null ? 'Mixed' : row.options?.find(option => option.value === row.value)?.label ?? (typeof row.value === 'boolean' ? row.value ? 'On' : 'Off' : String(row.value)); }
-	preview() { this.sheet.formatPreview = { sheet: this.target, styles: this.draft }; this.sheet.refreshPresentation(); }
+	preview() { this.sheet.formatPreview = { sheet: this.target, styles: this.draft }; this.sheet.refreshPresentation(this.target, this.range); }
 	set(key, value) {
 		this.draft = new Map([...this.draft].map(([position, style]) => {
 			const spec = key === 'formatKind' ? { ...formatDefaults, formatKind: value, formatGroup: value === 'currency' } : { ...this.spec(style), [key]: value };
@@ -84,7 +84,7 @@ export default class FormatSession {
 			catch { return true; } // Explicitly replacing unsupported settings is still a change.
 		});
 		for (const [key, style] of changes) { const [r, c] = key.split(':').map(Number); this.target.styles[r][c] = style; }
-		this.sheet.formatPreview = null; this.sheet.refreshPresentation();
+		this.sheet.formatPreview = null; this.sheet.refreshPresentation(this.target, this.range);
 		return changes.length > 0;
 	}
 }

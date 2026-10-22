@@ -52,6 +52,7 @@ export function summarizeFormats(styles) {
 
 const pad = value => String(value).padStart(2, '0');
 const leap = year => year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+const dateFormatters = new Map();
 const utc = (y, m, d, h = 0, min = 0, s = 0, ms = 0) => {
 	const date = new Date(0);
 	date.setUTCFullYear(y, m - 1, d); date.setUTCHours(h, min, s, ms);
@@ -80,10 +81,15 @@ function temporal(text) {
 function dateText(value, spec) {
 	let parts = temporal(value), suffix = '';
 	if (parts.instant !== undefined) {
-		const formatter = new Intl.DateTimeFormat('en-NZ', {
-			timeZone: spec.formatTimeZone, calendar: 'gregory', numberingSystem: 'latn', hourCycle: 'h23',
-			era: 'short', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-		});
+		let formatter = dateFormatters.get(spec.formatTimeZone);
+		if (!formatter) {
+			formatter = new Intl.DateTimeFormat('en-NZ', {
+				timeZone: spec.formatTimeZone, calendar: 'gregory', numberingSystem: 'latn', hourCycle: 'h23',
+				era: 'short', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+			});
+			if (dateFormatters.size >= 32) dateFormatters.delete(dateFormatters.keys().next().value);
+			dateFormatters.set(spec.formatTimeZone, formatter);
+		}
 		const fields = Object.fromEntries(formatter.formatToParts(new Date(parts.instant)).map(part => [part.type, part.value]));
 		const instant = parts.instant;
 		parts = { y: Number(fields.year), m: Number(fields.month), d: Number(fields.day), h: Number(fields.hour), min: Number(fields.minute), s: Number(fields.second) };

@@ -13,8 +13,6 @@ import { formulaAssist, formulaReferences } from './FormulaEditing.js';
 import { keyboardHints } from './KeyboardHints.js';
 import SyntaxHighlighting from './SyntaxHighlighting.js';
 import { cellLabel, referenceSpans, resolveReference } from './FormulaFunctions.js';
-import { runScriptWorker, scriptLimits } from './LuaScript.js';
-import { captureScriptWorkbook, publishWorkbookScript } from './WorkbookScript.js';
 import WindowManager from './WindowManager.js';
 import ConditionalSession from './ConditionalSession.js';
 import { summarizeFormats } from './CellFormatting.js';
@@ -153,7 +151,7 @@ export default class CheckCommand {
 		this.currentWindow.content = 'sheet';
 		this.currentWindow.rules = null;
 		this.currentWindow.keyboard = this.keyboard;
-		this.sheet.recalculate(); this.renderedRow = null;
+		this.syncActiveValues(); this.renderedRow = null;
 		await this.render();
 		this.sheet.loadStyles();
 	}
@@ -257,19 +255,13 @@ export default class CheckCommand {
 		const row = this.sheet.selRow, col = this.sheet.selCol;
 		// Keep scrolling a motion's responsibility; formula edits and Ex typing must not reset the viewport.
 		const moved = this.renderedRow !== row || this.renderedCol !== col;
-		if (moved) this.sheet.selectCell(row, col);
+		if (moved) this.sheet.selectCell(row, col, false);
 		this.renderedRow = row; this.renderedCol = col;
 		this.sheet.tempForm = keyboard.formula;
 		const references = keyboard.context === 'formula' ? formulaReferences(keyboard.formula, row, col, this.sheet) : [];
 		document.getElementById('formText').innerHTML = new SyntaxHighlighting().highlight(keyboard.formula, references);
 		this.sheet.cellCurPos = keyboard.context === 'formula' ? keyboard.formulaCursor : 0;
 		this.renderFormulaCursor();
-		if (keyboard.anchor && keyboard.context === 'sheet') {
-			const start = keyboard.anchor;
-			this.visual.sheetSelection = true;
-			this.visual.startVisual(start.row, keyboard.mode === 'V' ? 0 : start.col, 0, keyboard.mode === 'V', this.sheet.rows[0].length);
-			this.visual.setVisual(row, col, 0, this.sheet.rows[0].length);
-		}
 		const names = { n: 'NORMAL', i: 'INSERT', v: 'VISUAL', V: 'VISUAL-LINE', b: 'VISUAL-BLOCK' };
 		document.getElementById('modeDisplay').innerText = keyboard.formatSession ? '-- FORMAT --' : `-- ${keyboard.context === 'formula' ? 'FORMULA ' : ''}${names[keyboard.mode]} --`;
 		const display = document.getElementById('commandLine');
@@ -295,6 +287,7 @@ export default class CheckCommand {
 			format: { session, summary: session?.summary ?? summarizeFormats(styles), warnings, shortcut, openKey: shortcut('Open', keyboard.mappingMode), enabled: keyboard.mode !== 'i' && keyboard.command === null && !(keyboard.context === 'formula' && keyboard.anchor) },
 		};
 		await nextTick();
+		if (version !== this.renderVersion) return;
 		// Apply the new assistance/footer sizes before ensuring the selection is visible. Waiting for a
 		// ResizeObserver alone leaves the last row underneath a footer that changed height during this render.
 		const style = document.documentElement.style;
@@ -305,34 +298,40 @@ export default class CheckCommand {
 		this.renderOverlays(references, owner);
 	}
 	refreshOverlays() {
-		if (this.windows.active.content !== 'sheet') return;
-		const { selRow: row, selCol: col } = this.sheet;
-		this.renderOverlays(this.keyboard.context === 'formula' ? formulaReferences(this.keyboard.formula, row, col, this.sheet) : [], this.sheet.spillCells.get(`${row}:${col}`));
+		if (this.overlayFrame !== undefined) return;
+		this.overlayFrame = requestAnimationFrame(() => {
+			this.overlayFrame = undefined;
+			if (this.windows.active.content !== 'sheet') return;
+			const { selRow: row, selCol: col } = this.sheet;
+			this.renderOverlays(this.keyboard.context === 'formula' ? formulaReferences(this.keyboard.formula, row, col, this.sheet) : [], this.sheet.spillCells.get(`${row}:${col}`));
+		});
 	}
 
 	renderOverlays(references, owner) {
 		const layer = document.getElementById('gridOverlays');
 		if (!layer) return;
 		const viewport = this.viewportElement, base = viewport.getBoundingClientRect();
-		layer.replaceChildren();
-		const outline = (region, color, spill = false) => {
+		const fragment = document.createDocumentFragment();
+		const outline = (region, color, kind = 'reference-outline') => {
 			const first = this.sheet.getCell(region.r0, region.c0)?.parentElement.getBoundingClientRect();
 			const last = this.sheet.getCell(region.r1, region.c1)?.parentElement.getBoundingClientRect();
 			if (!first || !last) return;
 			const box = document.createElement('div');
-			box.className = spill ? 'spill-outline' : 'reference-outline';
+			box.className = kind;
 			box.dataset.range = `${this.sheet.columnLabel(region.c0)}${region.r0}:${this.sheet.columnLabel(region.c1)}${region.r1}`;
 			box.style.setProperty('--reference-color', color);
 			Object.assign(box.style, { left: `${first.left - base.left + viewport.scrollLeft}px`, top: `${first.top - base.top + viewport.scrollTop}px`, width: `${last.right - first.left}px`, height: `${last.bottom - first.top}px` });
-			layer.append(box);
+			fragment.append(box);
 		};
-		if (owner) outline({ r0: owner.row, c0: owner.col, r1: owner.row + owner.rows - 1, c1: owner.col + owner.cols - 1 }, '#8ba5c6', true);
+		if (this.keyboard.anchor && this.keyboard.context === 'sheet') outline(this.selectedRange(), 'lightblue', 'visual-grid-selection');
+		if (owner) outline({ r0: owner.row, c0: owner.col, r1: owner.row + owner.rows - 1, c1: owner.col + owner.cols - 1 }, '#8ba5c6', 'spill-outline');
 		if (this.keyboard.formatSession) outline(this.keyboard.formatSession.range, '#75e2bc');
 		const seen = new Set();
 		for (const ref of references) {
 			const key = JSON.stringify(ref.region);
 			if (ref.region && !seen.has(key)) { outline(ref.region, ref.color); seen.add(key); }
 		}
+		layer.replaceChildren(fragment);
 	}
 
 	renderFormulaCursor() {
@@ -340,6 +339,8 @@ export default class CheckCommand {
 		const cursor = document.getElementById('formCursor'), selection = document.getElementById('formSelection');
 		if (!bar || !text || !cursor || !selection) return;
 		selection.replaceChildren();
+		cursor.hidden = keyboard.context !== 'formula';
+		if (cursor.hidden) return;
 		// Give a trailing empty line a measurable caret and line box without changing the formula.
 		const endMarker = document.createElement('span');
 		endMarker.setAttribute('aria-hidden', 'true'); endMarker.textContent = '\u200b'; text.append(endMarker);
@@ -413,6 +414,7 @@ export default class CheckCommand {
 		return () => {
 			window.removeEventListener('keydown', keydown); window.removeEventListener('paste', paste); window.removeEventListener('compositionend', composition);
 			clearTimeout(this.mappingTimer);
+			cancelAnimationFrame(this.overlayFrame); this.overlayFrame = undefined;
 		};
 	}
 	handleKeydown(event) {
@@ -539,6 +541,7 @@ export default class CheckCommand {
 		const state = this.script.value;
 		if (!file || !state || state.running) return;
 		try {
+			const { scriptLimits } = await import('./LuaScript.js');
 			if (file.size > scriptLimits.sourceBytes) throw new Error('Script exceeds 128 KiB');
 			const source = await file.text();
 			if (new TextEncoder().encode(source).length > scriptLimits.sourceBytes) throw new Error('Script exceeds 128 KiB');
@@ -554,6 +557,10 @@ export default class CheckCommand {
 		const controller = new AbortController(); this.scriptAbort = controller;
 		this.script.value = { ...state, running: true, error: '' };
 		try {
+			const [{ runScriptWorker }, { captureScriptWorkbook, publishWorkbookScript }] = await Promise.all([
+				import('./LuaScript.js'), import('./WorkbookScript.js'),
+			]);
+			if (controller.signal.aborted) return;
 			const request = captureScriptWorkbook(this.sheet, state.context);
 			const worker = new Worker(new URL('./LuaScriptWorker.js', import.meta.url), { type: 'module' });
 			const result = await runScriptWorker(worker, { ...request, source: state.source }, controller.signal);
@@ -593,7 +600,7 @@ export default class CheckCommand {
 		this.currentWindow.sheet = this.sheet.activeSheet;
 		if (before !== this.sheet.activeSheet) await this.newSheet(false, true);
 		else if (this.currentWindow.content === 'cf' && action === 'sheet') await this.newSheet(false, true);
-		else { this.sheet.recalculate(); await this.render(); this.sheet.loadStyles(); }
+		else { this.syncActiveValues(); await this.render(); this.sheet.loadStyles(); }
 		this.setPhMessage(`Sheet ${this.sheet.workbook.activeSheetIndex + 1}/${this.sheet.sheets.length}: ${this.sheet.activeSheet.name}`);
 	}
 

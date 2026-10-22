@@ -16,7 +16,7 @@ export default class HistoryManager {
 		const { activeSheet, ...content } = state;
 		const text = JSON.stringify(content);
 		if (history.undo.at(-1)?.text === text) return false;
-		history.undo.push({ state: JSON.parse(JSON.stringify(state)), text, bytes: text.length * 2 }); history.redo = [];
+		history.undo.push({ state: { ...JSON.parse(text), ...(activeSheet === undefined ? {} : { activeSheet }) }, text, bytes: text.length * 2 }); history.redo = [];
 		let bytes = history.undo.reduce((total, item) => total + item.bytes, 0);
 		while (history.undo.length > 1 && (history.undo.length > this.maxLength || bytes > this.maxBytes)) bytes -= history.undo.shift().bytes;
 		if (notify) sheetManager.notifyWorkbookChanged?.();

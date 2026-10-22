@@ -52,7 +52,8 @@ export default class RecoveryManager {
 	capture() {
 		// serializeWorkbook intentionally contains live arrays. Never pass them
 		// through an await, to IndexedDB, or to native IPC without capturing them.
-		const workbook = JSON.parse(JSON.stringify(this.sheet.serializeWorkbook()));
+		const source = JSON.stringify(this.sheet.serializeWorkbook());
+		const workbook = JSON.parse(source);
 		// Project pending INSERT with the same pure preflight used at commit.
 		// This preserves dataset growth/header protection without publishing
 		// marks, recalculating pending input, or adding an undo entry.
@@ -69,7 +70,8 @@ export default class RecoveryManager {
 		}
 		this.sheet.validateWorkbook(workbook);
 		const content = JSON.stringify(workbook);
-		return { document: this.document, workbook, content, signature: signature(workbook) };
+		return { document: this.document, workbook, content, source, signature: signature(workbook),
+			writes: [...(this.sheet.markWriteCells ?? [])], structureChanged: this.sheet.markStructureChanged };
 	}
 
 	refresh(captured) {
@@ -120,7 +122,11 @@ export default class RecoveryManager {
 				this.lastContent = captured.content;
 				this.state.lastCheckpoint = record.updatedAt;
 				this.state.error = '';
-				this.refresh();
+				// The detached capture is still valid if no raw data or navigation changed during I/O.
+				const unchanged = this.sheet.markStructureChanged === captured.structureChanged
+					&& (this.sheet.markWriteCells?.size ?? 0) === captured.writes.length && captured.writes.every(key => this.sheet.markWriteCells.has(key))
+					&& JSON.stringify(this.sheet.serializeWorkbook()) === captured.source;
+				this.refresh(unchanged ? captured : undefined);
 			} catch (error) { this.state.error = message(error); throw error; }
 		});
 	}

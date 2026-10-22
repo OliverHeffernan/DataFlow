@@ -985,14 +985,22 @@ export default class SheetManager {
 		return values;
 	}
 
-	refreshPresentation() {
-		const results = new Map();
+	refreshPresentation(target = null, range = null) {
+		const results = new Map(this.sheetResults.value);
 		for (const [record, result] of this.sheetResults.value) {
+			if (target && record !== target) continue;
 			const preview = this.formatPreview?.sheet === record ? this.formatPreview.styles : null;
-			const presentation = result.values.map((row, r) => row.map((legacy, c) => {
-				const value = result.typed[r][c], text = toDisplayString(legacy);
-				return { value, ...(result.errors.has(keyOf(r, c)) ? { text, warning: '', align: 'left' } : presentCell(value, preview?.get(keyOf(r, c)) ?? record.styles[r]?.[c], text)) };
-			}));
+			const partial = range && result.presentation;
+			const presentation = partial ? result.presentation.slice() : result.values.map(row => Array(row.length));
+			const bounds = partial ? range : { r0: 0, r1: result.values.length - 1, c0: 0, c1: result.values[0].length - 1 };
+			for (let r = bounds.r0; r <= bounds.r1; r++) {
+				if (partial) presentation[r] = presentation[r].slice();
+				for (let c = bounds.c0; c <= bounds.c1; c++) {
+					const legacy = result.values[r][c];
+					const value = result.typed[r][c], text = toDisplayString(legacy);
+					presentation[r][c] = { value, ...(result.errors.has(keyOf(r, c)) ? { text, warning: '', align: 'left' } : presentCell(value, preview?.get(keyOf(r, c)) ?? record.styles[r]?.[c], text)) };
+				}
+			}
 			results.set(record, { ...result, presentation });
 		}
 		this.sheetResults.value = results;
@@ -1064,7 +1072,7 @@ export default class SheetManager {
 	}
 
 	// function to select a specific cell
-	selectCell(row, col) {
+	selectCell(row, col, scroll = true) {
 		row = Math.max(0, Math.min(row, this.rows.length - 1));
 		col = Math.max(0, Math.min(col, this.rows[0].length - 1));
 		this.selRow = row; this.selCol = col;
@@ -1074,7 +1082,7 @@ export default class SheetManager {
 		if (picker) picker.value = this.columnLabel(col) + row;
 		this.getSelectedCell()?.classList.remove('focussed');
 		this.getCell(row, col)?.classList.add('focussed');
-		this.ensureCellVisible(row, col);
+		if (scroll) this.ensureCellVisible(row, col);
 		this.tempForm = this.getFormula(row, col);
 		this.clearPlaceholder();
 	}

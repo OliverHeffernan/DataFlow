@@ -87,6 +87,7 @@ table {
 
 #windows { position: fixed; inset: 0 0 var(--status-bar-height, 64px); display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); min-width: 0; min-height: 0; }
 .reference-outline, .spill-outline { position: absolute; box-sizing: border-box; border: 2px solid var(--reference-color); pointer-events: none; }
+.visual-grid-selection { position: absolute; box-sizing: border-box; border: 2px solid lightblue; background: rgba(160,254,255,0.3); pointer-events: none; }
 .reference-outline { background: color-mix(in srgb, var(--reference-color) 9%, transparent); }
 .spill-outline { border-style: dashed; }
 .formula-string { color: #c9d7bd; }

@@ -133,6 +133,20 @@ test('FORMAT previews a fixed visual range, isolates input, preserves other styl
 	assert.equal(v.formatSession, null); // macro replay must not leave a half-recorded FORMAT session open
 });
 
+test('format previews and reverts preserve other cells and other sheets', () => {
+	sheet.loadWorkbook({ sheets: [{ name: 'First', rows: [['0.125', '7.25'], ['9', '12.5']] }, { name: 'Other', rows: [['123.5']] }] });
+	const v = keyboard();
+	v.feed('gFfj<CR>%');
+	assert.equal(sheet.cellPresentation.value[0][0].text, '12.50%');
+	assert.equal(sheet.cellPresentation.value[0][1].text, '7.25');
+	assert.equal(sheet.cellPresentation.value[1][0].text, '9');
+	assert.equal(sheet.sheetResults.value.get(sheet.sheets[1]).presentation[0][0].text, '123.5');
+	v.feed('u');
+	assert.equal(sheet.cellPresentation.value[0][0].text, '0.125');
+	v.feed('<Esc>');
+	assert.equal(sheet.cellPresentation.value[1][1].text, '12.5');
+});
+
 test('mixed fields change independently; full-row selections and reverted sessions preserve their contract', () => {
 	sheet.styles[0][0] = { ...sheet.styles[0][0], ...number, formatDigits: 1, formatGroup: true };
 	sheet.styles[1][0] = { ...sheet.styles[1][0], ...number, formatDigits: 3, formatPercent: true };
