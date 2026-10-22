@@ -313,8 +313,8 @@ export default class CheckCommand {
 		const viewport = this.viewportElement, base = viewport.getBoundingClientRect();
 		const fragment = document.createDocumentFragment();
 		const outline = (region, color, kind = 'reference-outline') => {
-			const first = this.sheet.getCell(region.r0, region.c0)?.parentElement.getBoundingClientRect();
-			const last = this.sheet.getCell(region.r1, region.c1)?.parentElement.getBoundingClientRect();
+			const first = this.sheet.cellBounds(region.r0, region.c0);
+			const last = this.sheet.cellBounds(region.r1, region.c1);
 			if (!first || !last) return;
 			const box = document.createElement('div');
 			box.className = kind;
@@ -444,6 +444,7 @@ export default class CheckCommand {
 		}
 		const visibleRows = [], visibleCols = [], viewport = this.viewportElement;
 		if (!viewport) return { top: 0, bottom: this.sheet.rows.length - 1, left: 0, right: this.sheet.rows[0].length - 1 };
+		if (viewport.gridGeometry) return viewport.gridGeometry.visible(viewport.scrollTop, viewport.scrollLeft, viewport.clientHeight, viewport.clientWidth);
 		const bounds = viewport.getBoundingClientRect(), top = bounds.top + viewport.querySelector('thead').offsetHeight;
 		for (let row = 0; row < this.sheet.rows.length; row++) {
 			const rect = this.sheet.getCell(row, this.sheet.selCol)?.getBoundingClientRect();
@@ -457,9 +458,9 @@ export default class CheckCommand {
 	}
 	scroll(action, count, explicit = false) {
 		const keyboard = this.keyboard, formula = keyboard.context === 'formula', bar = document.getElementById('newFormBar');
-		const rect = (formula ? document.getElementById('formCursor') : this.sheet.getCell(this.sheet.selRow, this.sheet.selCol)).getBoundingClientRect();
+		const rect = formula ? document.getElementById('formCursor').getBoundingClientRect() : this.sheet.cellBounds(this.sheet.selRow, this.sheet.selCol);
 		const pane = this.viewportElement, paneRect = pane?.getBoundingClientRect();
-		const bounds = formula ? bar.getBoundingClientRect() : { top: paneRect.top + pane.querySelector('thead').offsetHeight, left: paneRect.left + 90, right: paneRect.right, bottom: paneRect.bottom };
+		const bounds = formula ? bar.getBoundingClientRect() : { top: paneRect.top + pane.querySelector('thead').offsetHeight, left: paneRect.left + (pane.gridGeometry?.label * 2 || 90), right: paneRect.right, bottom: paneRect.bottom };
 		const width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
 		const scroll = (x, y) => (formula ? bar : pane).scrollBy(x, y);
 		if (['zz', 'z.', 'zt', 'z<CR>', 'zb', 'z-'].includes(action)) {

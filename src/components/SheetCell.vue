@@ -1,5 +1,5 @@
 <template>
-	<td class="tableCell">
+	<td class="tableCell" :aria-colindex="colNo + 3">
 		<button
 			:id="`window-${pane.id}-${colNo}:${rowNo}`"
 			class="cell"
@@ -126,7 +126,8 @@
 
 <style scoped>
 td {
-	border: 1px solid #15202E;
+	border: solid #15202E;
+	border-width: 0 1px 1px 0;
 	height: 20px;
 	padding: 0;
 	margin: 0;
@@ -142,17 +143,18 @@ td {
 	outline: none;
 	/*height: calc(18px);*/
 	height: 100%;
-	min-width: 80px;
+	min-width: 0;
 	/*width: fit-content;*/
 	width: 100%;
 	color: white;
 	text-align: left;
-	font-size: 15px;
+	font: var(--cell-font);
+	line-height: 18px;
+	box-sizing: border-box;
 	margin: 0;
 	padding: 2px;
 	white-space: pre;
 	display: block;
-	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 .cell:hover {

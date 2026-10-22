@@ -153,7 +153,7 @@ const layout = computed(() => {
 
 <style scoped>
 .chart-frame { position: absolute; z-index: 2; display: block; }
-.focussed > .chart-frame { outline: 2px solid white; outline-offset: -2px; }
+.focussed > .chart-frame, .active-window .pane-cursor > .chart-frame { outline: 2px solid white; outline-offset: -2px; }
 .chart { display: block; overflow: hidden; font: 10px ui-monospace, monospace; }
 .background { fill: #0d1925; stroke: #253847; }
 text { fill: #a5bacb; }

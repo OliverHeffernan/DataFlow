@@ -1088,6 +1088,16 @@ export default class SheetManager {
 	}
 
 	ensureCellVisible(row, col) {
+		const pane = document.getElementById('sheetViewport'), geometry = pane?.gridGeometry;
+		if (geometry) {
+			const rect = geometry.cellRect(row, col);
+			if (!rect) return;
+			if (rect.top < pane.scrollTop + geometry.header) pane.scrollTop = rect.top - geometry.header;
+			else if (rect.bottom > pane.scrollTop + pane.clientHeight) pane.scrollTop = rect.bottom - pane.clientHeight;
+			if (rect.left < pane.scrollLeft + geometry.label * 2) pane.scrollLeft = rect.left - geometry.label * 2;
+			else if (rect.right > pane.scrollLeft + pane.clientWidth) pane.scrollLeft = rect.right - pane.clientWidth;
+			return;
+		}
 		const cell = this.getCell(row, col), viewport = cell?.closest('.sheet-viewport');
 		if (!viewport) return;
 		const rect = cell.getBoundingClientRect(), bounds = viewport.getBoundingClientRect();
@@ -1220,6 +1230,16 @@ export default class SheetManager {
 		this.selectCell(startRow, startCol);
 
 		this.paste(amount, true);
+	}
+
+	// Screen coordinates remain available even when the cell is outside the rendered window.
+	cellBounds(row, col) {
+		const viewport = document.getElementById('sheetViewport'), rect = viewport?.gridGeometry?.cellRect(row, col);
+		if (!rect) return this.getCell(row, col)?.getBoundingClientRect();
+		const base = viewport.getBoundingClientRect();
+		return { top: base.top + rect.top - viewport.scrollTop, bottom: base.top + rect.bottom - viewport.scrollTop,
+			left: base.left + rect.left - viewport.scrollLeft, right: base.left + rect.right - viewport.scrollLeft,
+			width: rect.right - rect.left, height: rect.bottom - rect.top };
 	}
 
 	// function to get the element of a specific cell

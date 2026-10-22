@@ -1,15 +1,16 @@
 <template>
-	<tr class="sheetRow">
+	<tr class="sheetRow" :style="{ height: height + 'px' }" :aria-rowindex="rowNo + 2">
 		<td class="labels rowLabels">{{ rowNo }}</td>
 		<td class="labels relRow">{{ Math.abs(rowNo - pane.row) }}</td>
-		<SheetCell 
-			v-for="(cell, index) in row"
-			:key="index"
+		<template v-for="col in columns" :key="col.index">
+		<td v-if="col.gap" class="column-spacer" :colspan="col.count" aria-hidden="true"></td>
+		<SheetCell v-else
 			:rowNo="rowNo"
-			:colNo="index"
+			:colNo="col.index"
 			:pane="pane"
-			:selected="rowNo === pane.row && index === pane.col"
+			:selected="rowNo === pane.row && col.index === pane.col"
 		/>
+		</template>
 	</tr>
 </template>
 <script setup>
@@ -21,7 +22,8 @@
 			type: Number,
 			required: true,
 		},
-		row: {
+		height: { type: Number, required: true },
+		columns: {
 			type: Array,
 			required: true,
 		},
